@@ -13,12 +13,13 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
+securizar_setup_traps
 IR_BASE="/var/lib/incident-response"
 mkdir -p "$IR_BASE"
 

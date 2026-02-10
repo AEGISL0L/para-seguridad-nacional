@@ -58,4 +58,8 @@ case "$DISTRO_ID" in
         ;;
 esac
 
+if [[ "$DISTRO_FAMILY" == "unknown" ]]; then
+    echo "[!] AVISO: Distribución '$DISTRO_ID' no reconocida (familia: unknown). Algunos módulos pueden no funcionar correctamente." >&2
+fi
+
 export DISTRO_ID DISTRO_FAMILY DISTRO_VERSION DISTRO_NAME

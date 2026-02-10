@@ -12,12 +12,13 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
+securizar_setup_traps
 REPORT_DIR="/root/auditoria-externa-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/informe-reconocimiento.txt"

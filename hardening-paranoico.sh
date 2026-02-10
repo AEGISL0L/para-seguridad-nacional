@@ -7,13 +7,14 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "hardening-paranoico"
+securizar_setup_traps
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║     HARDENING PARANOICO - Linux Multi-Distro              ║"
@@ -225,17 +226,17 @@ log_section "6. RESTRINGIR CRON"
 
 if ask "¿Restringir cron solo a root y tu usuario?"; then
     echo "root" > /etc/cron.allow
-    echo "$SUDO_USER" >> /etc/cron.allow
+    echo "${SUDO_USER:-root}" >> /etc/cron.allow
     chmod 600 /etc/cron.allow
     rm -f /etc/cron.deny 2>/dev/null || true
 
     # at también
     echo "root" > /etc/at.allow
-    echo "$SUDO_USER" >> /etc/at.allow
+    echo "${SUDO_USER:-root}" >> /etc/at.allow
     chmod 600 /etc/at.allow
     rm -f /etc/at.deny 2>/dev/null || true
 
-    log_info "cron/at restringido a root y $SUDO_USER"
+    log_info "cron/at restringido a root y ${SUDO_USER:-root}"
 fi
 
 # ============================================================

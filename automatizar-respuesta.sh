@@ -13,12 +13,13 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
+securizar_setup_traps
 SOAR_DIR="/var/lib/soar"
 mkdir -p "$SOAR_DIR/actions" "$SOAR_DIR/queue" "$SOAR_DIR/log"
 

@@ -25,6 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
+securizar_setup_traps
 IOC_DIR="/etc/threat-intelligence"
 IOC_FEEDS_DIR="$IOC_DIR/feeds"
 IOC_LISTS_DIR="$IOC_DIR/lists"

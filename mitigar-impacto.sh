@@ -22,6 +22,7 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "mitigar-impacto"
+securizar_setup_traps
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE IMPACTO - TA0040                          ║"

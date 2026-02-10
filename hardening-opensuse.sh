@@ -4,13 +4,14 @@
 # Cada sección es independiente y pregunta antes de aplicar
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "hardening-opensuse"
+securizar_setup_traps
 echo ""
 echo "=========================================="
 echo " Hardening base del sistema"
@@ -250,8 +251,8 @@ fi
 # Configurar cliente SSH para GitHub
 echo ""
 log_info "Configurando cliente SSH para GitHub..."
-SSH_CONFIG_DIR="/home/$SUDO_USER/.ssh"
-if [[ -n "$SUDO_USER" && -d "$SSH_CONFIG_DIR" ]]; then
+SSH_CONFIG_DIR="/home/${SUDO_USER:-}/.ssh"
+if [[ -n "${SUDO_USER:-}" && -d "$SSH_CONFIG_DIR" ]]; then
     if [[ ! -f "$SSH_CONFIG_DIR/config" ]] || ! grep -q "Host github.com" "$SSH_CONFIG_DIR/config" 2>/dev/null; then
         if ask "¿Agregar configuración óptima de cliente SSH para GitHub?"; then
             cat >> "$SSH_CONFIG_DIR/config" << 'EOF'
@@ -265,7 +266,7 @@ Host github.com
     PreferredAuthentications publickey
 
 EOF
-            chown "$SUDO_USER:$(id -gn $SUDO_USER)" "$SSH_CONFIG_DIR/config"
+            chown "${SUDO_USER:-}:$(id -gn "${SUDO_USER:-}")" "$SSH_CONFIG_DIR/config"
             chmod 600 "$SSH_CONFIG_DIR/config"
             log_info "Configuración de cliente SSH para GitHub agregada"
             log_info "  Si no tienes llave SSH para GitHub, créala con:"
@@ -488,7 +489,7 @@ EOF
 # Genera una llave SSH FIDO2/U2F (requiere token físico como YubiKey)
 # Uso: sudo -u usuario generar-llave-fido2.sh
 
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -549,13 +550,13 @@ EOFFIDO
         echo ""
 
         # Verificar si el usuario actual tiene llaves SSH
-        if [[ -n "$SUDO_USER" ]]; then
+        if [[ -n "${SUDO_USER:-}" ]]; then
             local USER_HOME
-            USER_HOME=$(eval echo "~$SUDO_USER")
+            USER_HOME=$(eval echo "~${SUDO_USER:-}")
             if [[ -f "$USER_HOME/.ssh/authorized_keys" ]] && [[ -s "$USER_HOME/.ssh/authorized_keys" ]]; then
-                log_info "El usuario $SUDO_USER tiene llaves SSH configuradas"
+                log_info "El usuario ${SUDO_USER:-} tiene llaves SSH configuradas"
             else
-                log_warn "El usuario $SUDO_USER NO tiene llaves SSH en authorized_keys"
+                log_warn "El usuario ${SUDO_USER:-} NO tiene llaves SSH en authorized_keys"
                 log_warn "Genera una llave con: ssh-keygen -t ed25519"
                 log_warn "O para FIDO2: /usr/local/bin/generar-llave-fido2.sh"
 
@@ -643,7 +644,7 @@ if ask "¿Instalar y configurar ClamAV?"; then
 #   clamav-escanear.sh /ruta        → Escaneo de ruta específica
 #   clamav-escanear.sh --completo   → Escaneo completo del sistema
 
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -825,7 +826,7 @@ if ask "¿Instalar y configurar OpenSCAP?"; then
 #   openscap-auditar.sh --listar     → Listar perfiles disponibles
 #   openscap-auditar.sh --vuln       → Solo escaneo de vulnerabilidades
 
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

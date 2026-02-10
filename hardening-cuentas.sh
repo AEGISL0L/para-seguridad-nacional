@@ -20,6 +20,7 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "hardening-cuentas"
+securizar_setup_traps
 log_section "S1: POLÍTICAS DE CONTRASEÑAS (login.defs)"
 
 echo "Configuración propuesta:"

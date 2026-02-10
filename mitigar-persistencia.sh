@@ -15,13 +15,14 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "mitigar-persistencia"
+securizar_setup_traps
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE PERSISTENCIA - TA0003                     ║"

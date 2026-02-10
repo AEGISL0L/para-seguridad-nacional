@@ -611,3 +611,27 @@ _fw_rich_rule_to_nft() {
     local rule="$1"
     echo "AVISO: Traduce manualmente rich rule a nftables: $rule" >&2
 }
+
+# ── fw_try func [args...] ──────────────────────────────────
+# Ejecuta una función de firewall, registra advertencia en caso de fallo
+# y devuelve el código de salida real. Ruta de migración para callers
+# que actualmente usan '2>/dev/null || true'.
+fw_try() {
+    local func="$1"
+    shift
+    local rc=0
+    "$func" "$@" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        log_warn "fw_try: '$func' falló (código: $rc)"
+    fi
+    return $rc
+}
+
+# ── fw_try_quiet func [args...] ─────────────────────────────
+# Equivalente al patrón actual '|| true': ejecuta la función,
+# ignora fallos silenciosamente. Para compatibilidad con callers existentes.
+fw_try_quiet() {
+    local func="$1"
+    shift
+    "$func" "$@" || true
+}

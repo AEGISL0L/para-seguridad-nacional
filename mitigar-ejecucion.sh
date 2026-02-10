@@ -14,13 +14,14 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "mitigar-ejecucion"
+securizar_setup_traps
 CURRENT_USER="${SUDO_USER:-$USER}"
 
 echo ""

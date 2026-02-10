@@ -185,14 +185,14 @@ _exec_module() {
     [[ -n "${MOD_TAGS[$n]:-}" ]] && echo -e "  ${BG_YELLOW} ${MOD_TAGS[$n]} ${NC} ${DIM}Versión segura · sin riesgos de lockout${NC}"
     echo ""
 
-    if ${MOD_FUNCS[$n]}; then
-        MOD_RUN[$n]=1
-        echo ""
+    local rc=0
+    ${MOD_FUNCS[$n]} || rc=$?
+    MOD_RUN[$n]=1
+    echo ""
+    if [[ $rc -eq 0 ]]; then
         echo -e "  ${GREEN}✓${NC} ${BOLD}Módulo ${n}${NC} completado correctamente"
     else
-        MOD_RUN[$n]=1
-        echo ""
-        echo -e "  ${YELLOW}⚠${NC} ${BOLD}Módulo ${n}${NC} completado con advertencias"
+        echo -e "  ${YELLOW}⚠${NC} ${BOLD}Módulo ${n}${NC} completado con advertencias (código: $rc)"
     fi
     _pause
 }
@@ -311,8 +311,14 @@ mod_01_opensuse() {
     log_section "MÓDULO 1: Hardening openSUSE base"
     local script="$SCRIPT_DIR/hardening-opensuse.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 1 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 1 completado"
+        else
+            log_warn "Módulo 1 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -326,8 +332,14 @@ mod_02_seguro() {
     log_section "MÓDULO 2: Hardening seguro"
     local script="$SCRIPT_DIR/hardening-seguro.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 2 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 2 completado"
+        else
+            log_warn "Módulo 2 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -341,8 +353,14 @@ mod_03_final() {
     log_section "MÓDULO 3: Hardening final"
     local script="$SCRIPT_DIR/hardening-final.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 3 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 3 completado"
+        else
+            log_warn "Módulo 3 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -356,8 +374,14 @@ mod_04_externo() {
     log_section "MÓDULO 4: Hardening externo"
     local script="$SCRIPT_DIR/hardening-externo.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 4 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 4 completado"
+        else
+            log_warn "Módulo 4 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -798,16 +822,16 @@ EOF
 
     if ask "¿Restringir cron solo a root y tu usuario?"; then
         echo "root" > /etc/cron.allow
-        echo "$SUDO_USER" >> /etc/cron.allow
+        echo "${SUDO_USER:-root}" >> /etc/cron.allow
         chmod 600 /etc/cron.allow
         rm -f /etc/cron.deny 2>/dev/null || true
 
         echo "root" > /etc/at.allow
-        echo "$SUDO_USER" >> /etc/at.allow
+        echo "${SUDO_USER:-root}" >> /etc/at.allow
         chmod 600 /etc/at.allow
         rm -f /etc/at.deny 2>/dev/null || true
 
-        log_info "cron/at restringido a root y $SUDO_USER"
+        log_info "cron/at restringido a root y ${SUDO_USER:-root}"
     fi
 
     # ── Sección 7: Banner de advertencia legal ──
@@ -1112,8 +1136,14 @@ mod_07_mesh() {
     log_section "MÓDULO 7: Contramedidas mesh"
     local script="$SCRIPT_DIR/contramedidas-mesh.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 7 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 7 completado"
+        else
+            log_warn "Módulo 7 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1127,8 +1157,14 @@ mod_08_avanzadas() {
     log_section "MÓDULO 8: Contramedidas avanzadas"
     local script="$SCRIPT_DIR/contramedidas-avanzadas.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 8 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 8 completado"
+        else
+            log_warn "Módulo 8 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1142,8 +1178,14 @@ mod_09_privacidad() {
     log_section "MÓDULO 9: Proteger privacidad"
     local script="$SCRIPT_DIR/proteger-privacidad.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 9 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 9 completado"
+        else
+            log_warn "Módulo 9 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1157,8 +1199,14 @@ mod_10_banners() {
     log_section "MÓDULO 10: Aplicar banners"
     local script="$SCRIPT_DIR/aplicar-banner-total.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 10 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 10 completado"
+        else
+            log_warn "Módulo 10 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1172,8 +1220,14 @@ mod_11_kernel_boot() {
     log_section "MÓDULO 11: Kernel boot y Secure Boot"
     local script="$SCRIPT_DIR/hardening-kernel-boot.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 11 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 11 completado"
+        else
+            log_warn "Módulo 11 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1187,8 +1241,14 @@ mod_12_servicios_systemd() {
     log_section "MÓDULO 12: Sandboxing de servicios systemd"
     local script="$SCRIPT_DIR/hardening-servicios-systemd.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 12 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 12 completado"
+        else
+            log_warn "Módulo 12 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1202,8 +1262,14 @@ mod_13_cuentas() {
     log_section "MÓDULO 13: Seguridad de cuentas"
     local script="$SCRIPT_DIR/hardening-cuentas.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 13 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 13 completado"
+        else
+            log_warn "Módulo 13 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1217,8 +1283,14 @@ mod_14_red_avanzada() {
     log_section "MÓDULO 14: Red avanzada (IDS/DoT/VPN)"
     local script="$SCRIPT_DIR/proteger-red-avanzado.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 14 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 14 completado"
+        else
+            log_warn "Módulo 14 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1232,8 +1304,14 @@ mod_15_automatizacion() {
     log_section "MÓDULO 15: Automatización de seguridad"
     local script="$SCRIPT_DIR/automatizar-seguridad.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 15 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 15 completado"
+        else
+            log_warn "Módulo 15 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1247,8 +1325,14 @@ mod_16_sandbox() {
     log_section "MÓDULO 16: Sandboxing de aplicaciones"
     local script="$SCRIPT_DIR/sandbox-aplicaciones.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 16 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 16 completado"
+        else
+            log_warn "Módulo 16 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1262,8 +1346,14 @@ mod_17_auditoria_externa() {
     log_section "MÓDULO 17: Auditoría externa (reconocimiento TA0043)"
     local script="$SCRIPT_DIR/auditoria-externa.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 17 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 17 completado"
+        else
+            log_warn "Módulo 17 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1277,8 +1367,14 @@ mod_18_threat_intel() {
     log_section "MÓDULO 18: Inteligencia de amenazas (IoC feeds M1019)"
     local script="$SCRIPT_DIR/inteligencia-amenazas.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 18 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 18 completado"
+        else
+            log_warn "Módulo 18 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1292,8 +1388,14 @@ mod_19_acceso_inicial() {
     log_section "MÓDULO 19: Mitigación acceso inicial (TA0001)"
     local script="$SCRIPT_DIR/mitigar-acceso-inicial.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 19 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 19 completado"
+        else
+            log_warn "Módulo 19 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1307,8 +1409,14 @@ mod_20_ejecucion() {
     log_section "MÓDULO 20: Mitigación ejecución (TA0002)"
     local script="$SCRIPT_DIR/mitigar-ejecucion.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 20 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 20 completado"
+        else
+            log_warn "Módulo 20 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1322,8 +1430,14 @@ mod_21_persistencia() {
     log_section "MÓDULO 21: Mitigación persistencia (TA0003)"
     local script="$SCRIPT_DIR/mitigar-persistencia.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 21 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 21 completado"
+        else
+            log_warn "Módulo 21 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1337,8 +1451,14 @@ mod_22_escalada() {
     log_section "MÓDULO 22: Mitigación escalada de privilegios (TA0004)"
     local script="$SCRIPT_DIR/mitigar-escalada.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 22 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 22 completado"
+        else
+            log_warn "Módulo 22 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1352,8 +1472,14 @@ mod_23_impacto() {
     log_section "MÓDULO 23: Mitigación de impacto (TA0040)"
     local script="$SCRIPT_DIR/mitigar-impacto.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 23 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 23 completado"
+        else
+            log_warn "Módulo 23 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1367,8 +1493,14 @@ mod_24_evasion() {
     log_section "MÓDULO 24: Mitigación de evasión de defensas (TA0005)"
     local script="$SCRIPT_DIR/mitigar-evasion.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 24 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 24 completado"
+        else
+            log_warn "Módulo 24 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1382,8 +1514,14 @@ mod_25_credenciales() {
     log_section "MÓDULO 25: Mitigación de acceso a credenciales (TA0006)"
     local script="$SCRIPT_DIR/mitigar-credenciales.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 25 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 25 completado"
+        else
+            log_warn "Módulo 25 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1397,8 +1535,14 @@ mod_26_descubrimiento() {
     log_section "MÓDULO 26: Mitigación de descubrimiento (TA0007)"
     local script="$SCRIPT_DIR/mitigar-descubrimiento.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 26 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 26 completado"
+        else
+            log_warn "Módulo 26 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1412,8 +1556,14 @@ mod_27_movimiento_lateral() {
     log_section "MÓDULO 27: Mitigación de movimiento lateral (TA0008)"
     local script="$SCRIPT_DIR/mitigar-movimiento-lateral.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 27 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 27 completado"
+        else
+            log_warn "Módulo 27 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1427,8 +1577,14 @@ mod_28_recoleccion() {
     log_section "MÓDULO 28: Mitigación de recolección (TA0009)"
     local script="$SCRIPT_DIR/mitigar-recoleccion.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 28 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 28 completado"
+        else
+            log_warn "Módulo 28 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1442,8 +1598,14 @@ mod_29_exfiltracion() {
     log_section "MÓDULO 29: Mitigación de exfiltración (TA0010)"
     local script="$SCRIPT_DIR/mitigar-exfiltracion.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 29 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 29 completado"
+        else
+            log_warn "Módulo 29 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1457,8 +1619,14 @@ mod_30_comando_control() {
     log_section "MÓDULO 30: Mitigación de comando y control (TA0011)"
     local script="$SCRIPT_DIR/mitigar-comando-control.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 30 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 30 completado"
+        else
+            log_warn "Módulo 30 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1469,8 +1637,14 @@ mod_31_respuesta_incidentes() {
     log_section "MÓDULO 31: Respuesta a incidentes"
     local script="$SCRIPT_DIR/respuesta-incidentes.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 31 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 31 completado"
+        else
+            log_warn "Módulo 31 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1481,8 +1655,14 @@ mod_32_monitorizar() {
     log_section "MÓDULO 32: Monitorización continua"
     local script="$SCRIPT_DIR/monitorizar-continuo.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 32 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 32 completado"
+        else
+            log_warn "Módulo 32 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1493,8 +1673,14 @@ mod_33_reportes() {
     log_section "MÓDULO 33: Reportes de seguridad"
     local script="$SCRIPT_DIR/reportar-seguridad.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 33 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 33 completado"
+        else
+            log_warn "Módulo 33 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1505,8 +1691,14 @@ mod_34_cazar_amenazas() {
     log_section "MÓDULO 34: Caza de amenazas"
     local script="$SCRIPT_DIR/cazar-amenazas.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 34 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 34 completado"
+        else
+            log_warn "Módulo 34 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1517,8 +1709,14 @@ mod_35_automatizar_respuesta() {
     log_section "MÓDULO 35: Automatización de respuesta"
     local script="$SCRIPT_DIR/automatizar-respuesta.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 35 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 35 completado"
+        else
+            log_warn "Módulo 35 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1529,8 +1727,14 @@ mod_36_validar_controles() {
     log_section "MÓDULO 36: Validación de controles"
     local script="$SCRIPT_DIR/validar-controles.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 36 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 36 completado"
+        else
+            log_warn "Módulo 36 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1
@@ -1544,8 +1748,14 @@ mod_37_ciberinteligencia() {
     log_section "MÓDULO 37: Ciberinteligencia proactiva"
     local script="$SCRIPT_DIR/ciberinteligencia.sh"
     if [[ -f "$script" ]]; then
-        bash "$script"
-        log_info "Módulo 37 completado"
+        local rc=0
+        bash "$script" || rc=$?
+        if [[ $rc -eq 0 ]]; then
+            log_info "Módulo 37 completado"
+        else
+            log_warn "Módulo 37 terminó con código $rc"
+        fi
+        return $rc
     else
         log_error "No encontrado: $script"
         return 1

@@ -38,41 +38,69 @@ export PKG_MANAGER_NAME PKG_UPDATE_CMD
 # Resuelve nombres via pkg_resolve_name y ejecuta instalacion
 pkg_install() {
     local resolved=()
+    local skipped=0
     local pkg resolved_name
     for pkg in "$@"; do
-        resolved_name=$(pkg_resolve_name "$pkg") || continue
-        resolved+=("$resolved_name")
+        if resolved_name=$(pkg_resolve_name "$pkg"); then
+            resolved+=("$resolved_name")
+        else
+            log_warn "pkg_install: paquete '$pkg' no resuelto para $DISTRO_FAMILY, omitido"
+            ((skipped++)) || true
+        fi
     done
 
-    [[ ${#resolved[@]} -eq 0 ]] && return 0
+    if [[ ${#resolved[@]} -eq 0 ]]; then
+        log_warn "pkg_install: ningún paquete pudo resolverse ($# solicitados, $skipped omitidos)"
+        return 1
+    fi
 
+    local rc=0
     case "$DISTRO_FAMILY" in
-        suse)   zypper --non-interactive install "${resolved[@]}" ;;
-        debian) DEBIAN_FRONTEND=noninteractive apt-get install -y "${resolved[@]}" ;;
-        rhel)   dnf install -y "${resolved[@]}" ;;
-        arch)   pacman -S --noconfirm "${resolved[@]}" ;;
+        suse)   zypper --non-interactive install "${resolved[@]}" || rc=$? ;;
+        debian) DEBIAN_FRONTEND=noninteractive apt-get install -y "${resolved[@]}" || rc=$? ;;
+        rhel)   dnf install -y "${resolved[@]}" || rc=$? ;;
+        arch)   pacman -S --noconfirm "${resolved[@]}" || rc=$? ;;
         *)      echo "ERROR: gestor de paquetes no soportado ($DISTRO_FAMILY)" >&2; return 1 ;;
     esac
+
+    if [[ $rc -ne 0 ]]; then
+        log_warn "pkg_install: gestor de paquetes terminó con código $rc"
+    fi
+    return $rc
 }
 
 # ── pkg_remove pkg1 [pkg2...] ──────────────────────────────
 pkg_remove() {
     local resolved=()
+    local skipped=0
     local pkg resolved_name
     for pkg in "$@"; do
-        resolved_name=$(pkg_resolve_name "$pkg") || continue
-        resolved+=("$resolved_name")
+        if resolved_name=$(pkg_resolve_name "$pkg"); then
+            resolved+=("$resolved_name")
+        else
+            log_warn "pkg_remove: paquete '$pkg' no resuelto para $DISTRO_FAMILY, omitido"
+            ((skipped++)) || true
+        fi
     done
 
-    [[ ${#resolved[@]} -eq 0 ]] && return 0
+    if [[ ${#resolved[@]} -eq 0 ]]; then
+        log_warn "pkg_remove: ningún paquete pudo resolverse ($# solicitados, $skipped omitidos)"
+        return 1
+    fi
 
+    local rc=0
     case "$DISTRO_FAMILY" in
-        suse)   zypper --non-interactive remove "${resolved[@]}" ;;
-        debian) DEBIAN_FRONTEND=noninteractive apt-get remove -y "${resolved[@]}" ;;
-        rhel)   dnf remove -y "${resolved[@]}" ;;
-        arch)   pacman -R --noconfirm "${resolved[@]}" ;;
+        suse)   zypper --non-interactive remove "${resolved[@]}" || rc=$? ;;
+        debian) DEBIAN_FRONTEND=noninteractive apt-get remove -y "${resolved[@]}" || rc=$? ;;
+        rhel)   dnf remove -y "${resolved[@]}" || rc=$? ;;
+        arch)   pacman -R --noconfirm "${resolved[@]}" || rc=$? ;;
         *)      echo "ERROR: gestor de paquetes no soportado ($DISTRO_FAMILY)" >&2; return 1 ;;
     esac
+
+    if [[ $rc -ne 0 ]]; then
+        log_warn "pkg_remove: gestor de paquetes terminó con código $rc"
+    fi
+    return $rc
 }
 
 # ── pkg_refresh ─────────────────────────────────────────────

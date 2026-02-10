@@ -18,6 +18,7 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "proteger-red-avanzado"
+securizar_setup_traps
 log_section "S1: SURICATA IDS (DETECCIÓN DE INTRUSIONES)"
 
 echo "Suricata es un motor IDS/IPS de alto rendimiento."

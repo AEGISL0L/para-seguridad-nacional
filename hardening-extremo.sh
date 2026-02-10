@@ -4,12 +4,13 @@
 # ============================================================
 
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
+securizar_setup_traps
 log_info "1. Deshabilitando servicios de red..."
 
 SERVICES="sshd cups avahi-daemon bluetooth ModemManager"

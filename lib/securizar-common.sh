@@ -79,15 +79,70 @@ require_root() {
 init_backup() {
     local name="${1:-backup}"
     local base="${SECURIZAR_BACKUP_BASE:-/root}"
+
+    # Validar que el directorio base existe y es escribible
+    if [[ ! -d "$base" ]]; then
+        log_error "Directorio de backup no existe: $base"
+        return 1
+    fi
+    if [[ ! -w "$base" ]]; then
+        log_error "Directorio de backup no es escribible: $base"
+        return 1
+    fi
+
+    # Avisar si hay poco espacio en disco (<50MB)
+    local avail_kb
+    avail_kb=$(df -k "$base" 2>/dev/null | awk 'NR==2 {print $4}') || true
+    if [[ -n "${avail_kb:-}" ]] && [[ "$avail_kb" -lt 51200 ]]; then
+        log_warn "Espacio en disco bajo en $base: ${avail_kb}KB disponibles (<50MB)"
+    fi
+
     BACKUP_DIR="${base}/${name}-$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$BACKUP_DIR"
+    if ! mkdir -p "$BACKUP_DIR"; then
+        log_error "No se pudo crear directorio de backup: $BACKUP_DIR"
+        return 1
+    fi
     log_info "Backup en: $BACKUP_DIR"
     export BACKUP_DIR
 }
 
-# ── Cargar modulos ──────────────────────────────────────────
-source "${_SECURIZAR_LIB_DIR}/securizar-distro.sh"
-source "${_SECURIZAR_LIB_DIR}/securizar-pkg-map.sh"
-source "${_SECURIZAR_LIB_DIR}/securizar-pkg.sh"
-source "${_SECURIZAR_LIB_DIR}/securizar-firewall.sh"
-source "${_SECURIZAR_LIB_DIR}/securizar-paths.sh"
+# ── securizar_setup_traps [cleanup_func] ─────────────────────
+# Instala traps ERR y EXIT para diagnóstico de errores.
+# Argumento opcional: nombre de función de limpieza a ejecutar en EXIT.
+_SECURIZAR_CLEANUP_FUNC=""
+
+_securizar_exit_handler() {
+    local exit_code=$?
+    if [[ -n "${_SECURIZAR_CLEANUP_FUNC:-}" ]] && declare -f "${_SECURIZAR_CLEANUP_FUNC}" &>/dev/null; then
+        "${_SECURIZAR_CLEANUP_FUNC}" || true
+    fi
+    if [[ $exit_code -ne 0 ]]; then
+        log_warn "Script terminó con código de error $exit_code"
+        if [[ -n "${BACKUP_DIR:-}" ]] && [[ -d "${BACKUP_DIR:-}" ]]; then
+            log_warn "Backups en: ${BACKUP_DIR:-}"
+        fi
+    fi
+}
+
+securizar_setup_traps() {
+    _SECURIZAR_CLEANUP_FUNC="${1:-}"
+    trap 'log_error "Error: comando \"${BASH_COMMAND:-}\" falló en línea ${LINENO:-?} (código: $?)"' ERR
+    trap '_securizar_exit_handler' EXIT
+}
+
+# ── Carga validada de modulos ────────────────────────────────
+_securizar_source_lib() {
+    local lib_file="$1"
+    if [[ ! -f "$lib_file" ]]; then
+        echo "FATAL: Biblioteca no encontrada: $lib_file" >&2
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    source "$lib_file"
+}
+
+_securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-distro.sh"
+_securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-pkg-map.sh"
+_securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-pkg.sh"
+_securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-firewall.sh"
+_securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-paths.sh"

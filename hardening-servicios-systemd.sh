@@ -20,6 +20,7 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 init_backup "hardening-servicios-systemd"
+securizar_setup_traps
 log_section "S1: ANÁLISIS DE SEGURIDAD DE SERVICIOS"
 
 log_info "Ejecutando systemd-analyze security..."
