@@ -1904,10 +1904,15 @@ verificacion_proactiva() {
         [43]="Purple team"     [44]="Ciberinteligencia"
     )
     declare -A FAILED_CHECKS=()
+    declare -A _SECTION_FAILS=()
 
     _mark_section() {
-        if [[ ${_CUR_CHECK:-0} -gt 0 ]] && [[ ${warnings:-0} -gt ${_pre_warnings:-0} ]]; then
-            FAILED_CHECKS[$_CUR_CHECK]=1
+        if [[ ${_CUR_CHECK:-0} -gt 0 ]]; then
+            local _sec_fails=$(( ${warnings:-0} - ${_pre_warnings:-0} ))
+            if [[ $_sec_fails -gt 0 ]]; then
+                FAILED_CHECKS[$_CUR_CHECK]=1
+                _SECTION_FAILS[$_CUR_CHECK]=$_sec_fails
+            fi
         fi
         _CUR_CHECK=${1:-0}
         _pre_warnings=${warnings:-0}
@@ -1966,13 +1971,34 @@ verificacion_proactiva() {
         fi
     }
 
+    # Helper: check file exists AND contains pattern (path, pattern, ok_msg, fail_msg)
+    _vp_fcheck_contains() {
+        if [[ -f "$1" ]] && grep -q "$2" "$1" 2>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  $3"
+            _vp_ok
+        else
+            echo -e "  ${YELLOW}!!${NC}  $4"
+            _vp_fail
+        fi
+    }
+
+    local _score_file="/var/lib/securizar/score-history.dat"
     local _prev_score=-1
+    # Cargar último score persistido si existe
+    if [[ -f "$_score_file" ]]; then
+        _prev_score=$(tail -1 "$_score_file" 2>/dev/null | cut -d: -f2 || echo "-1")
+        [[ "$_prev_score" =~ ^[0-9]+$ ]] || _prev_score=-1
+    fi
 
     while true; do
 
     echo ""
     echo -e "  ${BG_CYAN} VERIFICACIÓN PROACTIVA DE SEGURIDAD ${NC}"
-    echo -e "  ${DIM}Auditoría completa del sistema · 44 categorías${NC}"
+    local _ctx_info="44 categorías"
+    [[ $_IS_CONTAINER -eq 1 ]] && _ctx_info+=" · contenedor" \
+        || { [[ $_IS_VM -eq 1 ]] && _ctx_info+=" · VM"; }
+    [[ $_IS_SERVER -eq 1 ]] && _ctx_info+=" · servidor"
+    echo -e "  ${DIM}Auditoría completa del sistema · ${_ctx_info}${NC}"
     echo ""
 
     local warnings=0
@@ -1981,12 +2007,19 @@ verificacion_proactiva() {
     local _crit_fails=0 _high_fails=0 _med_fails=0 _na_count=0
     local _CUR_CHECK=0 _pre_warnings=0
     for _k in "${!FAILED_CHECKS[@]}"; do unset "FAILED_CHECKS[$_k]"; done
+    for _k in "${!_SECTION_FAILS[@]}"; do unset "_SECTION_FAILS[$_k]"; done
 
     # ── Detección de contexto ──
-    local _IS_VM=0 _IS_SERVER=0 _HAS_PHYSICAL_USB=1
-    if command -v systemd-detect-virt &>/dev/null && systemd-detect-virt -q 2>/dev/null; then
-        _IS_VM=1
-        _HAS_PHYSICAL_USB=0
+    local _IS_VM=0 _IS_SERVER=0 _IS_CONTAINER=0 _HAS_PHYSICAL_USB=1
+    if command -v systemd-detect-virt &>/dev/null; then
+        local _virt_type
+        _virt_type=$(systemd-detect-virt 2>/dev/null || echo "none")
+        case "$_virt_type" in
+            docker|podman|lxc|lxc-libvirt|systemd-nspawn|openvz)
+                _IS_CONTAINER=1; _IS_VM=1; _HAS_PHYSICAL_USB=0 ;;
+            none) ;;
+            *)  _IS_VM=1; _HAS_PHYSICAL_USB=0 ;;
+        esac
     fi
     if [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
         _IS_SERVER=1
@@ -2270,25 +2303,25 @@ verificacion_proactiva() {
     echo ""
     _mark_section 12
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[12/44] MÓDULOS BLOQUEADOS${NC}"
-    if ls /etc/modprobe.d/*.conf &>/dev/null; then
-        local blocked_count=0
-        for conf in /etc/modprobe.d/*.conf; do
-            local mods
-            mods=$(grep -c "install .* /bin/false" "$conf" 2>/dev/null || echo 0)
-            if [[ "$mods" -gt 0 ]]; then
-                echo -e "  ${GREEN}OK${NC}  $conf: $mods módulos bloqueados"
-                blocked_count=$((blocked_count + mods))
-            fi
-        done
-        if [[ $blocked_count -eq 0 ]]; then
+    if [[ $_IS_CONTAINER -eq 1 ]]; then
+        echo -e "  ${DIM}--${NC}  Módulos kernel N/A (contenedor, kernel del host)"
+        _vp_na
+    else
+        local _mod_blocked=0
+        if ls /etc/modprobe.d/*.conf &>/dev/null; then
+            for conf in /etc/modprobe.d/*.conf; do
+                local mods
+                mods=$(grep -c "install .* /bin/false" "$conf" 2>/dev/null || echo 0)
+                [[ "$mods" -gt 0 ]] && _mod_blocked=$((_mod_blocked + mods))
+            done
+        fi
+        if [[ $_mod_blocked -gt 0 ]]; then
+            echo -e "  ${GREEN}OK${NC}  $_mod_blocked módulos bloqueados en modprobe.d"
+            _vp_ok
+        else
             echo -e "  ${YELLOW}!!${NC}  No hay módulos bloqueados en modprobe.d"
             _vp_fail
-        else
-            _vp_ok
         fi
-    else
-        echo -e "  ${YELLOW}!!${NC}  No hay archivos de configuración en /etc/modprobe.d/"
-        _vp_fail
     fi
 
     # ── 13. Herramientas instaladas ──
@@ -2561,48 +2594,21 @@ verificacion_proactiva() {
     fi
 
     # Script de auditoría periódica
-    if [[ -x /usr/local/bin/auditoria-reconocimiento.sh ]]; then
-        echo -e "  ${GREEN}OK${NC}  Script de auditoría de reconocimiento instalado"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Script de auditoría de reconocimiento NO instalado"
-        _vp_fail
-    fi
-
-    # Cron de auditoría semanal
-    if [[ -x /etc/cron.weekly/auditoria-reconocimiento ]]; then
-        echo -e "  ${GREEN}OK${NC}  Auditoría semanal de reconocimiento programada"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Auditoría semanal de reconocimiento NO programada"
-        _vp_fail
-    fi
+    _vp_xcheck /usr/local/bin/auditoria-reconocimiento.sh \
+        "Script de auditoría de reconocimiento instalado" "Script de auditoría de reconocimiento NO instalado"
+    _vp_xcheck /etc/cron.weekly/auditoria-reconocimiento \
+        "Auditoría semanal de reconocimiento programada" "Auditoría semanal de reconocimiento NO programada"
 
     # ── 22. MFA SSH (MITRE T1133 - M1032) ──
     echo ""
     _mark_section 22
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[22/44] MFA PARA SSH (T1133)${NC}"
-    if [[ -f /etc/ssh/sshd_config.d/91-mfa.conf ]]; then
-        if grep -q "AuthenticationMethods publickey,password" /etc/ssh/sshd_config.d/91-mfa.conf 2>/dev/null; then
-            echo -e "  ${GREEN}OK${NC}  MFA SSH activo (publickey + password)"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Archivo MFA existe pero sin AuthenticationMethods"
-            _vp_fail
-        fi
-    else
-        echo -e "  ${YELLOW}!!${NC}  MFA SSH NO configurado (/etc/ssh/sshd_config.d/91-mfa.conf)"
-        _vp_fail
-    fi
-
-    # Verificar soporte FIDO2
-    if [[ -x /usr/local/bin/generar-llave-fido2.sh ]]; then
-        echo -e "  ${GREEN}OK${NC}  Script generador de llaves FIDO2 disponible"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Script generador de llaves FIDO2 NO instalado"
-        _vp_fail
-    fi
+    _vp_fcheck_contains /etc/ssh/sshd_config.d/91-mfa.conf \
+        "AuthenticationMethods publickey,password" \
+        "MFA SSH activo (publickey + password)" \
+        "MFA SSH NO configurado"
+    _vp_xcheck /usr/local/bin/generar-llave-fido2.sh \
+        "Script generador de llaves FIDO2 disponible" "Script generador de llaves FIDO2 NO instalado"
 
     # ── 23. ClamAV (MITRE T1566 - M1049) ──
     echo ""
@@ -2817,13 +2823,8 @@ verificacion_proactiva() {
     fi
 
     # LD_PRELOAD restringido (T1129 - M1044)
-    if [[ -f /etc/profile.d/restrict-ld-env.sh ]]; then
-        echo -e "  ${GREEN}OK${NC}  LD_PRELOAD/LD_LIBRARY_PATH restringido"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  LD_PRELOAD NO restringido"
-        _vp_fail
-    fi
+    _vp_fcheck /etc/profile.d/restrict-ld-env.sh \
+        "LD_PRELOAD/LD_LIBRARY_PATH restringido" "LD_PRELOAD NO restringido"
 
     # Bash restringido por grupo (T1059.004 - M1038)
     if getent group shell-users &>/dev/null; then
@@ -2851,13 +2852,8 @@ verificacion_proactiva() {
     fi
 
     # cron.allow
-    if [[ -f /etc/cron.allow ]]; then
-        echo -e "  ${GREEN}OK${NC}  /etc/cron.allow presente (acceso restringido)"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  /etc/cron.allow NO presente"
-        _vp_fail
-    fi
+    _vp_fcheck /etc/cron.allow \
+        "/etc/cron.allow presente (acceso restringido)" "/etc/cron.allow NO presente"
 
     # Reglas de auditoría de ejecución
     _vp_fcheck /etc/audit/rules.d/98-ld-preload.rules \
@@ -3158,7 +3154,23 @@ verificacion_proactiva() {
         fi
         echo ""
     fi
+
+    # Tendencia: mostrar últimos 3 scores si hay historial
+    if [[ -f "$_score_file" ]]; then
+        local _trend=""
+        while IFS=: read -r _ts _sc; do
+            [[ "$_sc" =~ ^[0-9]+$ ]] && _trend+="${_sc}% → "
+        done < <(tail -3 "$_score_file" 2>/dev/null)
+        _trend+="${wscore}%"
+        _center "${DIM}Tendencia: ${_trend}${NC}"
+        echo ""
+    fi
+
     _prev_score=$wscore
+
+    # Persistir score para tracking entre ejecuciones
+    mkdir -p /var/lib/securizar 2>/dev/null || true
+    echo "$(date +%s):$wscore" >> "$_score_file" 2>/dev/null || true
 
     echo -e "    ${GREEN}●${NC} Checks OK:     ${GREEN}${BOLD}$checks_ok${NC}"
     echo -e "    ${YELLOW}●${NC} Advertencias:  ${YELLOW}${BOLD}$warnings${NC}"
@@ -3235,7 +3247,8 @@ verificacion_proactiva() {
             3) _sev_label="${RED}CRÍT${NC}"; _sev_color="$RED" ;;
             2) _sev_label="${YELLOW}ALTO${NC}"; _sev_color="$YELLOW" ;;
         esac
-        printf "    [${_sev_label}] ${_sev_color}Check %2d${NC} %-22s → Módulos:" "$_chk" "(${_CHECK_TITLE[$_chk]:-?})"
+        local _sf=${_SECTION_FAILS[$_chk]:-1}
+        printf "    [${_sev_label}] ${_sev_color}Check %2d${NC} %-22s ${DIM}(%d fallo(s))${NC} → Módulos:" "$_chk" "(${_CHECK_TITLE[$_chk]:-?})" "$_sf"
         for _m in $_mods; do
             printf " ${CYAN}%d${NC}" "$_m"
             _NEEDED_MODS[$_m]=1
@@ -3250,6 +3263,21 @@ verificacion_proactiva() {
         break
     fi
 
+    # Estimar impacto: puntos recuperables por la remediación
+    local _impact_pts=0
+    declare -A _impact_seen=()
+    for _chk in ${!FAILED_CHECKS[@]}; do
+        local _fix_mods="${_CHECK_FIX[$_chk]:-}"
+        for _m in $_fix_mods; do
+            if [[ -n "${_NEEDED_MODS[$_m]:-}" ]] && [[ -z "${_impact_seen[$_chk]:-}" ]]; then
+                _impact_pts=$(( _impact_pts + ${_SECTION_WEIGHT[$_chk]:-1} * ${_SECTION_FAILS[$_chk]:-1} ))
+                _impact_seen[$_chk]=1
+                break
+            fi
+        done
+    done
+    for _k in "${!_impact_seen[@]}"; do unset "_impact_seen[$_k]"; done
+
     echo ""
     echo -e "  ${BOLD}Módulos a ejecutar (${#_NEEDED_MODS[@]}):${NC}"
     echo ""
@@ -3257,6 +3285,12 @@ verificacion_proactiva() {
         printf "    ${CYAN}%2d${NC}  %s  ${DIM}(%s)${NC}\n" "$_m" "${MOD_NAMES[$_m]:-?}" "${MOD_DESCS[$_m]:-}"
     done
     echo ""
+    if [[ $_score_max -gt 0 ]]; then
+        local _new_est=$(( (_score_earned + _impact_pts) * 100 / _score_max ))
+        [[ $_new_est -gt 100 ]] && _new_est=100
+        echo -e "  ${DIM}Impacto estimado: ~${_impact_pts} puntos recuperables (${wscore}% → ~${_new_est}%)${NC}"
+        echo ""
+    fi
 
     if ! ask "¿Ejecutar estos módulos para mejorar la puntuación?"; then
         break
