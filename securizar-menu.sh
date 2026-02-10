@@ -1,0 +1,3227 @@
+#!/bin/bash
+# ============================================================
+# MENÚ INTERACTIVO DE SECURIZACIÓN - Linux Multi-Distro
+# ============================================================
+# Orquesta los 36 scripts de hardening con protecciones:
+#   - NO modifica PAM (/etc/pam.d/su intacto)
+#   - NO limita recursos (sin TMOUT readonly)
+#   - NO bloquea al usuario (sshd activo, sin chattr +i)
+# ============================================================
+
+set -euo pipefail
+
+# ── Cargar biblioteca compartida ───────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/securizar-common.sh"
+
+# ── Session tracking ───────────────────────────────────────────
+declare -A MOD_RUN=()
+SESSION_START=$(date +%s)
+
+# ── Override logging con versiones mejoradas (Unicode + tee) ──
+LOGFILE="/var/log/securizar-menu-$(date +%Y%m%d-%H%M%S).log"
+
+log_info()  { echo -e "  ${GREEN}✓${NC} $1" | tee -a "$LOGFILE"; }
+log_warn()  { echo -e "  ${YELLOW}⚠${NC} $1" | tee -a "$LOGFILE"; }
+log_error() { echo -e "  ${RED}✗${NC} $1" | tee -a "$LOGFILE"; }
+log_section() {
+    echo "" | tee -a "$LOGFILE"
+    echo -e "  ${CYAN}━━ $1 ━━${NC}" | tee -a "$LOGFILE"
+    echo "" | tee -a "$LOGFILE"
+}
+
+ask() {
+    echo ""
+    read -rp "$(echo -e "  ${CYAN}❯${NC} $1 ${DIM}[s/N]:${NC} ")" resp
+    [[ "$resp" =~ ^[sS]$ ]]
+}
+
+# ── Funciones UI ─────────────────────────────────────────────
+TERM_WIDTH=$(tput cols 2>/dev/null || echo 70)
+[[ $TERM_WIDTH -gt 80 ]] && TERM_WIDTH=80
+
+_hr() {
+    local char="${1:-─}"
+    local width="${2:-$TERM_WIDTH}"
+    printf '%*s' "$width" '' | tr ' ' "$char"
+}
+
+_center() {
+    local text="$1"
+    local width="${2:-$TERM_WIDTH}"
+    local clean
+    clean=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
+    local pad=$(( (width - ${#clean}) / 2 ))
+    [[ $pad -lt 0 ]] && pad=0
+    printf '%*s' "$pad" ''
+    echo -e "$text"
+}
+
+_status_dot() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        echo -e "${GREEN}●${NC}"
+    else
+        echo -e "${DIM}○${NC}"
+    fi
+}
+
+_svc_status() {
+    local svc="$1"
+    if systemctl is-active "$svc" &>/dev/null; then
+        echo -e "${GREEN}●${NC}"
+    elif systemctl is-enabled "$svc" &>/dev/null 2>&1; then
+        echo -e "${YELLOW}◐${NC}"
+    else
+        echo -e "${DIM}○${NC}"
+    fi
+}
+
+_progress_bar() {
+    local current=$1
+    local total=$2
+    local width=30
+    local filled=$(( current * width / total ))
+    local empty=$(( width - filled ))
+    local pct=$(( current * 100 / total ))
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    echo -e "  ${DIM}[${NC}${CYAN}${bar}${NC}${DIM}]${NC} ${BOLD}${pct}%${NC}"
+}
+
+_draw_header() {
+    clear 2>/dev/null || true
+    echo ""
+    echo -e "${CYAN}"
+    _center "███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗"
+    _center "██╔════╝██╔════╝██╔════╝██║   ██║██╔══██╗██║╚══███╔╝██╔══██╗██╔══██╗"
+    _center "███████╗█████╗  ██║     ██║   ██║██████╔╝██║  ███╔╝ ███████║██████╔╝"
+    _center "╚════██║██╔══╝  ██║     ██║   ██║██╔══██╗██║ ███╔╝  ██╔══██║██╔══██╗"
+    _center "███████║███████╗╚██████╗╚██████╔╝██║  ██║██║███████╗██║  ██║██║  ██║"
+    _center "╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝"
+    echo -e "${NC}"
+    _center "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    _center "${DIM}Hardening Suite · Linux Multi-Distro${NC}"
+    echo ""
+}
+
+_draw_sysinfo() {
+    local hostname kernel uptime_str user date_str
+    hostname=$(hostname 2>/dev/null || echo "localhost")
+    kernel=$(uname -r 2>/dev/null || echo "?")
+    uptime_str=$(uptime -p 2>/dev/null | sed 's/up //' || echo "?")
+    user="${SUDO_USER:-$USER}"
+    date_str=$(date '+%d/%m/%Y %H:%M')
+
+    local run_count=0
+    for _k in "${!MOD_RUN[@]}"; do [[ "${MOD_RUN[$_k]}" == "1" ]] && ((run_count++)) || true; done
+
+    echo -e "  ${DIM}╭─────────────────────────────────────────────────────────────────╮${NC}"
+    printf "  ${DIM}│${NC}  %-12s ${DIM}·${NC} %-20s ${DIM}·${NC} %-8s ${DIM}·${NC} %-14s  ${DIM}│${NC}\n" "$hostname" "$kernel" "$user" "$date_str"
+    printf "  ${DIM}│${NC}  ${DIM}Uptime:${NC} %-16s  ${DIM}Log:${NC} activo    ${DIM}Módulos:${NC} ${GREEN}%d${NC}${DIM}/36${NC}     ${DIM}│${NC}\n" "$uptime_str" "$run_count"
+    echo -e "  ${DIM}╰─────────────────────────────────────────────────────────────────╯${NC}"
+}
+
+_draw_footer() {
+    echo ""
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+    echo -e "  ${GREEN}✓${NC} ${DIM}sin PAM${NC}  ${GREEN}✓${NC} ${DIM}sin TMOUT${NC}  ${GREEN}✓${NC} ${DIM}sin lockout${NC}  ${GREEN}✓${NC} ${DIM}sshd activo${NC}"
+    echo ""
+}
+
+# ── UI extendido ───────────────────────────────────────────────
+_draw_header_compact() {
+    clear 2>/dev/null || true
+    echo ""
+    echo -e "  ${CYAN}${BOLD}SECURIZAR${NC} ${DIM}· Hardening Suite · Linux Multi-Distro${NC}"
+    echo -e "  ${DIM}$(_hr '─' $((TERM_WIDTH - 4)))${NC}"
+    echo ""
+}
+
+_breadcrumb() {
+    echo -e "  ${DIM}$1${NC}"
+    echo ""
+}
+
+_pause() {
+    echo ""
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+    echo -ne "  ${DIM}Presiona Enter para continuar...${NC} "
+    read -r _
+}
+
+_mod_icon() {
+    local n=$1
+    if [[ "${MOD_RUN[$n]:-}" == "1" ]]; then
+        echo -e "${GREEN}✓${NC}"
+    elif [[ -n "${MOD_FILES[$n]:-}" ]] && [[ ! -f "$SCRIPT_DIR/${MOD_FILES[$n]}" ]]; then
+        echo -e "${RED}!${NC}"
+    else
+        echo -e "${DIM}○${NC}"
+    fi
+}
+
+_show_module_entry() {
+    local n=$1
+    local icon
+    icon="$(_mod_icon "$n")"
+    local tag=""
+    [[ -n "${MOD_TAGS[$n]:-}" ]] && tag=" ${BG_YELLOW} ${MOD_TAGS[$n]} ${NC}"
+    printf "  %b  ${WHITE}%2d${NC}  ${BOLD}%-28s${NC}%b  ${DIM}%s${NC}\n" \
+        "$icon" "$n" "${MOD_NAMES[$n]}" "$tag" "${MOD_DESCS[$n]}"
+}
+
+_cat_dots() {
+    local total=$1 done_count=$2 i
+    for ((i=0; i<done_count; i++)); do printf "${GREEN}●${NC}"; done
+    for ((i=done_count; i<total; i++)); do printf "${DIM}○${NC}"; done
+}
+
+_exec_module() {
+    local n=$1
+    echo ""
+    echo -e "  ${CYAN}━━${NC} ${BOLD}Módulo ${n}: ${MOD_NAMES[$n]}${NC} ${CYAN}━━${NC}"
+    [[ -n "${MOD_TAGS[$n]:-}" ]] && echo -e "  ${BG_YELLOW} ${MOD_TAGS[$n]} ${NC} ${DIM}Versión segura · sin riesgos de lockout${NC}"
+    echo ""
+
+    if ${MOD_FUNCS[$n]}; then
+        MOD_RUN[$n]=1
+        echo ""
+        echo -e "  ${GREEN}✓${NC} ${BOLD}Módulo ${n}${NC} completado correctamente"
+    else
+        MOD_RUN[$n]=1
+        echo ""
+        echo -e "  ${YELLOW}⚠${NC} ${BOLD}Módulo ${n}${NC} completado con advertencias"
+    fi
+    _pause
+}
+
+_run_category() {
+    local label=$1 start=$2 end=$3
+    local count=$(( end - start + 1 ))
+
+    echo ""
+    echo -e "  ${BG_CYAN} ${label} ${NC}"
+    echo -e "  ${DIM}Se ejecutarán ${count} módulos secuencialmente${NC}"
+
+    if ! ask "¿Continuar con todos los módulos de esta categoría?"; then
+        return 0
+    fi
+
+    local ok=0 fail=0
+    for ((n=start; n<=end; n++)); do
+        echo ""
+        _progress_bar $((n - start + 1)) "$count"
+        echo -e "  ${CYAN}▶${NC} ${BOLD}${MOD_NAMES[$n]}${NC}"
+        echo ""
+
+        if ${MOD_FUNCS[$n]}; then
+            MOD_RUN[$n]=1
+            echo -e "  ${GREEN}✓${NC} Completado"
+            ((ok++))
+        else
+            MOD_RUN[$n]=1
+            echo -e "  ${RED}✗${NC} Falló"
+            ((fail++))
+        fi
+    done
+
+    echo ""
+    _progress_bar "$count" "$count"
+    echo ""
+    if [[ $fail -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} ${BOLD}Todos completados${NC} ($ok/$count)"
+    else
+        echo -e "  ${YELLOW}⚠${NC} ${GREEN}$ok OK${NC} · ${RED}$fail fallidos${NC}"
+    fi
+}
+
+_show_help() {
+    _draw_header_compact
+    echo -e "  ${BOLD}Navegación${NC}"
+    echo ""
+    echo -e "    ${WHITE}b${NC}  ${DIM}Hardening Base (10 módulos)${NC}"
+    echo -e "    ${WHITE}p${NC}  ${DIM}Securización Proactiva (8 módulos)${NC}"
+    echo -e "    ${WHITE}m${NC}  ${DIM}Mitigaciones MITRE ATT&CK (12 módulos)${NC}"
+    echo -e "    ${WHITE}o${NC}  ${DIM}Operaciones de Seguridad (6 módulos)${NC}"
+    echo -e "    ${WHITE}a${NC}  ${DIM}Aplicar todos los módulos${NC}"
+    echo -e "    ${WHITE}v${NC}  ${DIM}Verificación proactiva (43 checks)${NC}"
+    echo ""
+    echo -e "  ${BOLD}Acceso directo${NC}"
+    echo ""
+    echo -e "    ${WHITE}1-36${NC}  ${DIM}Ejecutar módulo por número desde cualquier menú${NC}"
+    echo ""
+    echo -e "  ${BOLD}En sub-menús${NC}"
+    echo ""
+    echo -e "    ${WHITE}N${NC}     ${DIM}Ejecutar módulo N${NC}"
+    echo -e "    ${WHITE}t${NC}     ${DIM}Ejecutar todos en la categoría${NC}"
+    echo -e "    ${WHITE}b${NC}     ${DIM}Volver al menú principal${NC}"
+    echo ""
+    echo -e "  ${BOLD}General${NC}"
+    echo ""
+    echo -e "    ${WHITE}?${NC}     ${DIM}Mostrar esta ayuda${NC}"
+    echo -e "    ${WHITE}q${NC}     ${DIM}Salir de Securizar${NC}"
+    echo ""
+    _pause
+}
+
+_exit_securizar() {
+    local elapsed=$(( $(date +%s) - SESSION_START ))
+    local mins=$((elapsed / 60))
+    local secs=$((elapsed % 60))
+    local run_count=0
+    for _k in "${!MOD_RUN[@]}"; do [[ "${MOD_RUN[$_k]}" == "1" ]] && ((run_count++)) || true; done
+
+    echo ""
+    echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${DIM}Sesión finalizada${NC} ${DIM}·${NC} ${WHITE}${run_count}${NC} ${DIM}módulos ejecutados${NC} ${DIM}·${NC} ${DIM}${mins}m ${secs}s${NC}"
+    echo -e "  ${DIM}Log:${NC} ${DIM}${LOGFILE}${NC}"
+    echo ""
+    echo -e "  ${GREEN}✓${NC} ${DIM}sin PAM · sin TMOUT · sin lockout · sshd activo${NC}"
+    echo ""
+    exit 0
+}
+
+# ── Verificar root ───────────────────────────────────────────
+if [[ $EUID -ne 0 ]]; then
+    log_error "Este script debe ejecutarse como root: sudo bash $0"
+    exit 1
+fi
+
+# ── Directorio base ─────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Backup ───────────────────────────────────────────────────
+BACKUP_DIR="/root/securizar-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# Guardar hash de PAM para verificación posterior
+PAM_SU_HASH=""
+if [[ -f /etc/pam.d/su ]]; then
+    PAM_SU_HASH=$(sha256sum /etc/pam.d/su 2>/dev/null | awk '{print $1}')
+fi
+
+# ============================================================
+# MÓDULO 1: hardening-opensuse.sh (SEGURO - delegado)
+# ============================================================
+mod_01_opensuse() {
+    log_section "MÓDULO 1: Hardening openSUSE base"
+    local script="$SCRIPT_DIR/hardening-opensuse.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 1 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 2: hardening-seguro.sh (SEGURO - delegado)
+# ============================================================
+mod_02_seguro() {
+    log_section "MÓDULO 2: Hardening seguro"
+    local script="$SCRIPT_DIR/hardening-seguro.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 2 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 3: hardening-final.sh (SEGURO - delegado)
+# ============================================================
+mod_03_final() {
+    log_section "MÓDULO 3: Hardening final"
+    local script="$SCRIPT_DIR/hardening-final.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 3 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 4: hardening-externo.sh (SEGURO - delegado)
+# ============================================================
+mod_04_externo() {
+    log_section "MÓDULO 4: Hardening externo"
+    local script="$SCRIPT_DIR/hardening-externo.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 4 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 5: hardening-extremo SEGURO (INLINE)
+# Secciones incluidas: 3-9
+# Secciones ELIMINADAS:
+#   1 - Deshabilita sshd (LOCKOUT)
+#   2 - Firewall DROP ultra-restrictivo (LOCKOUT)
+#  10 - chattr +i en passwd/shadow/sudoers (LOCKOUT)
+# ============================================================
+mod_05_extremo_seguro() {
+    log_section "MÓDULO 5: Hardening extremo (versión SEGURA)"
+    log_warn "Secciones peligrosas ELIMINADAS:"
+    log_warn "  - Deshabilitar sshd (evita lockout)"
+    log_warn "  - Firewall DROP ultra-restrictivo (evita lockout)"
+    log_warn "  - chattr +i en archivos críticos (evita lockout)"
+    echo ""
+
+    # ── Sección 3: Bloquear módulos de red innecesarios ──
+    log_info "3. Bloqueando módulos de red innecesarios..."
+
+    cat > /etc/modprobe.d/network-hardening.conf << 'EOF'
+# Bloquear protocolos de red peligrosos
+install dccp /bin/false
+install sctp /bin/false
+install rds /bin/false
+install tipc /bin/false
+install n-hdlc /bin/false
+install ax25 /bin/false
+install netrom /bin/false
+install x25 /bin/false
+install rose /bin/false
+install decnet /bin/false
+install econet /bin/false
+install af_802154 /bin/false
+install ipx /bin/false
+install appletalk /bin/false
+install psnap /bin/false
+install p8023 /bin/false
+install p8022 /bin/false
+install can /bin/false
+install atm /bin/false
+EOF
+
+    # ── Sección 4: Kernel paranoid mode ──
+    log_info "4. Activando modo paranoico del kernel..."
+
+    cat > /etc/sysctl.d/99-paranoid-max.conf << 'EOF'
+# MÁXIMA SEGURIDAD - MODO PARANOICO
+
+# Memoria
+kernel.randomize_va_space = 2
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+kernel.perf_event_paranoid = 3
+kernel.yama.ptrace_scope = 3
+kernel.unprivileged_bpf_disabled = 1
+kernel.kexec_load_disabled = 1
+kernel.sysrq = 0
+
+# Core dumps deshabilitados
+kernel.core_pattern = |/bin/false
+fs.suid_dumpable = 0
+
+# Protección de archivos
+fs.protected_symlinks = 1
+fs.protected_hardlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2
+
+# Red - Máxima restricción
+net.ipv4.ip_forward = 0
+net.ipv4.conf.all.forwarding = 0
+net.ipv6.conf.all.forwarding = 0
+
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+net.ipv4.icmp_echo_ignore_all = 1
+
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 3
+
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
+
+# BPF hardening
+net.core.bpf_jit_harden = 2
+
+# Memoria
+vm.mmap_min_addr = 65536
+vm.swappiness = 10
+EOF
+
+    /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_info "   Kernel en modo paranoico máximo"
+
+    # ── Sección 5: Bloquear USB ──
+    if ask "¿Bloquear TODOS los dispositivos USB nuevos?"; then
+        log_info "5. Bloqueando USB..."
+
+        if ! command -v usbguard &>/dev/null; then
+            pkg_install usbguard 2>/dev/null || true
+        fi
+
+        if command -v usbguard &>/dev/null; then
+            cat > /etc/usbguard/rules.conf << 'EOF'
+# Bloquear TODOS los dispositivos USB por defecto
+# Solo los dispositivos listados explícitamente serán permitidos
+EOF
+            usbguard generate-policy >> /etc/usbguard/rules.conf 2>/dev/null || true
+            systemctl enable --now usbguard 2>/dev/null || true
+            log_info "   USBGuard activo - USB nuevos bloqueados"
+        fi
+
+        echo "install usb-storage /bin/false" >> /etc/modprobe.d/network-hardening.conf
+        rmmod usb_storage 2>/dev/null || true
+    fi
+
+    # ── Sección 6: Deshabilitar usuarios innecesarios ──
+    log_info "6. Bloqueando shells de usuarios del sistema..."
+
+    for user in daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc gnats nobody; do
+        usermod -s /usr/sbin/nologin "$user" 2>/dev/null || true
+    done
+
+    # ── Sección 7: Permisos ultra-restrictivos ──
+    log_info "7. Aplicando permisos ultra-restrictivos..."
+
+    chmod u-s /usr/bin/wall 2>/dev/null || true
+    chmod u-s /usr/bin/write 2>/dev/null || true
+    chmod u-s /usr/bin/chage 2>/dev/null || true
+    chmod u-s /usr/bin/chfn 2>/dev/null || true
+    chmod u-s /usr/bin/chsh 2>/dev/null || true
+
+    chmod 600 /etc/shadow
+    chmod 600 /etc/gshadow
+    chmod 600 /etc/ssh/sshd_config 2>/dev/null || true
+    chmod 700 /root
+    chmod 700 /boot
+
+    # ── Sección 8: Monitoreo en tiempo real ──
+    log_info "8. Configurando monitoreo en tiempo real..."
+
+    cat > /usr/local/bin/security-monitor.sh << 'EOFMONITOR'
+#!/bin/bash
+# Monitor de seguridad en tiempo real
+
+LOG="/var/log/security-monitor.log"
+
+log_alert() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ALERTA: $1" >> "$LOG"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ALERTA: $1"
+}
+
+while true; do
+    # Verificar conexiones nuevas
+    CONNECTIONS=$(ss -tnp state established 2>/dev/null | grep -v "127.0.0.1" | wc -l)
+    if [[ $CONNECTIONS -gt 50 ]]; then
+        log_alert "Muchas conexiones establecidas: $CONNECTIONS"
+    fi
+
+    # Verificar puertos escuchando
+    LISTENING=$(ss -tlnp 2>/dev/null | grep -v "127.0.0.1" | grep -v "::1" | wc -l)
+    if [[ $LISTENING -gt 0 ]]; then
+        log_alert "Puertos abiertos detectados: $(ss -tlnp | grep -v '127.0.0.1')"
+    fi
+
+    # Verificar usuarios logueados
+    USERS=$(who | wc -l)
+    if [[ $USERS -gt 2 ]]; then
+        log_alert "Múltiples usuarios logueados: $(who)"
+    fi
+
+    # Verificar procesos sospechosos
+    for proc in nc ncat netcat nmap masscan hydra john; do
+        if pgrep -x "$proc" > /dev/null 2>&1; then
+            log_alert "Proceso sospechoso detectado: $proc"
+            pkill -9 "$proc" 2>/dev/null
+        fi
+    done
+
+    # Verificar archivos modificados en /etc
+    MODIFIED=$(find /etc -mmin -5 -type f 2>/dev/null | wc -l)
+    if [[ $MODIFIED -gt 10 ]]; then
+        log_alert "Muchos archivos modificados en /etc: $MODIFIED"
+    fi
+
+    sleep 30
+done
+EOFMONITOR
+    chmod +x /usr/local/bin/security-monitor.sh
+
+    cat > /etc/systemd/system/security-monitor.service << 'EOF'
+[Unit]
+Description=Security Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/security-monitor.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now security-monitor.service 2>/dev/null || true
+    log_info "   Monitor de seguridad activo"
+
+    # ── Sección 9: Alarma de intrusión ──
+    log_info "9. Configurando alarma de intrusión..."
+
+    cat > /usr/local/bin/intrusion-alarm.sh << 'EOFALARM'
+#!/bin/bash
+# Alarma de intrusión - ejecutar cuando se detecte acceso no autorizado
+
+for i in {1..5}; do
+    echo -e '\a'
+    sleep 0.5
+done
+
+wall "
+=====================================================================
+  ALERTA DE INTRUSION DETECTADA
+  Se ha detectado actividad sospechosa en el sistema.
+  Verificar inmediatamente.
+  $(date)
+=====================================================================
+"
+
+echo "[$(date)] INTRUSION DETECTADA" >> /var/log/intrusion.log
+EOFALARM
+    chmod +x /usr/local/bin/intrusion-alarm.sh
+
+    log_info "Módulo 5 (extremo seguro) completado"
+}
+
+# ============================================================
+# MÓDULO 6: hardening-paranoico SEGURO (INLINE)
+# Secciones incluidas: 1-3, 6-16
+# Secciones ELIMINADAS:
+#   4 - TMOUT=900 readonly (LIMITA RECURSOS)
+#   5 - Modifica /etc/pam.d/su (MODIFICA PAM)
+# ============================================================
+mod_06_paranoico_seguro() {
+    log_section "MÓDULO 6: Hardening paranoico (versión SEGURA)"
+    log_warn "Secciones peligrosas ELIMINADAS:"
+    log_warn "  - TMOUT=900 readonly (evita limitar recursos)"
+    log_warn "  - Modificar /etc/pam.d/su (evita modificar PAM)"
+    echo ""
+
+    local PBACKUP_DIR="/root/hardening-paranoico-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$PBACKUP_DIR"
+    log_info "Backups en: $PBACKUP_DIR"
+
+    # ── Sección 1: Kernel hardening extremo ──
+    log_section "1. KERNEL HARDENING EXTREMO"
+
+    if ask "¿Aplicar hardening extremo del kernel?"; then
+        cat > /etc/sysctl.d/99-paranoid.conf << 'EOF'
+# ===========================================
+# KERNEL HARDENING PARANOICO
+# ===========================================
+
+# --- Protección de memoria ---
+kernel.randomize_va_space = 2
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+kernel.perf_event_paranoid = 3
+kernel.yama.ptrace_scope = 2
+kernel.unprivileged_bpf_disabled = 1
+kernel.kexec_load_disabled = 1
+
+# --- Deshabilitar SysRq (magic keys) ---
+kernel.sysrq = 0
+
+# --- Core dumps deshabilitados ---
+kernel.core_pattern = |/bin/false
+fs.suid_dumpable = 0
+
+# --- Protección de archivos ---
+fs.protected_symlinks = 1
+fs.protected_hardlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2
+
+# --- Red IPv4 ---
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 5
+
+# --- Red IPv6 (restringir) ---
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
+
+# --- User namespaces (comentado - puede romper algunas apps) ---
+# kernel.unprivileged_userns_clone = 0
+EOF
+
+        /usr/sbin/sysctl --system > /dev/null 2>&1
+        log_info "Kernel hardening extremo aplicado"
+        log_warn "ptrace_scope=2 puede afectar debuggers (gdb, strace)"
+    fi
+
+    # ── Sección 2: Blacklist de módulos peligrosos ──
+    log_section "2. BLACKLIST DE MÓDULOS PELIGROSOS"
+
+    echo "Módulos que se pueden bloquear:"
+    echo "  - firewire (DMA attacks)"
+    echo "  - thunderbolt (DMA attacks)"
+    echo "  - bluetooth (si no lo usas)"
+    echo "  - cramfs, freevxfs, jffs2, hfs, hfsplus, udf (filesystems raros)"
+    echo ""
+
+    if ask "¿Bloquear módulos peligrosos (NO incluye USB)?"; then
+        cat > /etc/modprobe.d/paranoid-blacklist.conf << 'EOF'
+# Bloquear protocolos de red obsoletos/peligrosos
+install dccp /bin/false
+install sctp /bin/false
+install rds /bin/false
+install tipc /bin/false
+
+# Bloquear DMA attack vectors
+install firewire-core /bin/false
+install firewire-ohci /bin/false
+install firewire-sbp2 /bin/false
+install thunderbolt /bin/false
+
+# Bloquear filesystems raros
+install cramfs /bin/false
+install freevxfs /bin/false
+install jffs2 /bin/false
+install hfs /bin/false
+install hfsplus /bin/false
+install udf /bin/false
+install squashfs /bin/false
+EOF
+
+        log_info "Módulos peligrosos bloqueados"
+    fi
+
+    if ask "¿Bloquear Bluetooth también?"; then
+        cat >> /etc/modprobe.d/paranoid-blacklist.conf << 'EOF'
+
+# Bloquear Bluetooth
+install bluetooth /bin/false
+install btusb /bin/false
+EOF
+        systemctl stop bluetooth 2>/dev/null || true
+        systemctl disable bluetooth 2>/dev/null || true
+        log_info "Bluetooth bloqueado"
+    fi
+
+    # ── Sección 3: Deshabilitar core dumps ──
+    log_section "3. DESHABILITAR CORE DUMPS"
+
+    if ask "¿Deshabilitar core dumps completamente?"; then
+        cp /etc/security/limits.conf "$PBACKUP_DIR/" 2>/dev/null || true
+        if ! grep -q "hard core 0" /etc/security/limits.conf; then
+            echo "* hard core 0" >> /etc/security/limits.conf
+            echo "* soft core 0" >> /etc/security/limits.conf
+        fi
+
+        mkdir -p /etc/systemd/coredump.conf.d/
+        cat > /etc/systemd/coredump.conf.d/disable.conf << 'EOF'
+[Coredump]
+Storage=none
+ProcessSizeMax=0
+EOF
+
+        echo "ulimit -c 0" > /etc/profile.d/disable-coredump.sh
+
+        log_info "Core dumps deshabilitados"
+    fi
+
+    # ── SECCIÓN 4 ELIMINADA: TMOUT=900 readonly (LIMITA RECURSOS) ──
+    log_warn "Sección 4 (TMOUT) OMITIDA: evita limitar recursos del usuario"
+
+    # ── SECCIÓN 5 ELIMINADA: Modificar /etc/pam.d/su (MODIFICA PAM) ──
+    log_warn "Sección 5 (PAM su) OMITIDA: evita modificar configuración PAM"
+
+    # ── Sección 6: Restringir cron ──
+    log_section "6. RESTRINGIR CRON"
+
+    if ask "¿Restringir cron solo a root y tu usuario?"; then
+        echo "root" > /etc/cron.allow
+        echo "$SUDO_USER" >> /etc/cron.allow
+        chmod 600 /etc/cron.allow
+        rm -f /etc/cron.deny 2>/dev/null || true
+
+        echo "root" > /etc/at.allow
+        echo "$SUDO_USER" >> /etc/at.allow
+        chmod 600 /etc/at.allow
+        rm -f /etc/at.deny 2>/dev/null || true
+
+        log_info "cron/at restringido a root y $SUDO_USER"
+    fi
+
+    # ── Sección 7: Banner de advertencia legal ──
+    log_section "7. BANNER DE ADVERTENCIA LEGAL"
+
+    if ask "¿Agregar banner de advertencia legal?"; then
+        BANNER="
+=====================================================================
+  SISTEMA PRIVADO - ACCESO NO AUTORIZADO PROHIBIDO
+
+  Este sistema es de uso exclusivo para usuarios autorizados.
+  Toda actividad es monitoreada y registrada.
+  El acceso no autorizado esta prohibido y sera perseguido
+  conforme a la legislacion aplicable.
+=====================================================================
+"
+        echo "$BANNER" > /etc/issue
+        echo "$BANNER" > /etc/issue.net
+
+        echo "$BANNER" > /etc/ssh/banner
+        if [[ -f /etc/ssh/sshd_config ]]; then
+            if ! grep -q "^Banner" /etc/ssh/sshd_config; then
+                echo "Banner /etc/ssh/banner" >> /etc/ssh/sshd_config
+            fi
+        fi
+
+        log_info "Banner legal configurado"
+    fi
+
+    # ── Sección 8: Permisos restrictivos ──
+    log_section "8. PERMISOS RESTRICTIVOS"
+
+    if ask "¿Aplicar permisos restrictivos a archivos del sistema?"; then
+        chmod 600 /etc/shadow 2>/dev/null || true
+        chmod 600 /etc/gshadow 2>/dev/null || true
+        chmod 644 /etc/passwd 2>/dev/null || true
+        chmod 644 /etc/group 2>/dev/null || true
+
+        chmod 700 /etc/crontab 2>/dev/null || true
+        chmod 700 /etc/cron.d 2>/dev/null || true
+        chmod 700 /etc/cron.daily 2>/dev/null || true
+        chmod 700 /etc/cron.hourly 2>/dev/null || true
+        chmod 700 /etc/cron.weekly 2>/dev/null || true
+        chmod 700 /etc/cron.monthly 2>/dev/null || true
+
+        chmod 700 /etc/ssh 2>/dev/null || true
+        chmod 600 /etc/ssh/sshd_config 2>/dev/null || true
+        chmod 600 /etc/ssh/ssh_host_*_key 2>/dev/null || true
+
+        chmod 600 "$GRUB_CFG" 2>/dev/null || true
+
+        log_info "Permisos restrictivos aplicados"
+    fi
+
+    # ── Sección 9: Proteger GRUB con contraseña ──
+    log_section "9. PROTEGER GRUB CON CONTRASEÑA"
+
+    echo "Esto previene que alguien edite parámetros del kernel en boot"
+    if ask "¿Proteger GRUB con contraseña?"; then
+        echo ""
+        echo "Introduce una contraseña para GRUB:"
+        grub_set_password
+
+        log_info "GRUB protegido con contraseña"
+        log_warn "Necesitarás esta contraseña para editar entradas de GRUB"
+    fi
+
+    # ── Sección 10: Instalar herramientas de seguridad ──
+    log_section "10. INSTALAR HERRAMIENTAS DE SEGURIDAD"
+
+    echo "Herramientas disponibles:"
+    echo "  - aide: Verificador de integridad de archivos"
+    echo "  - rkhunter: Detector de rootkits"
+    echo "  - lynis: Auditor de seguridad"
+    echo ""
+
+    if ask "¿Instalar AIDE (verificador de integridad)?"; then
+        if pkg_install aide; then
+            log_info "Inicializando base de datos AIDE..."
+            aide --init
+            mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db 2>/dev/null || true
+            log_info "AIDE instalado. Ejecutar: aide --check"
+        fi
+    fi
+
+    if ask "¿Instalar rkhunter (detector de rootkits)?"; then
+        if pkg_install rkhunter; then
+            rkhunter --update 2>/dev/null || true
+            rkhunter --propupd 2>/dev/null || true
+            log_info "rkhunter instalado. Ejecutar: rkhunter --check"
+        fi
+    fi
+
+    if ask "¿Instalar lynis (auditor de seguridad)?"; then
+        if pkg_install lynis; then
+            log_info "lynis instalado. Ejecutar: lynis audit system"
+        fi
+    fi
+
+    # ── Sección 11: Firewall paranoico ──
+    log_section "11. FIREWALL PARANOICO"
+
+    if ask "¿Configurar firewall en modo paranoico (DROP por defecto)?"; then
+        systemctl enable --now firewalld 2>/dev/null || true
+
+        fw_set_default_zone drop
+
+        fw_add_service dhcpv6-client work
+        fw_add_service dns work
+
+        fw_add_icmp_block echo-request
+        fw_add_icmp_block timestamp-request
+        fw_add_icmp_block timestamp-reply
+
+        fw_set_log_denied all
+
+        fw_reload
+
+        log_info "Firewall configurado en modo paranoico"
+        log_warn "Zona por defecto: DROP (bloquea todo lo no explícito)"
+    fi
+
+    # ── Sección 12: CUPS restringir ──
+    log_section "12. CUPS - RESTRINGIR"
+
+    if systemctl is-active cups &>/dev/null; then
+        echo "CUPS está activo (impresión)"
+        if ask "¿Restringir CUPS solo a localhost?"; then
+            cp /etc/cups/cupsd.conf "$PBACKUP_DIR/" 2>/dev/null || true
+
+            sed -i 's/^Listen.*/Listen localhost:631/' /etc/cups/cupsd.conf 2>/dev/null || true
+            sed -i 's/^Port.*/# Port 631/' /etc/cups/cupsd.conf 2>/dev/null || true
+            sed -i 's/^Browsing.*/Browsing Off/' /etc/cups/cupsd.conf 2>/dev/null || true
+
+            systemctl restart cups
+            log_info "CUPS restringido a localhost"
+        fi
+
+        if ask "¿Deshabilitar CUPS completamente (no podrás imprimir)?"; then
+            systemctl stop cups
+            systemctl disable cups
+            log_info "CUPS deshabilitado"
+        fi
+    fi
+
+    # ── Sección 13: Umask restrictivo ──
+    log_section "13. UMASK RESTRICTIVO"
+
+    if ask "¿Configurar umask restrictivo (027)?"; then
+        if ! grep -q "umask 027" /etc/profile; then
+            echo "umask 027" >> /etc/profile
+        fi
+
+        if [[ -f /etc/bashrc ]] && ! grep -q "umask 027" /etc/bashrc; then
+            echo "umask 027" >> /etc/bashrc
+        fi
+
+        sed -i 's/^UMASK.*/UMASK 027/' /etc/login.defs 2>/dev/null || true
+
+        log_info "umask configurado a 027 (archivos: 640, directorios: 750)"
+    fi
+
+    # ── Sección 14: Deshabilitar USB storage ──
+    log_section "14. DESHABILITAR USB STORAGE (OPCIONAL)"
+
+    log_warn "CUIDADO: Esto impedirá usar memorias USB"
+    if ask "¿Bloquear almacenamiento USB (memorias, discos externos)?"; then
+        echo "install usb-storage /bin/false" >> /etc/modprobe.d/paranoid-blacklist.conf
+        rmmod usb_storage 2>/dev/null || true
+        log_info "USB storage bloqueado"
+    fi
+
+    # ── Sección 15: Auditoría avanzada ──
+    log_section "15. AUDITORÍA AVANZADA"
+
+    if systemctl is-active auditd &>/dev/null; then
+        if ask "¿Configurar reglas de auditoría paranoicas?"; then
+            cat > /etc/audit/rules.d/99-paranoid.rules << 'EOF'
+# Eliminar reglas anteriores
+-D
+
+# Buffer grande
+-b 8192
+
+# Fallar si no puede auditar
+-f 1
+
+# Monitorear cambios en usuarios y grupos
+-w /etc/passwd -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/security/opasswd -p wa -k identity
+
+# Monitorear sudoers
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d/ -p wa -k sudoers
+
+# Monitorear cambios en PAM
+-w /etc/pam.d/ -p wa -k pam
+
+# Monitorear SSH
+-w /etc/ssh/sshd_config -p wa -k sshd
+
+# Monitorear cron
+-w /etc/crontab -p wa -k cron
+-w /etc/cron.d/ -p wa -k cron
+-w /var/spool/cron/ -p wa -k cron
+
+# Monitorear logins
+-w /var/log/lastlog -p wa -k logins
+-w /var/log/wtmp -p wa -k logins
+-w /var/log/btmp -p wa -k logins
+-w /var/run/utmp -p wa -k logins
+
+# Monitorear hora del sistema
+-a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
+-a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+-a always,exit -F arch=b64 -S clock_settime -k time-change
+
+# Monitorear cambios en red
+-a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
+-w /etc/hostname -p wa -k system-locale
+-w /etc/hosts -p wa -k system-locale
+-w /etc/sysconfig/network -p wa -k system-locale
+
+# Monitorear módulos del kernel
+-w /sbin/insmod -p x -k modules
+-w /sbin/rmmod -p x -k modules
+-w /sbin/modprobe -p x -k modules
+-a always,exit -F arch=b64 -S init_module -S delete_module -k modules
+
+# Monitorear montajes
+-a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
+
+# Monitorear borrado de archivos
+-a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+
+# Monitorear uso de sudo
+-a always,exit -F arch=b64 -S execve -C uid!=euid -F euid=0 -k privilege_escalation
+
+# Monitorear acceso a archivos sensibles
+-w /etc/passwd -p r -k passwd_read
+-w /etc/shadow -p r -k shadow_read
+
+# Hacer reglas inmutables (requiere reboot para cambiar)
+-e 2
+EOF
+
+            augenrules --load 2>/dev/null || service auditd restart
+            log_info "Auditoría paranoica configurada"
+            log_warn "Reglas inmutables: requiere reboot para modificar"
+        fi
+    fi
+
+    # ── Sección 16: Fail2ban agresivo ──
+    log_section "16. FAIL2BAN AGRESIVO"
+
+    if command -v fail2ban-client &>/dev/null; then
+        if ask "¿Configurar fail2ban en modo agresivo?"; then
+            cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+bantime = 24h
+findtime = 10m
+maxretry = 3
+ignoreip = 127.0.0.1/8 ::1
+banaction = firewallcmd-rich-rules[actiontype=<multiport>]
+banaction_allports = firewallcmd-rich-rules[actiontype=<allports>]
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 48h
+
+[sshd-ddos]
+enabled = true
+port = ssh
+filter = sshd-ddos
+logpath = /var/log/secure
+maxretry = 2
+bantime = 72h
+EOF
+
+            systemctl restart fail2ban
+            log_info "fail2ban configurado en modo agresivo"
+            log_info "  - Ban general: 24h, SSH: 48h, DDoS: 72h"
+        fi
+    else
+        log_warn "fail2ban no instalado. Instálalo primero."
+    fi
+
+    log_info "Módulo 6 (paranoico seguro) completado"
+}
+
+# ============================================================
+# MÓDULO 7: contramedidas-mesh.sh (SEGURO - delegado)
+# ============================================================
+mod_07_mesh() {
+    log_section "MÓDULO 7: Contramedidas mesh"
+    local script="$SCRIPT_DIR/contramedidas-mesh.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 7 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 8: contramedidas-avanzadas.sh (SEGURO - delegado)
+# ============================================================
+mod_08_avanzadas() {
+    log_section "MÓDULO 8: Contramedidas avanzadas"
+    local script="$SCRIPT_DIR/contramedidas-avanzadas.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 8 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 9: proteger-privacidad.sh (SEGURO - delegado)
+# ============================================================
+mod_09_privacidad() {
+    log_section "MÓDULO 9: Proteger privacidad"
+    local script="$SCRIPT_DIR/proteger-privacidad.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 9 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 10: aplicar-banner-total.sh (SEGURO - delegado)
+# ============================================================
+mod_10_banners() {
+    log_section "MÓDULO 10: Aplicar banners"
+    local script="$SCRIPT_DIR/aplicar-banner-total.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 10 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 11: hardening-kernel-boot.sh (SEGURO - delegado)
+# ============================================================
+mod_11_kernel_boot() {
+    log_section "MÓDULO 11: Kernel boot y Secure Boot"
+    local script="$SCRIPT_DIR/hardening-kernel-boot.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 11 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 12: hardening-servicios-systemd.sh (SEGURO - delegado)
+# ============================================================
+mod_12_servicios_systemd() {
+    log_section "MÓDULO 12: Sandboxing de servicios systemd"
+    local script="$SCRIPT_DIR/hardening-servicios-systemd.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 12 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 13: hardening-cuentas.sh (SEGURO - delegado)
+# ============================================================
+mod_13_cuentas() {
+    log_section "MÓDULO 13: Seguridad de cuentas"
+    local script="$SCRIPT_DIR/hardening-cuentas.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 13 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 14: proteger-red-avanzado.sh (SEGURO - delegado)
+# ============================================================
+mod_14_red_avanzada() {
+    log_section "MÓDULO 14: Red avanzada (IDS/DoT/VPN)"
+    local script="$SCRIPT_DIR/proteger-red-avanzado.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 14 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 15: automatizar-seguridad.sh (SEGURO - delegado)
+# ============================================================
+mod_15_automatizacion() {
+    log_section "MÓDULO 15: Automatización de seguridad"
+    local script="$SCRIPT_DIR/automatizar-seguridad.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 15 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 16: sandbox-aplicaciones.sh (SEGURO - delegado)
+# ============================================================
+mod_16_sandbox() {
+    log_section "MÓDULO 16: Sandboxing de aplicaciones"
+    local script="$SCRIPT_DIR/sandbox-aplicaciones.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 16 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 17: auditoria-externa.sh (SEGURO - delegado)
+# ============================================================
+mod_17_auditoria_externa() {
+    log_section "MÓDULO 17: Auditoría externa (reconocimiento TA0043)"
+    local script="$SCRIPT_DIR/auditoria-externa.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 17 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 18: inteligencia-amenazas.sh (SEGURO - delegado)
+# ============================================================
+mod_18_threat_intel() {
+    log_section "MÓDULO 18: Inteligencia de amenazas (IoC feeds M1019)"
+    local script="$SCRIPT_DIR/inteligencia-amenazas.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 18 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 19: mitigar-acceso-inicial.sh (SEGURO - delegado)
+# ============================================================
+mod_19_acceso_inicial() {
+    log_section "MÓDULO 19: Mitigación acceso inicial (TA0001)"
+    local script="$SCRIPT_DIR/mitigar-acceso-inicial.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 19 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 20: mitigar-ejecucion.sh (SEGURO - delegado)
+# ============================================================
+mod_20_ejecucion() {
+    log_section "MÓDULO 20: Mitigación ejecución (TA0002)"
+    local script="$SCRIPT_DIR/mitigar-ejecucion.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 20 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 21: mitigar-persistencia.sh (SEGURO - delegado)
+# ============================================================
+mod_21_persistencia() {
+    log_section "MÓDULO 21: Mitigación persistencia (TA0003)"
+    local script="$SCRIPT_DIR/mitigar-persistencia.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 21 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 22: mitigar-escalada.sh (SEGURO - delegado)
+# ============================================================
+mod_22_escalada() {
+    log_section "MÓDULO 22: Mitigación escalada de privilegios (TA0004)"
+    local script="$SCRIPT_DIR/mitigar-escalada.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 22 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 23: mitigar-impacto.sh (SEGURO - delegado)
+# ============================================================
+mod_23_impacto() {
+    log_section "MÓDULO 23: Mitigación de impacto (TA0040)"
+    local script="$SCRIPT_DIR/mitigar-impacto.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 23 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 24: mitigar-evasion.sh (SEGURO - delegado)
+# ============================================================
+mod_24_evasion() {
+    log_section "MÓDULO 24: Mitigación de evasión de defensas (TA0005)"
+    local script="$SCRIPT_DIR/mitigar-evasion.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 24 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 25: mitigar-credenciales.sh (SEGURO - delegado)
+# ============================================================
+mod_25_credenciales() {
+    log_section "MÓDULO 25: Mitigación de acceso a credenciales (TA0006)"
+    local script="$SCRIPT_DIR/mitigar-credenciales.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 25 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 26: mitigar-descubrimiento.sh (SEGURO - delegado)
+# ============================================================
+mod_26_descubrimiento() {
+    log_section "MÓDULO 26: Mitigación de descubrimiento (TA0007)"
+    local script="$SCRIPT_DIR/mitigar-descubrimiento.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 26 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 27: mitigar-movimiento-lateral.sh (SEGURO - delegado)
+# ============================================================
+mod_27_movimiento_lateral() {
+    log_section "MÓDULO 27: Mitigación de movimiento lateral (TA0008)"
+    local script="$SCRIPT_DIR/mitigar-movimiento-lateral.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 27 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 28: mitigar-recoleccion.sh (SEGURO - delegado)
+# ============================================================
+mod_28_recoleccion() {
+    log_section "MÓDULO 28: Mitigación de recolección (TA0009)"
+    local script="$SCRIPT_DIR/mitigar-recoleccion.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 28 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 29: mitigar-exfiltracion.sh (SEGURO - delegado)
+# ============================================================
+mod_29_exfiltracion() {
+    log_section "MÓDULO 29: Mitigación de exfiltración (TA0010)"
+    local script="$SCRIPT_DIR/mitigar-exfiltracion.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 29 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# MÓDULO 30: mitigar-comando-control.sh (SEGURO - delegado)
+# ============================================================
+mod_30_comando_control() {
+    log_section "MÓDULO 30: Mitigación de comando y control (TA0011)"
+    local script="$SCRIPT_DIR/mitigar-comando-control.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 30 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+mod_31_respuesta_incidentes() {
+    log_section "MÓDULO 31: Respuesta a incidentes"
+    local script="$SCRIPT_DIR/respuesta-incidentes.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 31 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+mod_32_monitorizar() {
+    log_section "MÓDULO 32: Monitorización continua"
+    local script="$SCRIPT_DIR/monitorizar-continuo.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 32 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+mod_33_reportes() {
+    log_section "MÓDULO 33: Reportes de seguridad"
+    local script="$SCRIPT_DIR/reportar-seguridad.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 33 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+mod_34_cazar_amenazas() {
+    log_section "MÓDULO 34: Caza de amenazas"
+    local script="$SCRIPT_DIR/cazar-amenazas.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 34 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+mod_35_automatizar_respuesta() {
+    log_section "MÓDULO 35: Automatización de respuesta"
+    local script="$SCRIPT_DIR/automatizar-respuesta.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 35 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+mod_36_validar_controles() {
+    log_section "MÓDULO 36: Validación de controles"
+    local script="$SCRIPT_DIR/validar-controles.sh"
+    if [[ -f "$script" ]]; then
+        bash "$script"
+        log_info "Módulo 36 completado"
+    else
+        log_error "No encontrado: $script"
+        return 1
+    fi
+}
+
+# ============================================================
+# REGISTRO DE MÓDULOS (metadata para sub-menús)
+# ============================================================
+declare -a MOD_NAMES=() MOD_DESCS=() MOD_FUNCS=() MOD_FILES=() MOD_TAGS=()
+
+MOD_NAMES[1]="Hardening openSUSE base";       MOD_DESCS[1]="Kernel, SSH, firewall, MFA, ClamAV";    MOD_FUNCS[1]="mod_01_opensuse";           MOD_FILES[1]="hardening-opensuse.sh";           MOD_TAGS[1]=""
+MOD_NAMES[2]="Hardening seguro";               MOD_DESCS[2]="Archivos, procesos, AIDE, SSH keys";    MOD_FUNCS[2]="mod_02_seguro";             MOD_FILES[2]="hardening-seguro.sh";             MOD_TAGS[2]=""
+MOD_NAMES[3]="Hardening final";                MOD_DESCS[3]="Auditd, sysctl, firewall, updates";     MOD_FUNCS[3]="mod_03_final";              MOD_FILES[3]="hardening-final.sh";              MOD_TAGS[3]=""
+MOD_NAMES[4]="Hardening externo";              MOD_DESCS[4]="Banners, honeypot, DNS, VPN";           MOD_FUNCS[4]="mod_04_externo";            MOD_FILES[4]="hardening-externo.sh";            MOD_TAGS[4]=""
+MOD_NAMES[5]="Hardening extremo";              MOD_DESCS[5]="USB, kernel, red (sin lockout)";        MOD_FUNCS[5]="mod_05_extremo_seguro";     MOD_FILES[5]="";                                MOD_TAGS[5]="SEGURO"
+MOD_NAMES[6]="Hardening paranoico";            MOD_DESCS[6]="Core dumps, GRUB, audit (sin PAM)";     MOD_FUNCS[6]="mod_06_paranoico_seguro";   MOD_FILES[6]="";                                MOD_TAGS[6]="SEGURO"
+MOD_NAMES[7]="Contramedidas mesh";             MOD_DESCS[7]="WiFi, Bluetooth, IoT mesh";             MOD_FUNCS[7]="mod_07_mesh";               MOD_FILES[7]="contramedidas-mesh.sh";           MOD_TAGS[7]=""
+MOD_NAMES[8]="Contramedidas avanzadas";        MOD_DESCS[8]="TEMPEST, acústico, side-channel";       MOD_FUNCS[8]="mod_08_avanzadas";          MOD_FILES[8]="contramedidas-avanzadas.sh";      MOD_TAGS[8]=""
+MOD_NAMES[9]="Proteger privacidad";            MOD_DESCS[9]="VNC, cámara, DNS leaks, Tor";           MOD_FUNCS[9]="mod_09_privacidad";         MOD_FILES[9]="proteger-privacidad.sh";          MOD_TAGS[9]=""
+MOD_NAMES[10]="Aplicar banners";               MOD_DESCS[10]="MOTD, issue, SSH, GDM, Firefox";       MOD_FUNCS[10]="mod_10_banners";           MOD_FILES[10]="aplicar-banner-total.sh";        MOD_TAGS[10]=""
+MOD_NAMES[11]="Kernel boot y Secure Boot";     MOD_DESCS[11]="GRUB cmdline, firmas, lockdown";       MOD_FUNCS[11]="mod_11_kernel_boot";       MOD_FILES[11]="hardening-kernel-boot.sh";       MOD_TAGS[11]=""
+MOD_NAMES[12]="Sandboxing de servicios";       MOD_DESCS[12]="Drop-ins systemd para servicios";      MOD_FUNCS[12]="mod_12_servicios_systemd"; MOD_FILES[12]="hardening-servicios-systemd.sh"; MOD_TAGS[12]=""
+MOD_NAMES[13]="Seguridad de cuentas";          MOD_DESCS[13]="Contraseñas, faillock, UID=0";         MOD_FUNCS[13]="mod_13_cuentas";           MOD_FILES[13]="hardening-cuentas.sh";           MOD_TAGS[13]=""
+MOD_NAMES[14]="Red avanzada";                  MOD_DESCS[14]="Suricata IDS, DoT, VPN, ARP";          MOD_FUNCS[14]="mod_14_red_avanzada";      MOD_FILES[14]="proteger-red-avanzado.sh";       MOD_TAGS[14]=""
+MOD_NAMES[15]="Automatización";                MOD_DESCS[15]="AIDE, rkhunter, lynis, digest";        MOD_FUNCS[15]="mod_15_automatizacion";    MOD_FILES[15]="automatizar-seguridad.sh";       MOD_TAGS[15]=""
+MOD_NAMES[16]="Sandboxing de aplicaciones";    MOD_DESCS[16]="Firejail, bubblewrap, perfiles";       MOD_FUNCS[16]="mod_16_sandbox";           MOD_FILES[16]="sandbox-aplicaciones.sh";        MOD_TAGS[16]=""
+MOD_NAMES[17]="Auditoría externa";             MOD_DESCS[17]="TA0043 reconocimiento, Shodan";        MOD_FUNCS[17]="mod_17_auditoria_externa"; MOD_FILES[17]="auditoria-externa.sh";           MOD_TAGS[17]=""
+MOD_NAMES[18]="Inteligencia de amenazas";      MOD_DESCS[18]="M1019 IoC feeds, ipset, Suricata";     MOD_FUNCS[18]="mod_18_threat_intel";      MOD_FILES[18]="inteligencia-amenazas.sh";       MOD_TAGS[18]=""
+MOD_NAMES[19]="Acceso inicial";                MOD_DESCS[19]="TA0001 SSH, exploits, phishing";       MOD_FUNCS[19]="mod_19_acceso_inicial";    MOD_FILES[19]="mitigar-acceso-inicial.sh";      MOD_TAGS[19]=""
+MOD_NAMES[20]="Ejecución";                     MOD_DESCS[20]="TA0002 AppArmor, noexec, intérpretes"; MOD_FUNCS[20]="mod_20_ejecucion";         MOD_FILES[20]="mitigar-ejecucion.sh";           MOD_TAGS[20]=""
+MOD_NAMES[21]="Persistencia";                  MOD_DESCS[21]="TA0003 cron, systemd, auth, PATH";     MOD_FUNCS[21]="mod_21_persistencia";      MOD_FILES[21]="mitigar-persistencia.sh";        MOD_TAGS[21]=""
+MOD_NAMES[22]="Escalada de privilegios";       MOD_DESCS[22]="TA0004 SUID, sudo, ptrace, kernel";    MOD_FUNCS[22]="mod_22_escalada";          MOD_FILES[22]="mitigar-escalada.sh";            MOD_TAGS[22]=""
+MOD_NAMES[23]="Impacto";                       MOD_DESCS[23]="TA0040 ransomware, backups, recovery";  MOD_FUNCS[23]="mod_23_impacto";           MOD_FILES[23]="mitigar-impacto.sh";             MOD_TAGS[23]=""
+MOD_NAMES[24]="Evasión de defensas";           MOD_DESCS[24]="TA0005 logs, rootkits, LOLBins";        MOD_FUNCS[24]="mod_24_evasion";           MOD_FILES[24]="mitigar-evasion.sh";             MOD_TAGS[24]=""
+MOD_NAMES[25]="Acceso a credenciales";         MOD_DESCS[25]="TA0006 dumping, brute force, MITM";     MOD_FUNCS[25]="mod_25_credenciales";      MOD_FILES[25]="mitigar-credenciales.sh";        MOD_TAGS[25]=""
+MOD_NAMES[26]="Descubrimiento";                MOD_DESCS[26]="TA0007 portscan, procesos, red";        MOD_FUNCS[26]="mod_26_descubrimiento";    MOD_FILES[26]="mitigar-descubrimiento.sh";      MOD_TAGS[26]=""
+MOD_NAMES[27]="Movimiento lateral";            MOD_DESCS[27]="TA0008 SSH, SMB, segmentación";         MOD_FUNCS[27]="mod_27_movimiento_lateral"; MOD_FILES[27]="mitigar-movimiento-lateral.sh"; MOD_TAGS[27]=""
+MOD_NAMES[28]="Recolección";                   MOD_DESCS[28]="TA0009 datos, USB, staging, captura";   MOD_FUNCS[28]="mod_28_recoleccion";       MOD_FILES[28]="mitigar-recoleccion.sh";         MOD_TAGS[28]=""
+MOD_NAMES[29]="Exfiltración";                  MOD_DESCS[29]="TA0010 DNS tunnel, cloud, tráfico";     MOD_FUNCS[29]="mod_29_exfiltracion";      MOD_FILES[29]="mitigar-exfiltracion.sh";        MOD_TAGS[29]=""
+MOD_NAMES[30]="Comando y control";             MOD_DESCS[30]="TA0011 C2, beaconing, proxy, DGA";      MOD_FUNCS[30]="mod_30_comando_control";   MOD_FILES[30]="mitigar-comando-control.sh";     MOD_TAGS[30]=""
+MOD_NAMES[31]="Respuesta a incidentes";        MOD_DESCS[31]="IR, forense, playbooks, contención";    MOD_FUNCS[31]="mod_31_respuesta_incidentes"; MOD_FILES[31]="respuesta-incidentes.sh";      MOD_TAGS[31]=""
+MOD_NAMES[32]="Monitorización continua";       MOD_DESCS[32]="Dashboard, correlación, baseline";      MOD_FUNCS[32]="mod_32_monitorizar";       MOD_FILES[32]="monitorizar-continuo.sh";        MOD_TAGS[32]=""
+MOD_NAMES[33]="Reportes de seguridad";         MOD_DESCS[33]="MITRE report, Navigator, compliance";   MOD_FUNCS[33]="mod_33_reportes";          MOD_FILES[33]="reportar-seguridad.sh";          MOD_TAGS[33]=""
+MOD_NAMES[34]="Caza de amenazas";              MOD_DESCS[34]="UEBA, hunting, T1098, anomalías red";   MOD_FUNCS[34]="mod_34_cazar_amenazas";    MOD_FILES[34]="cazar-amenazas.sh";              MOD_TAGS[34]=""
+MOD_NAMES[35]="Automatización de respuesta";   MOD_DESCS[35]="SOAR, auto-bloqueo, notificación";      MOD_FUNCS[35]="mod_35_automatizar_respuesta"; MOD_FILES[35]="automatizar-respuesta.sh";   MOD_TAGS[35]=""
+MOD_NAMES[36]="Validación de controles";       MOD_DESCS[36]="Purple team, simulación, scoring";      MOD_FUNCS[36]="mod_36_validar_controles"; MOD_FILES[36]="validar-controles.sh";           MOD_TAGS[36]=""
+
+# ============================================================
+# APLICAR TODO SEGURO
+# ============================================================
+aplicar_todo_seguro() {
+    echo ""
+    echo -e "  ${BG_GREEN} APLICAR TODO SEGURO ${NC}"
+    echo ""
+    echo -e "  Se ejecutarán ${BOLD}36 módulos${NC} de hardening secuencialmente."
+    echo -e "  Los scripts peligrosos se ejecutan en versión ${YELLOW}SEGURA${NC}."
+    echo -e "  Incluye mitigaciones MITRE: ${CYAN}TA0043, TA0001-TA0011, TA0040${NC}."
+    echo ""
+    echo -e "  ${DIM}Categorías:${NC}"
+    echo -e "    ${BLUE}1-10${NC}  ${DIM}Hardening Base${NC}"
+    echo -e "    ${MAGENTA}11-18${NC} ${DIM}Securización Proactiva${NC}"
+    echo -e "    ${RED}19-30${NC} ${DIM}Mitigaciones MITRE ATT&CK${NC}"
+    echo -e "    ${GREEN}31-36${NC} ${DIM}Operaciones de Seguridad${NC}"
+
+    if ! ask "¿Continuar con la aplicación de TODOS los módulos?"; then
+        log_info "Operación cancelada por el usuario"
+        return 0
+    fi
+
+    local failed=0
+    local succeeded=0
+    local total=36
+
+    for num in $(seq 1 36); do
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        _progress_bar "$num" "$total"
+        echo -e "  ${CYAN}▶${NC} ${BOLD}Módulo ${num}/${total}:${NC} ${MOD_NAMES[$num]}"
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+
+        if ${MOD_FUNCS[$num]}; then
+            MOD_RUN[$num]=1
+            echo ""
+            echo -e "  ${GREEN}✓${NC} ${BOLD}${MOD_NAMES[$num]}${NC} completado"
+            ((succeeded++))
+        else
+            MOD_RUN[$num]=1
+            echo ""
+            echo -e "  ${RED}✗${NC} ${BOLD}${MOD_NAMES[$num]}${NC} falló"
+            ((failed++))
+        fi
+    done
+
+    echo ""
+    echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    _progress_bar "$total" "$total"
+    echo ""
+
+    if [[ $failed -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} ${BOLD}Todos los módulos completados exitosamente${NC} ($succeeded/$total)"
+    else
+        echo -e "  ${YELLOW}⚠${NC} ${GREEN}$succeeded OK${NC} · ${RED}$failed fallidos${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${CYAN}◆${NC} Ejecutando verificación proactiva..."
+    echo ""
+    verificacion_proactiva
+}
+
+# ============================================================
+# VERIFICACIÓN PROACTIVA
+# ============================================================
+verificacion_proactiva() {
+    echo ""
+    echo -e "  ${BG_CYAN} VERIFICACIÓN PROACTIVA DE SEGURIDAD ${NC}"
+    echo -e "  ${DIM}Auditoría completa del sistema · 43 categorías${NC}"
+    echo ""
+
+    local warnings=0
+    local checks_ok=0
+
+    # ── 1. Kernel ──
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[1/43] PARÁMETROS DE KERNEL${NC}"
+    local kernel_params=(
+        "kernel.randomize_va_space:2:ASLR"
+        "kernel.kptr_restrict:2:Ocultar punteros kernel"
+        "kernel.dmesg_restrict:1:Restringir dmesg"
+        "kernel.yama.ptrace_scope:2:Restringir ptrace"
+        "net.ipv4.tcp_syncookies:1:SYN cookies"
+        "net.ipv4.conf.all.rp_filter:1:Reverse path filter"
+        "net.ipv4.conf.all.accept_redirects:0:Rechazar redirects"
+        "net.ipv4.conf.all.send_redirects:0:No enviar redirects"
+        "net.ipv4.conf.all.accept_source_route:0:Rechazar source route"
+        "net.ipv4.icmp_echo_ignore_broadcasts:1:Ignorar ICMP broadcast"
+        "fs.suid_dumpable:0:Sin core dumps SUID"
+    )
+
+    for param_entry in "${kernel_params[@]}"; do
+        IFS=':' read -r param expected desc <<< "$param_entry"
+        local actual
+        actual=$(sysctl -n "$param" 2>/dev/null || echo "N/A")
+        if [[ "$actual" == "$expected" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $desc ($param = $actual)"
+            ((checks_ok++))
+        elif [[ "$actual" =~ ^[0-9]+$ ]] && [[ "$actual" -ge "$expected" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $desc ($param = $actual, >= $expected)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  $desc ($param = $actual, esperado: $expected)"
+            ((warnings++))
+        fi
+    done
+
+    # ── 2. Servicios activos ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[2/43] SERVICIOS DE SEGURIDAD${NC}"
+    local sec_services=("firewalld" "fail2ban" "auditd")
+    for svc in "${sec_services[@]}"; do
+        if systemctl is-active "$svc" &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  $svc activo"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  $svc NO activo"
+            ((warnings++))
+        fi
+    done
+
+    # USBGuard (opcional)
+    if command -v usbguard &>/dev/null; then
+        if systemctl is-active usbguard &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  usbguard activo"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  usbguard instalado pero NO activo"
+            ((warnings++))
+        fi
+    fi
+
+    # ── 3. Servicios deshabilitados ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[3/43] SERVICIOS INNECESARIOS${NC}"
+    local bad_services=("cups" "avahi-daemon" "bluetooth" "ModemManager")
+    for svc in "${bad_services[@]}"; do
+        if systemctl is-active "$svc" &>/dev/null; then
+            echo -e "  ${YELLOW}!!${NC}  $svc aún activo"
+            ((warnings++))
+        else
+            echo -e "  ${GREEN}OK${NC}  $svc inactivo"
+            ((checks_ok++))
+        fi
+    done
+
+    # ── 4. Firewall ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[4/43] FIREWALL${NC}"
+    if fw_is_active; then
+        local default_zone
+        default_zone=$(fw_get_default_zone 2>/dev/null || echo "desconocida")
+        echo -e "  ${GREEN}OK${NC}  Firewall activo ($FW_BACKEND, zona: $default_zone)"
+        ((checks_ok++))
+
+        local log_denied
+        log_denied=$(fw_get_log_denied 2>/dev/null || echo "off")
+        if [[ "$log_denied" != "off" ]]; then
+            echo -e "  ${GREEN}OK${NC}  Log de paquetes rechazados: $log_denied"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Log de paquetes rechazados: deshabilitado"
+            ((warnings++))
+        fi
+
+        echo "  Reglas activas:"
+        fw_list_all 2>/dev/null | sed 's/^/    /' || true
+    else
+        echo -e "  ${RED}XX${NC}  Firewall NO activo"
+        ((warnings++))
+    fi
+
+    # ── 5. Red ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[5/43] PUERTOS Y CONEXIONES DE RED${NC}"
+    echo "  Puertos escuchando:"
+    ss -tlnp 2>/dev/null | sed 's/^/    /' || true
+    echo "  Conexiones activas (no localhost):"
+    ss -tnp state established 2>/dev/null | grep -v "127.0.0.1" | head -20 | sed 's/^/    /' || echo "    (ninguna)"
+
+    # ── 6. Permisos de archivos ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[6/43] PERMISOS DE ARCHIVOS CRÍTICOS${NC}"
+    local file_checks=(
+        "/etc/passwd:644"
+        "/etc/shadow:600"
+        "/etc/sudoers:440"
+        "/etc/ssh/sshd_config:600"
+    )
+
+    for fc in "${file_checks[@]}"; do
+        IFS=':' read -r fpath expected_perm <<< "$fc"
+        if [[ -f "$fpath" ]]; then
+            local actual_perm
+            actual_perm=$(stat -c "%a" "$fpath" 2>/dev/null || echo "???")
+            if [[ "$actual_perm" == "$expected_perm" ]]; then
+                echo -e "  ${GREEN}OK${NC}  $fpath ($actual_perm)"
+                ((checks_ok++))
+            else
+                echo -e "  ${YELLOW}!!${NC}  $fpath ($actual_perm, esperado: $expected_perm)"
+                ((warnings++))
+            fi
+        fi
+    done
+
+    if [[ -f "$GRUB_CFG" ]]; then
+        local grub_perm
+        grub_perm=$(stat -c "%a" "$GRUB_CFG" 2>/dev/null || echo "???")
+        if [[ "$grub_perm" == "600" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $GRUB_CFG ($grub_perm)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  $GRUB_CFG ($grub_perm, esperado: 600)"
+            ((warnings++))
+        fi
+    fi
+
+    # ── 7. PAM intacto ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[7/43] PAM INTACTO${NC}"
+    if [[ -f /etc/pam.d/su ]]; then
+        local current_hash
+        current_hash=$(sha256sum /etc/pam.d/su 2>/dev/null | awk '{print $1}')
+        if [[ -n "$PAM_SU_HASH" && "$current_hash" == "$PAM_SU_HASH" ]]; then
+            echo -e "  ${GREEN}OK${NC}  /etc/pam.d/su NO fue modificado (hash intacto)"
+            ((checks_ok++))
+        elif [[ -z "$PAM_SU_HASH" ]]; then
+            echo -e "  ${GREEN}OK${NC}  /etc/pam.d/su existe (sin hash de referencia previo)"
+            ((checks_ok++))
+        else
+            echo -e "  ${RED}XX${NC}  /etc/pam.d/su FUE MODIFICADO (hash cambió)"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${GREEN}OK${NC}  /etc/pam.d/su no existe (no fue creado)"
+        ((checks_ok++))
+    fi
+
+    # ── 8. Sin límites de recursos (TMOUT) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[8/43] SIN LÍMITES DE RECURSOS${NC}"
+    if [[ -f /etc/profile.d/timeout.sh ]]; then
+        if grep -q "readonly TMOUT" /etc/profile.d/timeout.sh 2>/dev/null; then
+            echo -e "  ${RED}XX${NC}  TMOUT readonly detectado en /etc/profile.d/timeout.sh"
+            ((warnings++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  /etc/profile.d/timeout.sh existe (sin readonly)"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${GREEN}OK${NC}  No hay TMOUT forzado en /etc/profile.d/"
+        ((checks_ok++))
+    fi
+
+    # ── 9. Acceso SSH ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[9/43] ACCESO SSH${NC}"
+    if systemctl is-masked sshd &>/dev/null; then
+        echo -e "  ${RED}XX${NC}  sshd está ENMASCARADO (no se puede iniciar)"
+        ((warnings++))
+    elif systemctl is-active sshd &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  sshd activo y accesible"
+        ((checks_ok++))
+    elif systemctl is-enabled sshd &>/dev/null; then
+        echo -e "  ${YELLOW}!!${NC}  sshd habilitado pero no activo"
+        ((warnings++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  sshd no activo ni habilitado"
+        ((warnings++))
+    fi
+
+    # ── 10. Acceso sudo ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[10/43] ACCESO SUDO${NC}"
+    local current_user="${SUDO_USER:-$USER}"
+    if id -nG "$current_user" 2>/dev/null | grep -qw "wheel"; then
+        echo -e "  ${GREEN}OK${NC}  $current_user pertenece al grupo wheel"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  $current_user NO pertenece al grupo wheel"
+        ((warnings++))
+    fi
+
+    if [[ -f /etc/sudoers ]]; then
+        if visudo -c &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  /etc/sudoers sintácticamente correcto"
+            ((checks_ok++))
+        else
+            echo -e "  ${RED}XX${NC}  /etc/sudoers tiene errores de sintaxis"
+            ((warnings++))
+        fi
+    fi
+
+    # ── 11. Sin inmutabilidad ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[11/43] SIN INMUTABILIDAD EN ARCHIVOS CRÍTICOS${NC}"
+    local immutable_files=("/etc/passwd" "/etc/shadow" "/etc/sudoers")
+    for f in "${immutable_files[@]}"; do
+        if [[ -f "$f" ]]; then
+            local attrs
+            attrs=$(lsattr "$f" 2>/dev/null | awk '{print $1}')
+            if [[ "$attrs" == *"i"* ]]; then
+                echo -e "  ${RED}XX${NC}  $f tiene flag INMUTABLE (chattr +i)"
+                ((warnings++))
+            else
+                echo -e "  ${GREEN}OK${NC}  $f modificable (sin chattr +i)"
+                ((checks_ok++))
+            fi
+        fi
+    done
+
+    # ── 12. Módulos bloqueados ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[12/43] MÓDULOS BLOQUEADOS${NC}"
+    if ls /etc/modprobe.d/*.conf &>/dev/null; then
+        local blocked_count=0
+        for conf in /etc/modprobe.d/*.conf; do
+            local mods
+            mods=$(grep -c "install .* /bin/false" "$conf" 2>/dev/null || echo 0)
+            if [[ "$mods" -gt 0 ]]; then
+                echo -e "  ${GREEN}OK${NC}  $conf: $mods módulos bloqueados"
+                blocked_count=$((blocked_count + mods))
+            fi
+        done
+        if [[ $blocked_count -eq 0 ]]; then
+            echo -e "  ${YELLOW}!!${NC}  No hay módulos bloqueados en modprobe.d"
+            ((warnings++))
+        else
+            ((checks_ok++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  No hay archivos de configuración en /etc/modprobe.d/"
+        ((warnings++))
+    fi
+
+    # ── 13. Herramientas instaladas ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[13/43] HERRAMIENTAS DE SEGURIDAD${NC}"
+    local tools=("aide" "rkhunter" "lynis" "fail2ban-client")
+    local tool_names=("AIDE" "rkhunter" "lynis" "fail2ban")
+    for i in "${!tools[@]}"; do
+        if command -v "${tools[$i]}" &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  ${tool_names[$i]} instalado"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  ${tool_names[$i]} NO instalado"
+            ((warnings++))
+        fi
+    done
+
+    # ── 14. Scripts de monitoreo ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[14/43] SCRIPTS DE MONITOREO${NC}"
+    local monitor_scripts
+    monitor_scripts=$(ls /usr/local/bin/*.sh 2>/dev/null || true)
+    if [[ -n "$monitor_scripts" ]]; then
+        while IFS= read -r script; do
+            echo -e "  ${GREEN}OK${NC}  $script"
+            ((checks_ok++))
+        done <<< "$monitor_scripts"
+    else
+        echo -e "  ${YELLOW}!!${NC}  No hay scripts en /usr/local/bin/"
+        ((warnings++))
+    fi
+
+    # ── 15. Parámetros de arranque ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[15/43] PARÁMETROS DE ARRANQUE${NC}"
+    if [[ -f /proc/cmdline ]]; then
+        local cmdline
+        cmdline=$(cat /proc/cmdline 2>/dev/null)
+        local boot_params=("init_on_alloc" "lockdown")
+        for param in "${boot_params[@]}"; do
+            if echo "$cmdline" | grep -q "$param"; then
+                echo -e "  ${GREEN}OK${NC}  $param presente en cmdline"
+                ((checks_ok++))
+            else
+                echo -e "  ${YELLOW}!!${NC}  $param NO presente en cmdline"
+                ((warnings++))
+            fi
+        done
+    fi
+
+    # Secure Boot
+    if command -v mokutil &>/dev/null; then
+        if mokutil --sb-state 2>&1 | grep -qi "enabled"; then
+            echo -e "  ${GREEN}OK${NC}  Secure Boot habilitado"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Secure Boot NO habilitado"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  mokutil no disponible (no se puede verificar Secure Boot)"
+        ((warnings++))
+    fi
+
+    # ── 16. Sandboxing systemd ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[16/43] SANDBOXING SYSTEMD${NC}"
+    local dropin_services=("sshd" "fail2ban" "firewalld")
+    for svc in "${dropin_services[@]}"; do
+        local dropin="/etc/systemd/system/${svc}.service.d/hardening.conf"
+        if [[ -f "$dropin" ]]; then
+            echo -e "  ${GREEN}OK${NC}  Drop-in de $svc presente"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Drop-in de $svc NO encontrado"
+            ((warnings++))
+        fi
+    done
+
+    # ── 17. Cuentas ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[17/43] SEGURIDAD DE CUENTAS${NC}"
+    # PASS_MAX_DAYS
+    if [[ -f /etc/login.defs ]]; then
+        local max_days
+        max_days=$(grep "^PASS_MAX_DAYS" /etc/login.defs 2>/dev/null | awk '{print $2}')
+        if [[ -n "$max_days" ]] && [[ "$max_days" -le 90 ]]; then
+            echo -e "  ${GREEN}OK${NC}  PASS_MAX_DAYS = $max_days"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  PASS_MAX_DAYS = ${max_days:-no configurado} (recomendado: <= 90)"
+            ((warnings++))
+        fi
+    fi
+
+    # Cuentas sin contraseña
+    local empty_pass=0
+    while IFS=: read -r username pass _; do
+        if [[ "$pass" == "" ]]; then
+            ((empty_pass++))
+        fi
+    done < /etc/shadow 2>/dev/null
+    if [[ $empty_pass -eq 0 ]]; then
+        echo -e "  ${GREEN}OK${NC}  Sin cuentas sin contraseña"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  $empty_pass cuenta(s) sin contraseña"
+        ((warnings++))
+    fi
+
+    # UID=0 extra
+    local uid0_count=0
+    while IFS=: read -r username _ uid _ _ _ _; do
+        if [[ "$uid" -eq 0 ]] && [[ "$username" != "root" ]]; then
+            ((uid0_count++))
+        fi
+    done < /etc/passwd
+    if [[ $uid0_count -eq 0 ]]; then
+        echo -e "  ${GREEN}OK${NC}  Solo root tiene UID=0"
+        ((checks_ok++))
+    else
+        echo -e "  ${RED}XX${NC}  $uid0_count cuenta(s) extra con UID=0"
+        ((warnings++))
+    fi
+
+    # ── 18. Red avanzada ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[18/43] RED AVANZADA${NC}"
+    # Suricata
+    if systemctl is-active suricata &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  Suricata IDS activo"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Suricata IDS NO activo"
+        ((warnings++))
+    fi
+
+    # DNS over TLS
+    if [[ -f /etc/systemd/resolved.conf.d/dns-over-tls.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  DNS over TLS configurado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  DNS over TLS NO configurado"
+        ((warnings++))
+    fi
+
+    # WireGuard
+    if [[ -f /etc/wireguard/wg0.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  WireGuard configurado (plantilla)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  WireGuard NO configurado"
+        ((warnings++))
+    fi
+
+    # arpwatch
+    if systemctl is-active arpwatch &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  arpwatch activo"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  arpwatch NO activo"
+        ((warnings++))
+    fi
+
+    # ── 19. Automatización ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[19/43] AUTOMATIZACIÓN DE SEGURIDAD${NC}"
+    local cron_jobs=(
+        "/etc/cron.daily/aide-check:AIDE diario"
+        "/etc/cron.daily/zypper-security-update:Parches automáticos"
+        "/etc/cron.daily/rkhunter-check:rkhunter diario"
+        "/etc/cron.weekly/lynis-audit:lynis semanal"
+        "/etc/cron.daily/seguridad-resumen:Digest diario"
+    )
+    for cj in "${cron_jobs[@]}"; do
+        IFS=':' read -r cpath cdesc <<< "$cj"
+        if [[ -f "$cpath" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $cdesc ($cpath)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  $cdesc NO configurado"
+            ((warnings++))
+        fi
+    done
+
+    # ── 20. Sandboxing de apps ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[20/43] SANDBOXING DE APLICACIONES${NC}"
+    # Firejail
+    if command -v firejail &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  Firejail instalado"
+        ((checks_ok++))
+
+        # Verificar si firecfg fue aplicado
+        local fj_symlinks
+        fj_symlinks=$(ls -la /usr/local/bin/ 2>/dev/null | grep -c "firejail" || echo 0)
+        if [[ "$fj_symlinks" -gt 0 ]]; then
+            echo -e "  ${GREEN}OK${NC}  firecfg activo ($fj_symlinks symlinks)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  firecfg no aplicado"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  Firejail NO instalado"
+        ((warnings++))
+    fi
+
+    # bubblewrap
+    if command -v bwrap &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  bubblewrap instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  bubblewrap NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 21. Auditoría de reconocimiento ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[21/43] EXPOSICIÓN EXTERNA (RECONOCIMIENTO TA0043)${NC}"
+
+    # Puertos expuestos externamente
+    local ext_ports
+    ext_ports=$(ss -tlnp 2>/dev/null | tail -n +2 | grep -vE "127\.|::1" | wc -l || echo 0)
+    if [[ "$ext_ports" -eq 0 ]]; then
+        echo -e "  ${GREEN}OK${NC}  Sin puertos TCP expuestos externamente"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  $ext_ports puerto(s) TCP expuestos externamente"
+        ((warnings++))
+    fi
+
+    # TCP timestamps
+    local tcp_ts
+    tcp_ts=$(sysctl -n net.ipv4.tcp_timestamps 2>/dev/null || echo "1")
+    if [[ "$tcp_ts" == "0" ]]; then
+        echo -e "  ${GREEN}OK${NC}  TCP timestamps deshabilitados (anti-fingerprinting)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  TCP timestamps habilitados (fingerprinting posible)"
+        ((warnings++))
+    fi
+
+    # Banners no filtran info
+    local banner_leak=0
+    for bf in /etc/issue /etc/issue.net; do
+        if [[ -f "$bf" ]] && grep -qiE "suse|leap|linux.*[0-9]" "$bf" 2>/dev/null; then
+            banner_leak=1
+        fi
+    done
+    if [[ $banner_leak -eq 0 ]]; then
+        echo -e "  ${GREEN}OK${NC}  Banners no filtran información del OS"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Banners filtran información del sistema operativo"
+        ((warnings++))
+    fi
+
+    # Script de auditoría periódica
+    if [[ -x /usr/local/bin/auditoria-reconocimiento.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Script de auditoría de reconocimiento instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Script de auditoría de reconocimiento NO instalado"
+        ((warnings++))
+    fi
+
+    # Cron de auditoría semanal
+    if [[ -x /etc/cron.weekly/auditoria-reconocimiento ]]; then
+        echo -e "  ${GREEN}OK${NC}  Auditoría semanal de reconocimiento programada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Auditoría semanal de reconocimiento NO programada"
+        ((warnings++))
+    fi
+
+    # ── 22. MFA SSH (MITRE T1133 - M1032) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[22/43] MFA PARA SSH (T1133)${NC}"
+    if [[ -f /etc/ssh/sshd_config.d/91-mfa.conf ]]; then
+        if grep -q "AuthenticationMethods publickey,password" /etc/ssh/sshd_config.d/91-mfa.conf 2>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  MFA SSH activo (publickey + password)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Archivo MFA existe pero sin AuthenticationMethods"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  MFA SSH NO configurado (/etc/ssh/sshd_config.d/91-mfa.conf)"
+        ((warnings++))
+    fi
+
+    # Verificar soporte FIDO2
+    if [[ -x /usr/local/bin/generar-llave-fido2.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Script generador de llaves FIDO2 disponible"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Script generador de llaves FIDO2 NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 23. ClamAV (MITRE T1566 - M1049) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[23/43] CLAMAV ANTIMALWARE (T1566)${NC}"
+    if command -v clamscan &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  ClamAV instalado"
+        ((checks_ok++))
+
+        # Verificar firmas actualizadas
+        if [[ -f /var/lib/clamav/main.cvd ]] || [[ -f /var/lib/clamav/main.cld ]]; then
+            echo -e "  ${GREEN}OK${NC}  Base de datos de firmas presente"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Base de datos de firmas NO encontrada"
+            ((warnings++))
+        fi
+
+        # freshclam automático
+        if systemctl is-active clamav-freshclam &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  Actualización automática de firmas activa"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Actualización automática de firmas NO activa"
+            ((warnings++))
+        fi
+
+        # Cron de escaneo
+        if [[ -x /etc/cron.daily/clamav-scan ]]; then
+            echo -e "  ${GREEN}OK${NC}  Escaneo diario programado"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Escaneo diario NO programado"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  ClamAV NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 24. OpenSCAP (MITRE T1195 - M1016) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[24/43] OPENSCAP AUDITORÍA (T1195)${NC}"
+    if command -v oscap &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  OpenSCAP instalado"
+        ((checks_ok++))
+
+        # Verificar SCAP Security Guide
+        if pkg_is_installed scap-security-guide 2>&1; then
+            echo -e "  ${GREEN}OK${NC}  SCAP Security Guide instalado"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  SCAP Security Guide NO instalado"
+            ((warnings++))
+        fi
+
+        # Script de auditoría
+        if [[ -x /usr/local/bin/openscap-auditar.sh ]]; then
+            echo -e "  ${GREEN}OK${NC}  Script de auditoría OpenSCAP disponible"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Script de auditoría OpenSCAP NO instalado"
+            ((warnings++))
+        fi
+
+        # Cron semanal
+        if [[ -x /etc/cron.weekly/openscap-audit ]]; then
+            echo -e "  ${GREEN}OK${NC}  Auditoría semanal programada"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Auditoría semanal NO programada"
+            ((warnings++))
+        fi
+
+        # Reportes existentes
+        local scap_reports
+        scap_reports=$(ls /var/log/openscap/reports/*.html 2>/dev/null | wc -l || echo 0)
+        if [[ "$scap_reports" -gt 0 ]]; then
+            echo -e "  ${GREEN}OK${NC}  $scap_reports reporte(s) HTML disponible(s)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Sin reportes de auditoría generados aún"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  OpenSCAP NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 25. Inteligencia de amenazas (MITRE TA0042 - M1019) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[25/43] INTELIGENCIA DE AMENAZAS (M1019 IoC Feeds)${NC}"
+
+    # Directorio de IoC
+    if [[ -d /etc/threat-intelligence ]]; then
+        echo -e "  ${GREEN}OK${NC}  Directorio de IoC configurado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Directorio de IoC NO configurado"
+        ((warnings++))
+    fi
+
+    # Feeds de IPs descargados
+    if [[ -f /etc/threat-intelligence/lists/malicious-ips.txt ]]; then
+        local ioc_ips
+        ioc_ips=$(wc -l < /etc/threat-intelligence/lists/malicious-ips.txt 2>/dev/null || echo 0)
+        echo -e "  ${GREEN}OK${NC}  Feeds de IPs maliciosas: $ioc_ips IPs"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Feeds de IPs maliciosas NO descargados"
+        ((warnings++))
+    fi
+
+    # ipset activo
+    if command -v ipset &>/dev/null && ipset list threat-intel-ips &>/dev/null 2>&1; then
+        local ipset_count
+        ipset_count=$(ipset list threat-intel-ips 2>/dev/null | grep -c "^[0-9]" || echo 0)
+        echo -e "  ${GREEN}OK${NC}  Bloqueo ipset activo: $ipset_count IPs bloqueadas"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Bloqueo ipset NO activo"
+        ((warnings++))
+    fi
+
+    # Herramienta de consulta
+    if [[ -x /usr/local/bin/ioc-lookup.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Herramienta ioc-lookup.sh disponible"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Herramienta ioc-lookup.sh NO instalada"
+        ((warnings++))
+    fi
+
+    # Cron de actualización
+    if [[ -x /etc/cron.daily/threat-intel-update ]]; then
+        echo -e "  ${GREEN}OK${NC}  Actualización diaria de IoC programada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Actualización diaria de IoC NO programada"
+        ((warnings++))
+    fi
+
+    # ── 26. Acceso Inicial (TA0001) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[26/43] ACCESO INICIAL (TA0001)${NC}"
+
+    # SSH hardening modular
+    if [[ -f /etc/ssh/sshd_config.d/01-acceso-inicial.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  Hardening SSH avanzado aplicado (sshd_config.d/)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Hardening SSH avanzado NO aplicado"
+        ((warnings++))
+    fi
+
+    # USBGuard
+    if systemctl is-active usbguard &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  USBGuard activo (control de hardware)"
+        ((checks_ok++))
+    elif command -v usbguard &>/dev/null; then
+        echo -e "  ${YELLOW}!!${NC}  USBGuard instalado pero NO activo"
+        ((warnings++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  USBGuard NO instalado"
+        ((warnings++))
+    fi
+
+    # Core dumps deshabilitados
+    if [[ -f /etc/systemd/coredump.conf.d/disable.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  Core dumps deshabilitados (anti-exploit)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Core dumps NO deshabilitados"
+        ((warnings++))
+    fi
+
+    # ── 27. Ejecución (TA0002) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[27/43] EJECUCIÓN (TA0002)${NC}"
+
+    # AppArmor activo (T1059 - M1038)
+    if command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
+        local aa_enforced
+        aa_enforced=$(aa-status 2>/dev/null | grep "profiles are in enforce mode" | awk '{print $1}' || echo "0")
+        echo -e "  ${GREEN}OK${NC}  AppArmor activo ($aa_enforced perfiles enforce)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  AppArmor NO activo"
+        ((warnings++))
+    fi
+
+    # noexec en montajes temporales (T1204 - M1038)
+    local noexec_ok=0
+    for nmp in /tmp /var/tmp /dev/shm; do
+        if mountpoint -q "$nmp" 2>/dev/null && mount | grep " on $nmp " | grep -q "noexec" 2>/dev/null; then
+            noexec_ok=$((noexec_ok + 1))
+        fi
+    done
+    if [[ $noexec_ok -ge 2 ]]; then
+        echo -e "  ${GREEN}OK${NC}  noexec en montajes temporales ($noexec_ok/3)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  noexec incompleto en montajes temporales ($noexec_ok/3)"
+        ((warnings++))
+    fi
+
+    # LD_PRELOAD restringido (T1129 - M1044)
+    if [[ -f /etc/profile.d/restrict-ld-env.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  LD_PRELOAD/LD_LIBRARY_PATH restringido"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  LD_PRELOAD NO restringido"
+        ((warnings++))
+    fi
+
+    # Bash restringido por grupo (T1059.004 - M1038)
+    if getent group shell-users &>/dev/null; then
+        local bash_perms
+        bash_perms=$(stat -c "%a" /bin/bash 2>/dev/null || echo "755")
+        if [[ "$bash_perms" == "750" ]]; then
+            echo -e "  ${GREEN}OK${NC}  /bin/bash restringido a grupo shell-users (750)"
+            ((checks_ok++))
+        else
+            echo -e "  ${YELLOW}!!${NC}  Grupo shell-users existe pero bash tiene permisos $bash_perms"
+            ((warnings++))
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  Bash no restringido (grupo shell-users no existe)"
+        ((warnings++))
+    fi
+
+    # Intérpretes restringidos (T1059 - M1038)
+    if getent group interp-users &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  Intérpretes restringidos a grupo interp-users"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Intérpretes NO restringidos (grupo interp-users no existe)"
+        ((warnings++))
+    fi
+
+    # cron.allow
+    if [[ -f /etc/cron.allow ]]; then
+        echo -e "  ${GREEN}OK${NC}  /etc/cron.allow presente (acceso restringido)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  /etc/cron.allow NO presente"
+        ((warnings++))
+    fi
+
+    # Reglas de auditoría de ejecución
+    if [[ -f /etc/audit/rules.d/98-ld-preload.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Auditoría de LD_PRELOAD configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Auditoría de LD_PRELOAD NO configurada"
+        ((warnings++))
+    fi
+
+    # Monitor de ejecución
+    if [[ -x /usr/local/bin/monitor-ejecucion.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Script monitor-ejecucion.sh instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Script monitor-ejecucion.sh NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 28. Persistencia (TA0003) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[28/43] PERSISTENCIA (TA0003)${NC}"
+
+    # Reglas auditd de persistencia
+    local persist_rules=0
+    for rfile in /etc/audit/rules.d/persistence-*.rules; do
+        [[ -f "$rfile" ]] && persist_rules=$((persist_rules + 1))
+    done
+    if [[ $persist_rules -ge 3 ]]; then
+        echo -e "  ${GREEN}OK${NC}  Monitoreo de persistencia configurado ($persist_rules conjuntos de reglas)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Monitoreo de persistencia incompleto ($persist_rules/4 reglas)"
+        ((warnings++))
+    fi
+
+    # Script de detección
+    if [[ -x /usr/local/bin/detectar-persistencia.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Script de detección de persistencia instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Script de detección de persistencia NO instalado"
+        ((warnings++))
+    fi
+
+    # Cron de detección
+    if [[ -x /etc/cron.daily/detectar-persistencia ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección diaria de persistencia programada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección diaria de persistencia NO programada"
+        ((warnings++))
+    fi
+
+    # ── 29. Escalada de Privilegios (TA0004) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[29/43] ESCALADA DE PRIVILEGIOS (TA0004)${NC}"
+
+    # Protecciones kernel anti-privesc
+    local privesc_sysctl="/etc/sysctl.d/99-anti-privesc.conf"
+    if [[ -f "$privesc_sysctl" ]]; then
+        echo -e "  ${GREEN}OK${NC}  Protecciones kernel anti-escalada aplicadas"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Protecciones kernel anti-escalada NO aplicadas"
+        ((warnings++))
+    fi
+
+    # Hardening sudo
+    if [[ -f /etc/sudoers.d/99-hardening ]]; then
+        echo -e "  ${GREEN}OK${NC}  Hardening de sudo aplicado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Hardening de sudo NO aplicado"
+        ((warnings++))
+    fi
+
+    # Script de detección de escalada
+    if [[ -x /usr/local/bin/detectar-escalada.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Script de detección de escalada instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Script de detección de escalada NO instalado"
+        ((warnings++))
+    fi
+
+    # Reglas auditd de inyección
+    if [[ -f /etc/audit/rules.d/privesc-injection.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Monitoreo de inyección de procesos configurado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Monitoreo de inyección de procesos NO configurado"
+        ((warnings++))
+    fi
+
+    # ── 30. Impacto (TA0040) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[30/43] IMPACTO (TA0040)${NC}"
+
+    # Backups offsite (T1486/T1561 - M1053)
+    if [[ -f /etc/backup-offsite/config ]] && [[ -x /usr/local/bin/backup-offsite.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Backups offsite automáticos configurados"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Backups offsite NO configurados"
+        ((warnings++))
+    fi
+
+    # ClamAV anti-ransomware (T1486 - M1049)
+    if [[ -x /usr/local/bin/clamav-antiransomware.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  ClamAV anti-ransomware configurado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  ClamAV anti-ransomware NO configurado"
+        ((warnings++))
+    fi
+
+    # Protección snapshots/backups (T1490 - M1053)
+    if [[ -x /usr/local/bin/verificar-backups.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Protección de snapshots/backups configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Protección de snapshots/backups NO configurada"
+        ((warnings++))
+    fi
+
+    # Monitoreo de impacto (T1485/T1486/T1489)
+    if [[ -x /usr/local/bin/detectar-impacto.sh ]] && [[ -f /etc/audit/rules.d/impact-detection.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Monitoreo de actividad de impacto configurado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Monitoreo de actividad de impacto NO configurado"
+        ((warnings++))
+    fi
+
+    # ── 31. Evasión de Defensas (TA0005) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[31/43] EVASIÓN DE DEFENSAS (TA0005)${NC}"
+
+    if [[ -f /etc/audit/rules.d/60-log-protection.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Protección de logs contra manipulación"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Protección de logs NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/detectar-masquerading.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de masquerading configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de masquerading NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -f /etc/systemd/system/watchdog-seguridad.timer ]]; then
+        echo -e "  ${GREEN}OK${NC}  Watchdog de herramientas de seguridad activo"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Watchdog de herramientas NO configurado"
+        ((warnings++))
+    fi
+
+    # ── 32. Acceso a Credenciales (TA0006) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[32/43] ACCESO A CREDENCIALES (TA0006)${NC}"
+
+    if [[ -f /etc/sysctl.d/91-credential-protection.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  Protección contra credential dumping"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Protección contra credential dumping NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -f /etc/security/faillock.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  Protección contra fuerza bruta (faillock)"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Protección contra fuerza bruta NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/buscar-credenciales.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Escaneo de credenciales expuestas configurado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Escaneo de credenciales expuestas NO configurado"
+        ((warnings++))
+    fi
+
+    # ── 33. Descubrimiento (TA0007) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[33/43] DESCUBRIMIENTO (TA0007)${NC}"
+
+    if [[ -x /usr/local/bin/detectar-portscan.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de port scanning configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de port scanning NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -f /etc/audit/rules.d/63-discovery.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Auditoría de reconocimiento interno configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Auditoría de reconocimiento interno NO configurada"
+        ((warnings++))
+    fi
+
+    # ── 34. Movimiento Lateral (TA0008) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[34/43] MOVIMIENTO LATERAL (TA0008)${NC}"
+
+    if [[ -f /etc/ssh/sshd_config.d/06-lateral-movement.conf ]]; then
+        echo -e "  ${GREEN}OK${NC}  Hardening SSH anti movimiento lateral"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Hardening SSH anti lateral NO configurado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/detectar-lateral.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de movimiento lateral configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de movimiento lateral NO configurada"
+        ((warnings++))
+    fi
+
+    # ── 35. Recolección (TA0009) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[35/43] RECOLECCIÓN (TA0009)${NC}"
+
+    if [[ -f /etc/audit/rules.d/65-collection.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Auditoría de recolección de datos configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Auditoría de recolección NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/detectar-staging.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de data staging configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de data staging NO configurada"
+        ((warnings++))
+    fi
+
+    # ── 36. Exfiltración (TA0010) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[36/43] EXFILTRACIÓN (TA0010)${NC}"
+
+    if [[ -x /usr/local/bin/detectar-exfiltracion.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de exfiltración configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de exfiltración NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/detectar-dns-tunnel.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de DNS tunneling configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de DNS tunneling NO configurada"
+        ((warnings++))
+    fi
+
+    # ── 37. Comando y Control (TA0011) ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[37/43] COMANDO Y CONTROL (TA0011)${NC}"
+
+    if [[ -x /usr/local/bin/detectar-beaconing.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de C2 beaconing configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de C2 beaconing NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/detectar-tunneling.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección de proxy/tunneling configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección de proxy/tunneling NO configurada"
+        ((warnings++))
+    fi
+
+    if [[ -f /etc/audit/rules.d/67-command-control.rules ]]; then
+        echo -e "  ${GREEN}OK${NC}  Auditoría de herramientas C2 configurada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Auditoría de herramientas C2 NO configurada"
+        ((warnings++))
+    fi
+
+    # ── 38. Respuesta a Incidentes ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[38/43] RESPUESTA A INCIDENTES${NC}"
+
+    if [[ -x /usr/local/bin/ir-recolectar-forense.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Toolkit forense instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Toolkit forense NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/ir-responder.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Playbooks de contención instalados"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Playbooks de contención NO instalados"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/ir-timeline.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Generador de timeline instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Generador de timeline NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 39. Monitorización Continua ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[39/43] MONITORIZACIÓN CONTINUA${NC}"
+
+    if [[ -x /usr/local/bin/security-dashboard.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Dashboard de seguridad instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Dashboard de seguridad NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/correlacionar-alertas.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Correlación de alertas instalada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Correlación de alertas NO instalada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/security-healthcheck.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Health check de controles instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Health check de controles NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 40. Reportes de Seguridad ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[40/43] REPORTES DE SEGURIDAD${NC}"
+
+    if [[ -x /usr/local/bin/reporte-mitre.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Reporte MITRE ATT&CK instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Reporte MITRE ATT&CK NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/exportar-navigator.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Exportador ATT&CK Navigator instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Exportador ATT&CK Navigator NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/reporte-cumplimiento.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Reporte de cumplimiento instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Reporte de cumplimiento NO instalado"
+        ((warnings++))
+    fi
+
+    # ── 41. Caza de amenazas ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[41/43] CAZA DE AMENAZAS (UEBA / THREAT HUNTING)${NC}"
+
+    if [[ -x /usr/local/bin/ueba-crear-baseline.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Sistema UEBA de baseline instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Sistema UEBA NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/cazar-amenazas.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Playbooks de caza de amenazas instalados"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Playbooks de caza NO instalados"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/detectar-persistencia-avanzada.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Detección T1098 persistencia avanzada instalada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Detección T1098 NO instalada"
+        ((warnings++))
+    fi
+
+    # ── 42. Automatización de respuesta ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[42/43] AUTOMATIZACIÓN DE RESPUESTA (SOAR)${NC}"
+
+    if [[ -x /usr/local/bin/soar-responder.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Motor SOAR de respuesta automática instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Motor SOAR NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/soar-gestionar-bloqueos.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Gestión de bloqueos SOAR instalada"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Gestión de bloqueos SOAR NO instalada"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/soar-notificar.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Notificaciones SOAR instaladas"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Notificaciones SOAR NO instaladas"
+        ((warnings++))
+    fi
+
+    # ── 43. Validación de controles ──
+    echo ""
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[43/43] VALIDACIÓN DE CONTROLES (PURPLE TEAM)${NC}"
+
+    if [[ -x /usr/local/bin/simular-ataques.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Simulador ATT&CK seguro instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Simulador ATT&CK NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/reporte-validacion.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Reporte de validación Purple Team instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Reporte de validación NO instalado"
+        ((warnings++))
+    fi
+
+    if [[ -x /usr/local/bin/validar-endpoint.sh ]]; then
+        echo -e "  ${GREEN}OK${NC}  Validador de endpoint instalado"
+        ((checks_ok++))
+    else
+        echo -e "  ${YELLOW}!!${NC}  Validador de endpoint NO instalado"
+        ((warnings++))
+    fi
+
+    # ── Resumen ──
+    local total=$((checks_ok + warnings))
+    local score=0
+    if [[ $total -gt 0 ]]; then
+        score=$(( checks_ok * 100 / total ))
+    fi
+
+    echo ""
+    echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    # Score visual
+    local score_color="$RED"
+    local score_label="CRÍTICO"
+    local score_bg="$BG_RED"
+    if [[ $score -ge 90 ]]; then
+        score_color="$GREEN"; score_label="EXCELENTE"; score_bg="$BG_GREEN"
+    elif [[ $score -ge 70 ]]; then
+        score_color="$GREEN"; score_label="BUENO"; score_bg="$BG_GREEN"
+    elif [[ $score -ge 50 ]]; then
+        score_color="$YELLOW"; score_label="PARCIAL"; score_bg="$BG_YELLOW"
+    elif [[ $score -ge 30 ]]; then
+        score_color="$YELLOW"; score_label="BAJO"; score_bg="$BG_YELLOW"
+    fi
+
+    _center "${score_bg} PUNTUACIÓN: ${score}% ${NC}"
+    echo ""
+    _center "${score_color}${BOLD}${score_label}${NC}"
+    echo ""
+
+    # Progress bar del score
+    local bar_width=40
+    local bar_filled=$(( score * bar_width / 100 ))
+    local bar_empty=$(( bar_width - bar_filled ))
+    local bar_str=""
+    for ((bi=0; bi<bar_filled; bi++)); do bar_str+="█"; done
+    for ((bi=0; bi<bar_empty; bi++)); do bar_str+="░"; done
+    _center "${score_color}${bar_str}${NC}"
+    echo ""
+
+    echo -e "    ${GREEN}●${NC} Checks OK:     ${GREEN}${BOLD}$checks_ok${NC}"
+    echo -e "    ${YELLOW}●${NC} Advertencias:  ${YELLOW}${BOLD}$warnings${NC}"
+    echo -e "    ${DIM}Total verificaciones: $total${NC}"
+    echo ""
+
+    if [[ $warnings -eq 0 ]]; then
+        _center "${GREEN}${BOLD}Sistema completamente securizado${NC}"
+    elif [[ $warnings -le 5 ]]; then
+        _center "${YELLOW}Sistema parcialmente securizado${NC}"
+    elif [[ $warnings -le 10 ]]; then
+        _center "${YELLOW}Sistema necesita más hardening${NC}"
+    else
+        _center "${RED}Sistema requiere atención inmediata${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  ${DIM}Log: $LOGFILE${NC}"
+}
+
+# ============================================================
+# SUB-MENÚS
+# ============================================================
+
+submenu_base() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Hardening Base"
+
+        echo -e "  ${DIM}Módulos fundamentales de securización del sistema${NC}"
+        echo ""
+        local n
+        for n in 1 2 3 4 5 6 7 8 9 10; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            10)       _exec_module 10 ;;
+            [1-9])    _exec_module "$opt" ;;
+            t|T)      _run_category "Hardening Base" 1 10 ; _pause ;;
+            b|B|0)    return ;;
+            q|Q)      _exit_securizar ;;
+            "?")      _show_help ;;
+            "")       continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 36 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_proactiva() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Securización Proactiva"
+
+        echo -e "  ${DIM}Módulos avanzados de protección proactiva${NC}"
+        echo ""
+        local n
+        for n in 11 12 13 14 15 16 17 18; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            1[1-8])   _exec_module "$opt" ;;
+            t|T)      _run_category "Securización Proactiva" 11 18 ; _pause ;;
+            b|B|0)    return ;;
+            q|Q)      _exit_securizar ;;
+            "?")      _show_help ;;
+            "")       continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 36 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_mitre() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Mitigaciones MITRE ATT&CK"
+
+        echo -e "  ${DIM}Defensa contra tácticas específicas del framework MITRE${NC}"
+        echo ""
+        local n
+        for n in 19 20 21 22 23 24 25 26 27 28 29 30; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            19|20|21|22|23|24|25|26|27|28|29|30) _exec_module "$opt" ;;
+            t|T)         _run_category "Mitigaciones MITRE ATT&CK" 19 30 ; _pause ;;
+            b|B|0)       return ;;
+            q|Q)         _exit_securizar ;;
+            "?")         _show_help ;;
+            "")          continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 36 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_operaciones() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Operaciones de Seguridad"
+
+        echo -e "  ${DIM}IR, monitorización, reportes, hunting, SOAR, purple team${NC}"
+        echo ""
+        local n
+        for n in 31 32 33 34 35 36; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            3[1-6]) _exec_module "$opt" ;;
+            t|T)         _run_category "Operaciones de Seguridad" 31 36 ; _pause ;;
+            b|B|0)       return ;;
+            q|Q)         _exit_securizar ;;
+            "?")         _show_help ;;
+            "")          continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 36 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+# ============================================================
+# MENÚ PRINCIPAL
+# ============================================================
+menu_principal() {
+    while true; do
+        _draw_header
+        _draw_sysinfo
+        echo ""
+
+        # Count module progress per category
+        local base_done=0 pro_done=0 mitre_done=0 ops_done=0
+        local _n
+        for _n in 1 2 3 4 5 6 7 8 9 10; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((base_done++)) || true; done
+        for _n in 11 12 13 14 15 16 17 18; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((pro_done++)) || true; done
+        for _n in 19 20 21 22 23 24 25 26 27 28 29 30; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((mitre_done++)) || true; done
+        for _n in 31 32 33 34 35 36; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((ops_done++)) || true; done
+
+        echo -e "  ${BOLD}Módulos${NC}"
+        echo ""
+        printf "    ${CYAN}b${NC}   ${BOLD}Hardening Base${NC}              ${DIM}10 módulos${NC}   "
+        _cat_dots 10 "$base_done"
+        echo ""
+        printf "    ${CYAN}p${NC}   ${BOLD}Securización Proactiva${NC}       ${DIM}8 módulos${NC}   "
+        _cat_dots 8 "$pro_done"
+        echo ""
+        printf "    ${CYAN}m${NC}   ${BOLD}Mitigaciones MITRE ATT&CK${NC}   ${DIM}12 módulos${NC}  "
+        _cat_dots 12 "$mitre_done"
+        echo ""
+        printf "    ${CYAN}o${NC}   ${BOLD}Operaciones de Seguridad${NC}     ${DIM}6 módulos${NC}   "
+        _cat_dots 6 "$ops_done"
+        echo ""
+
+        echo ""
+        echo -e "  ${BOLD}Acciones${NC}"
+        echo ""
+        echo -e "    ${GREEN}a${NC}   ${GREEN}${BOLD}Aplicar TODO seguro${NC}          ${DIM}36 módulos secuenciales${NC}"
+        echo -e "    ${CYAN}v${NC}   ${CYAN}${BOLD}Verificación proactiva${NC}       ${DIM}43 checks de seguridad${NC}"
+
+        _draw_footer
+
+        echo -e "    ${DIM}q${NC}   ${DIM}Salir${NC}                        ${DIM}?  Ayuda · 1-36  Acceso directo${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opcion
+
+        # Direct module number access (1-36)
+        if [[ "$opcion" =~ ^[0-9]+$ ]] && [[ "$opcion" -ge 1 ]] && [[ "$opcion" -le 36 ]]; then
+            _exec_module "$opcion"
+            continue
+        fi
+
+        case "$opcion" in
+            b|B)    submenu_base ;;
+            p|P)    submenu_proactiva ;;
+            m|M)    submenu_mitre ;;
+            o|O)    submenu_operaciones ;;
+            a|A)    aplicar_todo_seguro ; _pause ;;
+            v|V)    verificacion_proactiva ; _pause ;;
+            "?")    _show_help ;;
+            q|Q|0)  _exit_securizar ;;
+            "")     continue ;;
+            *)      echo -e "  ${RED}✗${NC} Opción no válida: $opcion"; sleep 0.5 ;;
+        esac
+    done
+}
+
+# ============================================================
+# INICIO
+# ============================================================
+{
+    echo "Securizar-menu iniciado - $(date)"
+    echo "Directorio de scripts: $SCRIPT_DIR"
+    echo "Backup en: $BACKUP_DIR"
+    echo "Log en: $LOGFILE"
+} >> "$LOGFILE"
+
+# Init animation
+printf "  ${CYAN}⠋${NC} ${DIM}Inicializando...${NC}"
+sleep 0.15
+printf "\r  ${CYAN}⠹${NC} ${DIM}Verificando sistema...${NC}"
+sleep 0.15
+printf "\r  ${CYAN}⠧${NC} ${DIM}Cargando módulos...${NC}   "
+sleep 0.15
+printf "\r                                     \r"
+
+menu_principal

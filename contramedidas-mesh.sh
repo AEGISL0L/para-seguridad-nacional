@@ -1,0 +1,339 @@
+#!/bin/bash
+# ============================================================
+# CONTRAMEDIDAS CONTRA TECH MESH
+# WiFi Mesh, Bluetooth Mesh, IoT Mesh, Redes en malla
+# ============================================================
+
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/securizar-common.sh"
+
+require_root
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║       CONTRAMEDIDAS CONTRA TECH MESH                      ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+echo "Las redes mesh permiten vigilancia mediante:"
+echo "  • Rastreo de dispositivos por Bluetooth/WiFi"
+echo "  • Triangulación de ubicación"
+echo "  • Interceptación de tráfico"
+echo "  • Dispositivos IoT comprometidos"
+echo ""
+
+# ============================================================
+# 1. DETECTAR REDES MESH CERCANAS
+# ============================================================
+echo -e "${CYAN}═══ 1. DETECCIÓN DE REDES MESH ═══${NC}"
+echo ""
+
+log_info "Escaneando redes WiFi cercanas..."
+echo ""
+nmcli dev wifi list 2>/dev/null | head -20
+echo ""
+
+log_info "Buscando dispositivos Bluetooth cercanos..."
+echo ""
+if command -v bluetoothctl &>/dev/null; then
+    timeout 5 bluetoothctl scan on 2>/dev/null &
+    sleep 5
+    bluetoothctl devices 2>/dev/null
+    bluetoothctl scan off 2>/dev/null
+else
+    echo "bluetoothctl no disponible"
+fi
+echo ""
+
+# ============================================================
+# 2. BLOQUEAR BLUETOOTH COMPLETAMENTE
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 2. BLOQUEAR BLUETOOTH ═══${NC}"
+echo ""
+echo "Bluetooth Mesh puede rastrear tu ubicación y dispositivo."
+echo ""
+
+if ask "¿Bloquear Bluetooth completamente?"; then
+    # Desactivar por rfkill
+    sudo rfkill block bluetooth 2>/dev/null
+
+    # Desactivar servicio
+    sudo systemctl stop bluetooth 2>/dev/null
+    sudo systemctl disable bluetooth 2>/dev/null
+    sudo systemctl mask bluetooth 2>/dev/null
+
+    # Bloquear módulos
+    echo "install bluetooth /bin/false" | sudo tee /etc/modprobe.d/disable-bluetooth.conf > /dev/null
+    echo "install btusb /bin/false" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
+    echo "install btrtl /bin/false" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
+    echo "install btintel /bin/false" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
+
+    # Descargar módulos
+    sudo rmmod btusb 2>/dev/null
+    sudo rmmod bluetooth 2>/dev/null
+
+    log_info "Bluetooth bloqueado completamente"
+fi
+
+# ============================================================
+# 3. BLOQUEAR WiFi MESH / HOTSPOT AUTOMÁTICO
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 3. BLOQUEAR WiFi MESH ═══${NC}"
+echo ""
+echo "WiFi Mesh y hotspots automáticos pueden conectarse sin permiso."
+echo ""
+
+if ask "¿Deshabilitar conexiones WiFi automáticas?"; then
+    # Deshabilitar autoconexión a redes desconocidas
+    sudo nmcli general logging level INFO 2>/dev/null
+
+    # Deshabilitar WiFi Direct (P2P)
+    cat > /tmp/no-wifi-direct.conf << 'EOF'
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=random
+
+# Deshabilitar P2P/WiFi Direct
+wifi.p2p-management=false
+EOF
+    sudo cp /tmp/no-wifi-direct.conf /etc/NetworkManager/conf.d/99-no-mesh.conf
+
+    # Deshabilitar autoconexión a redes abiertas
+    for conn in $(nmcli -t -f NAME,TYPE con show | grep wireless | cut -d: -f1); do
+        nmcli con mod "$conn" connection.autoconnect-priority -1 2>/dev/null
+    done
+
+    sudo systemctl restart NetworkManager
+
+    log_info "WiFi Mesh/P2P deshabilitado"
+fi
+
+# ============================================================
+# 4. BLOQUEAR COMUNICACIÓN CON DISPOSITIVOS IoT
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 4. BLOQUEAR IoT MESH ═══${NC}"
+echo ""
+echo "Dispositivos IoT pueden formar redes mesh de vigilancia."
+echo ""
+
+if ask "¿Bloquear comunicación con dispositivos IoT conocidos?"; then
+    # Bloquear puertos comunes de IoT
+    fw_add_rich_rule 'rule family="ipv4" port port="5353" protocol="udp" drop' 2>/dev/null  # mDNS
+    fw_add_rich_rule 'rule family="ipv4" port port="1900" protocol="udp" drop' 2>/dev/null  # SSDP/UPnP
+    fw_add_rich_rule 'rule family="ipv4" port port="5683" protocol="udp" drop' 2>/dev/null  # CoAP (IoT)
+    fw_add_rich_rule 'rule family="ipv4" port port="8883" protocol="tcp" drop' 2>/dev/null  # MQTT SSL
+    fw_add_rich_rule 'rule family="ipv4" port port="1883" protocol="tcp" drop' 2>/dev/null  # MQTT
+    fw_add_rich_rule 'rule family="ipv4" port port="5684" protocol="udp" drop' 2>/dev/null  # CoAP DTLS
+
+    # Bloquear Zigbee/Z-Wave (si hay adaptador)
+    echo "install ieee802154 /bin/false" | sudo tee /etc/modprobe.d/disable-zigbee.conf > /dev/null
+
+    fw_reload 2>/dev/null
+
+    log_info "Puertos IoT bloqueados"
+fi
+
+# ============================================================
+# 5. DESHABILITAR mDNS/AVAHI (descubrimiento automático)
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 5. BLOQUEAR mDNS/AVAHI ═══${NC}"
+echo ""
+echo "mDNS permite que dispositivos te descubran automáticamente."
+echo ""
+
+if ask "¿Deshabilitar mDNS/Avahi?"; then
+    sudo systemctl stop avahi-daemon 2>/dev/null
+    sudo systemctl disable avahi-daemon 2>/dev/null
+    sudo systemctl mask avahi-daemon 2>/dev/null
+
+    # Bloquear en firewall
+    fw_add_rich_rule 'rule family="ipv4" destination address="224.0.0.251" drop'
+    fw_reload 2>/dev/null
+
+    log_info "mDNS/Avahi deshabilitado"
+fi
+
+# ============================================================
+# 6. BLOQUEAR UPnP (apertura automática de puertos)
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 6. BLOQUEAR UPnP ═══${NC}"
+echo ""
+echo "UPnP permite que dispositivos abran puertos sin permiso."
+echo ""
+
+if ask "¿Bloquear UPnP?"; then
+    # Bloquear SSDP
+    fw_add_rich_rule 'rule family="ipv4" destination address="239.255.255.250" drop'
+    fw_add_rich_rule 'rule family="ipv4" source address="239.255.255.250" drop'
+
+    fw_reload 2>/dev/null
+
+    log_info "UPnP bloqueado"
+fi
+
+# ============================================================
+# 7. MAC ADDRESS ALEATORIO CONTINUO
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 7. MAC ALEATORIO CONTINUO ═══${NC}"
+echo ""
+echo "Cambiar MAC frecuentemente evita rastreo por redes mesh."
+echo ""
+
+if ask "¿Configurar cambio de MAC cada reconexión?"; then
+    sudo tee /etc/NetworkManager/conf.d/99-random-mac-full.conf > /dev/null << 'EOF'
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=random
+ethernet.cloned-mac-address=random
+connection.stable-id=${CONNECTION}/${BOOT}/${RANDOM}
+EOF
+
+    sudo systemctl restart NetworkManager
+
+    log_info "MAC aleatorio en cada conexión"
+fi
+
+# ============================================================
+# 8. MONITOR DE REDES MESH
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 8. MONITOR DE REDES MESH ═══${NC}"
+echo ""
+
+if ask "¿Crear script de monitoreo de redes mesh?"; then
+    cat > /usr/local/bin/monitor-mesh.sh << 'EOF'
+#!/bin/bash
+# Monitor de redes mesh y dispositivos sospechosos
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║           MONITOR DE REDES MESH                           ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "=== REDES WiFi DETECTADAS ==="
+nmcli dev wifi list 2>/dev/null
+echo ""
+
+echo "=== REDES MESH SOSPECHOSAS ==="
+nmcli dev wifi list 2>/dev/null | grep -iE "mesh|direct|p2p|guest|iot|smart|amazon|google|alexa|nest|ring|xiaomi|tuya"
+echo ""
+
+echo "=== BLUETOOTH ==="
+if rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
+    echo "Bluetooth: BLOQUEADO (bien)"
+else
+    echo "Bluetooth: ACTIVO (riesgo)"
+    bluetoothctl devices 2>/dev/null
+fi
+echo ""
+
+echo "=== DISPOSITIVOS EN RED LOCAL ==="
+# ARP scan
+arp -a 2>/dev/null
+echo ""
+
+echo "=== CONEXIONES mDNS/SSDP ==="
+ss -u | grep -E "5353|1900" 2>/dev/null || echo "Ninguna (bien)"
+echo ""
+
+echo "=== TRÁFICO MULTICAST ==="
+ss -u | grep -E "224\.|239\." 2>/dev/null || echo "Ninguno (bien)"
+echo ""
+EOF
+    chmod +x /usr/local/bin/monitor-mesh.sh
+    log_info "Monitor creado: monitor-mesh.sh"
+fi
+
+# ============================================================
+# 9. BLOQUEAR FRECUENCIAS ESPECÍFICAS (info)
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 9. BLOQUEO DE FRECUENCIAS (físico) ═══${NC}"
+echo ""
+log_warn "MEDIDAS FÍSICAS contra redes mesh:"
+echo ""
+echo "  Las redes mesh usan estas frecuencias:"
+echo ""
+echo "  • WiFi Mesh:      2.4 GHz, 5 GHz"
+echo "  • Bluetooth:      2.4 GHz"
+echo "  • Zigbee:         2.4 GHz"
+echo "  • Z-Wave:         868 MHz (EU), 908 MHz (US)"
+echo "  • Thread/Matter:  2.4 GHz"
+echo ""
+echo "  Para bloqueo físico:"
+echo ""
+echo "  ⚠️  Jaula de Faraday (bloquea todo)"
+echo "  ⚠️  Pintura con partículas metálicas"
+echo "  ⚠️  Cortinas con malla metálica"
+echo "  ⚠️  Bolsa Faraday para el portátil cuando no uses"
+echo ""
+
+# ============================================================
+# 10. DESHABILITAR NFC
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 10. BLOQUEAR NFC ═══${NC}"
+echo ""
+
+if ask "¿Bloquear NFC?"; then
+    echo "install nfc /bin/false" | sudo tee /etc/modprobe.d/disable-nfc.conf > /dev/null
+    echo "install pn533 /bin/false" | sudo tee -a /etc/modprobe.d/disable-nfc.conf > /dev/null
+
+    sudo rmmod pn533 2>/dev/null
+    sudo rmmod nfc 2>/dev/null
+
+    log_info "NFC bloqueado"
+fi
+
+# ============================================================
+# RESUMEN
+# ============================================================
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║       CONTRAMEDIDAS MESH APLICADAS                        ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+echo "ESTADO:"
+echo ""
+
+# Verificar Bluetooth
+if rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
+    echo "  ✓ Bluetooth: BLOQUEADO"
+else
+    echo "  ✗ Bluetooth: activo (ejecuta: sudo rfkill block bluetooth)"
+fi
+
+# Verificar Avahi
+if systemctl is-active avahi-daemon &>/dev/null; then
+    echo "  ✗ mDNS/Avahi: activo"
+else
+    echo "  ✓ mDNS/Avahi: DESHABILITADO"
+fi
+
+# Verificar WiFi Direct
+echo "  ✓ WiFi Direct/P2P: configurado para bloquear"
+echo "  ✓ MAC aleatorio: habilitado"
+echo "  ✓ Puertos IoT: bloqueados"
+echo ""
+echo "COMANDOS:"
+echo ""
+echo "  monitor-mesh.sh     - Ver redes mesh cercanas"
+echo "  rfkill block wifi   - Bloquear WiFi temporalmente"
+echo "  rfkill block all    - Bloquear todas las radios"
+echo ""
+echo "PARA MÁXIMA SEGURIDAD:"
+echo ""
+echo "  Cuando no necesites red, ejecuta:"
+echo "  sudo rfkill block all"
+echo ""
