@@ -1931,22 +1931,22 @@ verificacion_proactiva() {
         local _w=${_SECTION_WEIGHT[$_CUR_CHECK]:-1}
         _score_earned=$(( _score_earned + _w ))
         _score_max=$(( _score_max + _w ))
-        ((checks_ok++)) || true
+        checks_ok=$(( checks_ok + 1 ))
     }
 
     _vp_fail() {
         local _w=${_SECTION_WEIGHT[$_CUR_CHECK]:-1}
         _score_max=$(( _score_max + _w ))
-        ((warnings++)) || true
+        warnings=$(( warnings + 1 ))
         case $_w in
-            3) ((_crit_fails++)) || true ;;
-            2) ((_high_fails++)) || true ;;
-            *) ((_med_fails++)) || true ;;
+            3) _crit_fails=$(( _crit_fails + 1 )) ;;
+            2) _high_fails=$(( _high_fails + 1 )) ;;
+            *) _med_fails=$(( _med_fails + 1 )) ;;
         esac
     }
 
     _vp_na() {
-        ((_na_count++)) || true
+        _na_count=$(( _na_count + 1 ))
     }
 
     # Helper: check executable exists (path, ok_msg, fail_msg)
@@ -1978,6 +1978,58 @@ verificacion_proactiva() {
             _vp_ok
         else
             echo -e "  ${YELLOW}!!${NC}  $4"
+            _vp_fail
+        fi
+    }
+
+    # Helper: check systemd service is active (svc_name, ok_msg, fail_msg)
+    _vp_svc_check() {
+        if systemctl is-active "$1" &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  $2"
+            _vp_ok
+        else
+            echo -e "  ${YELLOW}!!${NC}  $3"
+            _vp_fail
+        fi
+    }
+
+    # Helper: check sysctl param (param, expected, ok_msg, fail_msg)
+    # Passes if actual == expected or actual >= expected (for numeric values)
+    _vp_sysctl_check() {
+        local _actual
+        _actual=$(sysctl -n "$1" 2>/dev/null || echo "N/A")
+        if [[ "$_actual" == "$2" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $3"
+            _vp_ok
+        elif [[ "$_actual" =~ ^[0-9]+$ ]] && [[ "$2" =~ ^[0-9]+$ ]] && [[ "$_actual" -ge "$2" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $3"
+            _vp_ok
+        else
+            echo -e "  ${YELLOW}!!${NC}  $4 (actual: $_actual)"
+            _vp_fail
+        fi
+    }
+
+    # Helper: check group exists (group, ok_msg, fail_msg)
+    _vp_group_check() {
+        if getent group "$1" &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  $2"
+            _vp_ok
+        else
+            echo -e "  ${YELLOW}!!${NC}  $3"
+            _vp_fail
+        fi
+    }
+
+    # Helper: check file permission (path, expected_perm, ok_msg, fail_msg)
+    _vp_perm_check() {
+        local _actual
+        _actual=$(stat -c "%a" "$1" 2>/dev/null || echo "???")
+        if [[ "$_actual" == "$2" ]]; then
+            echo -e "  ${GREEN}OK${NC}  $3"
+            _vp_ok
+        else
+            echo -e "  ${YELLOW}!!${NC}  $4 (actual: $_actual, esperado: $2)"
             _vp_fail
         fi
     }
@@ -2043,19 +2095,11 @@ verificacion_proactiva() {
     )
 
     for param_entry in "${kernel_params[@]}"; do
-        IFS=':' read -r param expected desc <<< "$param_entry"
-        local actual
-        actual=$(sysctl -n "$param" 2>/dev/null || echo "N/A")
-        if [[ "$actual" == "$expected" ]]; then
-            echo -e "  ${GREEN}OK${NC}  $desc ($param = $actual)"
-            _vp_ok
-        elif [[ "$actual" =~ ^[0-9]+$ ]] && [[ "$actual" -ge "$expected" ]]; then
-            echo -e "  ${GREEN}OK${NC}  $desc ($param = $actual, >= $expected)"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  $desc ($param = $actual, esperado: $expected)"
-            _vp_fail
-        fi
+        local param="${param_entry%%:*}"
+        local rest="${param_entry#*:}"
+        local expected="${rest%%:*}" desc="${rest#*:}"
+        _vp_sysctl_check "$param" "$expected" \
+            "$desc ($param)" "$desc ($param, esperado: $expected)"
     done
 
     # ── 2. Servicios activos ──
@@ -2064,13 +2108,7 @@ verificacion_proactiva() {
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[2/44] SERVICIOS DE SEGURIDAD${NC}"
     local sec_services=("firewalld" "fail2ban" "auditd")
     for svc in "${sec_services[@]}"; do
-        if systemctl is-active "$svc" &>/dev/null; then
-            echo -e "  ${GREEN}OK${NC}  $svc activo"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  $svc NO activo"
-            _vp_fail
-        fi
+        _vp_svc_check "$svc" "$svc activo" "$svc NO activo"
     done
 
     # USBGuard (opcional, N/A en VMs)
@@ -2078,13 +2116,7 @@ verificacion_proactiva() {
         echo -e "  ${DIM}--${NC}  usbguard N/A (máquina virtual)"
         _vp_na
     elif command -v usbguard &>/dev/null; then
-        if systemctl is-active usbguard &>/dev/null; then
-            echo -e "  ${GREEN}OK${NC}  usbguard activo"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  usbguard instalado pero NO activo"
-            _vp_fail
-        fi
+        _vp_svc_check usbguard "usbguard activo" "usbguard instalado pero NO activo"
     fi
 
     # ── 3. Servicios deshabilitados ──
@@ -2099,6 +2131,7 @@ verificacion_proactiva() {
             _vp_na
             continue
         fi
+        # Inverse logic: active = bad, inactive = good
         if systemctl is-active "$svc" &>/dev/null; then
             echo -e "  ${YELLOW}!!${NC}  $svc aún activo"
             _vp_fail
@@ -2147,7 +2180,7 @@ verificacion_proactiva() {
         _port=$(echo "$_line" | awk '{print $4}' | rev | cut -d: -f1 | rev)
         [[ -z "$_port" ]] && continue
         if [[ "$_expected_ports" != *" $_port "* ]]; then
-            ((_unexpected++)) || true
+            _unexpected=$(( _unexpected + 1 ))
             _port_list+=" $_port"
         fi
     done < <(ss -tlnp 2>/dev/null | tail -n +2 | grep -vE "127\.|::1|\*:|\[::\]:")
@@ -2173,31 +2206,13 @@ verificacion_proactiva() {
     )
 
     for fc in "${file_checks[@]}"; do
-        IFS=':' read -r fpath expected_perm <<< "$fc"
-        if [[ -f "$fpath" ]]; then
-            local actual_perm
-            actual_perm=$(stat -c "%a" "$fpath" 2>/dev/null || echo "???")
-            if [[ "$actual_perm" == "$expected_perm" ]]; then
-                echo -e "  ${GREEN}OK${NC}  $fpath ($actual_perm)"
-                _vp_ok
-            else
-                echo -e "  ${YELLOW}!!${NC}  $fpath ($actual_perm, esperado: $expected_perm)"
-                _vp_fail
-            fi
-        fi
+        local fpath="${fc%%:*}" expected_perm="${fc#*:}"
+        [[ -f "$fpath" ]] && _vp_perm_check "$fpath" "$expected_perm" \
+            "$fpath permisos correctos" "$fpath permisos incorrectos"
     done
 
-    if [[ -f "$GRUB_CFG" ]]; then
-        local grub_perm
-        grub_perm=$(stat -c "%a" "$GRUB_CFG" 2>/dev/null || echo "???")
-        if [[ "$grub_perm" == "600" ]]; then
-            echo -e "  ${GREEN}OK${NC}  $GRUB_CFG ($grub_perm)"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  $GRUB_CFG ($grub_perm, esperado: 600)"
-            _vp_fail
-        fi
-    fi
+    [[ -f "$GRUB_CFG" ]] && _vp_perm_check "$GRUB_CFG" "600" \
+        "$GRUB_CFG permisos correctos" "$GRUB_CFG permisos incorrectos"
 
     # ── 7. PAM intacto ──
     echo ""
@@ -2328,14 +2343,14 @@ verificacion_proactiva() {
     echo ""
     _mark_section 13
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[13/44] HERRAMIENTAS DE SEGURIDAD${NC}"
-    local tools=("aide" "rkhunter" "lynis" "fail2ban-client")
-    local tool_names=("AIDE" "rkhunter" "lynis" "fail2ban")
-    for i in "${!tools[@]}"; do
-        if command -v "${tools[$i]}" &>/dev/null; then
-            echo -e "  ${GREEN}OK${NC}  ${tool_names[$i]} instalado"
+    local _sec_tools=("aide:AIDE" "rkhunter:rkhunter" "lynis:lynis" "fail2ban-client:fail2ban")
+    for _st in "${_sec_tools[@]}"; do
+        local _cmd="${_st%%:*}" _name="${_st#*:}"
+        if command -v "$_cmd" &>/dev/null; then
+            echo -e "  ${GREEN}OK${NC}  $_name instalado"
             _vp_ok
         else
-            echo -e "  ${YELLOW}!!${NC}  ${tool_names[$i]} NO instalado"
+            echo -e "  ${YELLOW}!!${NC}  $_name NO instalado"
             _vp_fail
         fi
     done
@@ -2363,7 +2378,7 @@ verificacion_proactiva() {
         cmdline=$(cat /proc/cmdline 2>/dev/null)
         local boot_params=("init_on_alloc" "lockdown")
         for param in "${boot_params[@]}"; do
-            if echo "$cmdline" | grep -q "$param"; then
+            if echo "$cmdline" | grep -qE "(^| )${param}(=| |$)"; then
                 echo -e "  ${GREEN}OK${NC}  $param presente en cmdline"
                 _vp_ok
             else
@@ -2396,14 +2411,8 @@ verificacion_proactiva() {
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[16/44] SANDBOXING SYSTEMD${NC}"
     local dropin_services=("$SSH_SERVICE_NAME" "fail2ban" "firewalld")
     for svc in "${dropin_services[@]}"; do
-        local dropin="/etc/systemd/system/${svc}.service.d/hardening.conf"
-        if [[ -f "$dropin" ]]; then
-            echo -e "  ${GREEN}OK${NC}  Drop-in de $svc presente"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Drop-in de $svc NO encontrado"
-            _vp_fail
-        fi
+        _vp_fcheck "/etc/systemd/system/${svc}.service.d/hardening.conf" \
+            "Drop-in de $svc presente" "Drop-in de $svc NO encontrado"
     done
 
     # ── 17. Cuentas ──
@@ -2426,10 +2435,8 @@ verificacion_proactiva() {
     # Cuentas sin contraseña
     local empty_pass=0
     while IFS=: read -r username pass _; do
-        if [[ "$pass" == "" ]]; then
-            ((empty_pass++)) || true
-        fi
-    done < /etc/shadow 2>/dev/null
+        [[ -z "$pass" ]] && empty_pass=$(( empty_pass + 1 ))
+    done < <(cat /etc/shadow 2>/dev/null)
     if [[ $empty_pass -eq 0 ]]; then
         echo -e "  ${GREEN}OK${NC}  Sin cuentas sin contraseña"
         _vp_ok
@@ -2441,10 +2448,8 @@ verificacion_proactiva() {
     # UID=0 extra
     local uid0_count=0
     while IFS=: read -r username _ uid _ _ _ _; do
-        if [[ "$uid" -eq 0 ]] && [[ "$username" != "root" ]]; then
-            ((uid0_count++))
-        fi
-    done < /etc/passwd
+        [[ "$uid" -eq 0 ]] && [[ "$username" != "root" ]] && uid0_count=$(( uid0_count + 1 ))
+    done < <(cat /etc/passwd 2>/dev/null)
     if [[ $uid0_count -eq 0 ]]; then
         echo -e "  ${GREEN}OK${NC}  Solo root tiene UID=0"
         _vp_ok
@@ -2458,22 +2463,11 @@ verificacion_proactiva() {
     _mark_section 18
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[18/44] RED AVANZADA${NC}"
     # Suricata
-    if systemctl is-active suricata &>/dev/null; then
-        echo -e "  ${GREEN}OK${NC}  Suricata IDS activo"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Suricata IDS NO activo"
-        _vp_fail
-    fi
+    _vp_svc_check suricata "Suricata IDS activo" "Suricata IDS NO activo"
 
     # DNS over TLS
-    if [[ -f /etc/systemd/resolved.conf.d/dns-over-tls.conf ]]; then
-        echo -e "  ${GREEN}OK${NC}  DNS over TLS configurado"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  DNS over TLS NO configurado"
-        _vp_fail
-    fi
+    _vp_fcheck /etc/systemd/resolved.conf.d/dns-over-tls.conf \
+        "DNS over TLS configurado" "DNS over TLS NO configurado"
 
     # WireGuard (N/A si no existe /etc/wireguard)
     if [[ ! -d /etc/wireguard ]]; then
@@ -2488,13 +2482,7 @@ verificacion_proactiva() {
     fi
 
     # arpwatch
-    if systemctl is-active arpwatch &>/dev/null; then
-        echo -e "  ${GREEN}OK${NC}  arpwatch activo"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  arpwatch NO activo"
-        _vp_fail
-    fi
+    _vp_svc_check arpwatch "arpwatch activo" "arpwatch NO activo"
 
     # ── 19. Automatización ──
     echo ""
@@ -2508,14 +2496,8 @@ verificacion_proactiva() {
         "/etc/cron.daily/seguridad-resumen:Digest diario"
     )
     for cj in "${cron_jobs[@]}"; do
-        IFS=':' read -r cpath cdesc <<< "$cj"
-        if [[ -f "$cpath" ]]; then
-            echo -e "  ${GREEN}OK${NC}  $cdesc ($cpath)"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  $cdesc NO configurado"
-            _vp_fail
-        fi
+        local cpath="${cj%%:*}" cdesc="${cj#*:}"
+        _vp_fcheck "$cpath" "$cdesc ($cpath)" "$cdesc NO configurado"
     done
 
     # ── 20. Sandboxing de apps ──
@@ -2567,16 +2549,10 @@ verificacion_proactiva() {
         _vp_fail
     fi
 
-    # TCP timestamps
-    local tcp_ts
-    tcp_ts=$(sysctl -n net.ipv4.tcp_timestamps 2>/dev/null || echo "1")
-    if [[ "$tcp_ts" == "0" ]]; then
-        echo -e "  ${GREEN}OK${NC}  TCP timestamps deshabilitados (anti-fingerprinting)"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  TCP timestamps habilitados (fingerprinting posible)"
-        _vp_fail
-    fi
+    # TCP timestamps (0 = deshabilitado = deseado)
+    _vp_sysctl_check net.ipv4.tcp_timestamps "0" \
+        "TCP timestamps deshabilitados (anti-fingerprinting)" \
+        "TCP timestamps habilitados (fingerprinting posible)"
 
     # Banners no filtran info
     local banner_leak=0
@@ -2628,22 +2604,13 @@ verificacion_proactiva() {
         fi
 
         # freshclam automático
-        if systemctl is-active clamav-freshclam &>/dev/null; then
-            echo -e "  ${GREEN}OK${NC}  Actualización automática de firmas activa"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Actualización automática de firmas NO activa"
-            _vp_fail
-        fi
+        _vp_svc_check clamav-freshclam \
+            "Actualización automática de firmas activa" \
+            "Actualización automática de firmas NO activa"
 
         # Cron de escaneo
-        if [[ -x /etc/cron.daily/clamav-scan ]]; then
-            echo -e "  ${GREEN}OK${NC}  Escaneo diario programado"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Escaneo diario NO programado"
-            _vp_fail
-        fi
+        _vp_xcheck /etc/cron.daily/clamav-scan \
+            "Escaneo diario programado" "Escaneo diario NO programado"
     else
         echo -e "  ${YELLOW}!!${NC}  ClamAV NO instalado ${DIM}(3 sub-checks omitidos)${NC}"
         _vp_fail
@@ -2667,22 +2634,11 @@ verificacion_proactiva() {
         fi
 
         # Script de auditoría
-        if [[ -x /usr/local/bin/openscap-auditar.sh ]]; then
-            echo -e "  ${GREEN}OK${NC}  Script de auditoría OpenSCAP disponible"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Script de auditoría OpenSCAP NO instalado"
-            _vp_fail
-        fi
-
+        _vp_xcheck /usr/local/bin/openscap-auditar.sh \
+            "Script de auditoría OpenSCAP disponible" "Script de auditoría OpenSCAP NO instalado"
         # Cron semanal
-        if [[ -x /etc/cron.weekly/openscap-audit ]]; then
-            echo -e "  ${GREEN}OK${NC}  Auditoría semanal programada"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Auditoría semanal NO programada"
-            _vp_fail
-        fi
+        _vp_xcheck /etc/cron.weekly/openscap-audit \
+            "Auditoría semanal programada" "Auditoría semanal NO programada"
 
         # Reportes existentes
         local scap_reports
@@ -2732,22 +2688,11 @@ verificacion_proactiva() {
         fi
 
         # Herramienta de consulta
-        if [[ -x /usr/local/bin/ioc-lookup.sh ]]; then
-            echo -e "  ${GREEN}OK${NC}  Herramienta ioc-lookup.sh disponible"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Herramienta ioc-lookup.sh NO instalada"
-            _vp_fail
-        fi
-
+        _vp_xcheck /usr/local/bin/ioc-lookup.sh \
+            "Herramienta ioc-lookup.sh disponible" "Herramienta ioc-lookup.sh NO instalada"
         # Cron de actualización
-        if [[ -x /etc/cron.daily/threat-intel-update ]]; then
-            echo -e "  ${GREEN}OK${NC}  Actualización diaria de IoC programada"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Actualización diaria de IoC NO programada"
-            _vp_fail
-        fi
+        _vp_xcheck /etc/cron.daily/threat-intel-update \
+            "Actualización diaria de IoC programada" "Actualización diaria de IoC NO programada"
     else
         echo -e "  ${YELLOW}!!${NC}  Directorio de IoC NO configurado ${DIM}(4 sub-checks omitidos)${NC}"
         _vp_fail
@@ -2759,13 +2704,8 @@ verificacion_proactiva() {
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[26/44] ACCESO INICIAL (TA0001)${NC}"
 
     # SSH hardening modular
-    if [[ -f /etc/ssh/sshd_config.d/01-acceso-inicial.conf ]]; then
-        echo -e "  ${GREEN}OK${NC}  Hardening SSH avanzado aplicado (sshd_config.d/)"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Hardening SSH avanzado NO aplicado"
-        _vp_fail
-    fi
+    _vp_fcheck /etc/ssh/sshd_config.d/01-acceso-inicial.conf \
+        "Hardening SSH avanzado aplicado (sshd_config.d/)" "Hardening SSH avanzado NO aplicado"
 
     # USBGuard (N/A en VMs)
     if [[ $_IS_VM -eq 1 ]]; then
@@ -2783,13 +2723,8 @@ verificacion_proactiva() {
     fi
 
     # Core dumps deshabilitados
-    if [[ -f /etc/systemd/coredump.conf.d/disable.conf ]]; then
-        echo -e "  ${GREEN}OK${NC}  Core dumps deshabilitados (anti-exploit)"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Core dumps NO deshabilitados"
-        _vp_fail
-    fi
+    _vp_fcheck /etc/systemd/coredump.conf.d/disable.conf \
+        "Core dumps deshabilitados (anti-exploit)" "Core dumps NO deshabilitados"
 
     # ── 27. Ejecución (TA0002) ──
     echo ""
@@ -2808,18 +2743,23 @@ verificacion_proactiva() {
     fi
 
     # noexec en montajes temporales (T1204 - M1038)
-    local noexec_ok=0
-    for nmp in /tmp /var/tmp /dev/shm; do
-        if mountpoint -q "$nmp" 2>/dev/null && mount | grep " on $nmp " | grep -q "noexec" 2>/dev/null; then
-            noexec_ok=$((noexec_ok + 1))
-        fi
-    done
-    if [[ $noexec_ok -ge 2 ]]; then
-        echo -e "  ${GREEN}OK${NC}  noexec en montajes temporales ($noexec_ok/3)"
-        _vp_ok
+    if [[ $_IS_CONTAINER -eq 1 ]]; then
+        echo -e "  ${DIM}--${NC}  noexec montajes N/A (contenedor, el host controla montajes)"
+        _vp_na
     else
-        echo -e "  ${YELLOW}!!${NC}  noexec incompleto en montajes temporales ($noexec_ok/3)"
-        _vp_fail
+        local noexec_ok=0
+        for nmp in /tmp /var/tmp /dev/shm; do
+            if mountpoint -q "$nmp" 2>/dev/null && mount | grep " on $nmp " | grep -q "noexec" 2>/dev/null; then
+                noexec_ok=$((noexec_ok + 1))
+            fi
+        done
+        if [[ $noexec_ok -ge 2 ]]; then
+            echo -e "  ${GREEN}OK${NC}  noexec en montajes temporales ($noexec_ok/3)"
+            _vp_ok
+        else
+            echo -e "  ${YELLOW}!!${NC}  noexec incompleto en montajes temporales ($noexec_ok/3)"
+            _vp_fail
+        fi
     fi
 
     # LD_PRELOAD restringido (T1129 - M1044)
@@ -2828,28 +2768,18 @@ verificacion_proactiva() {
 
     # Bash restringido por grupo (T1059.004 - M1038)
     if getent group shell-users &>/dev/null; then
-        local bash_perms
-        bash_perms=$(stat -c "%a" /bin/bash 2>/dev/null || echo "755")
-        if [[ "$bash_perms" == "750" ]]; then
-            echo -e "  ${GREEN}OK${NC}  /bin/bash restringido a grupo shell-users (750)"
-            _vp_ok
-        else
-            echo -e "  ${YELLOW}!!${NC}  Grupo shell-users existe pero bash tiene permisos $bash_perms"
-            _vp_fail
-        fi
+        _vp_perm_check /bin/bash "750" \
+            "/bin/bash restringido a grupo shell-users" \
+            "Grupo shell-users existe pero bash no restringido"
     else
         echo -e "  ${YELLOW}!!${NC}  Bash no restringido (grupo shell-users no existe)"
         _vp_fail
     fi
 
     # Intérpretes restringidos (T1059 - M1038)
-    if getent group interp-users &>/dev/null; then
-        echo -e "  ${GREEN}OK${NC}  Intérpretes restringidos a grupo interp-users"
-        _vp_ok
-    else
-        echo -e "  ${YELLOW}!!${NC}  Intérpretes NO restringidos (grupo interp-users no existe)"
-        _vp_fail
-    fi
+    _vp_group_check interp-users \
+        "Intérpretes restringidos a grupo interp-users" \
+        "Intérpretes NO restringidos (grupo interp-users no existe)"
 
     # cron.allow
     _vp_fcheck /etc/cron.allow \
@@ -3201,17 +3131,21 @@ verificacion_proactiva() {
             local _tc="$DIM"
             case $_tw in 3) _tc="$RED" ;; 2) _tc="$YELLOW" ;; esac
             printf "      ${_tc}%d.${NC} [%s] %s\n" "$((_top_i+1))" "${_CHECK_TITLE[$_tk]:-?}" "(check $_tk)"
-            ((_top_i++)) || true
+            _top_i=$(( _top_i + 1 ))
         done
         echo ""
     fi
 
-    if [[ $warnings -le 5 ]]; then
+    if [[ $warnings -eq 0 ]]; then
+        _center "${GREEN}${BOLD}Sistema completamente securizado${NC}"
+    elif [[ $_crit_fails -gt 0 ]]; then
+        _center "${RED}Sistema requiere atención inmediata ($_crit_fails fallos críticos)${NC}"
+    elif [[ $warnings -le 5 ]]; then
+        _center "${GREEN}Sistema bien securizado (ajustes menores pendientes)${NC}"
+    elif [[ $warnings -le 15 ]]; then
         _center "${YELLOW}Sistema parcialmente securizado${NC}"
-    elif [[ $warnings -le 10 ]]; then
-        _center "${YELLOW}Sistema necesita más hardening${NC}"
     else
-        _center "${RED}Sistema requiere atención inmediata${NC}"
+        _center "${YELLOW}Sistema necesita más hardening${NC}"
     fi
 
     echo ""
@@ -3301,7 +3235,7 @@ verificacion_proactiva() {
     local _mod_i=0
     local _mod_total=${#_NEEDED_MODS[@]}
     for _m in $(echo "${!_NEEDED_MODS[@]}" | tr ' ' '\n' | sort -n); do
-        ((_mod_i++)) || true
+        _mod_i=$(( _mod_i + 1 ))
         echo ""
         echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
         echo -e "  ${CYAN}▶${NC} ${BOLD}Módulo ${_m} (${_mod_i}/${_mod_total}):${NC} ${MOD_NAMES[$_m]}"
