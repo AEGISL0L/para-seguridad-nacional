@@ -87,10 +87,14 @@ net.ipv6.conf.default.accept_ra = 0
 # --- User namespaces (comentado - puede romper algunas apps) ---
 # kernel.unprivileged_userns_clone = 0
 EOF
+    log_change "Creado" "/etc/sysctl.d/99-paranoid.conf"
 
     /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system"
     log_info "Kernel hardening extremo aplicado"
     log_warn "ptrace_scope=2 puede afectar debuggers (gdb, strace)"
+else
+    log_skip "Hardening extremo del kernel"
 fi
 
 # ============================================================
@@ -127,8 +131,11 @@ install hfsplus /bin/false
 install udf /bin/false
 install squashfs /bin/false
 EOF
+    log_change "Creado" "/etc/modprobe.d/paranoid-blacklist.conf"
 
     log_info "Módulos peligrosos bloqueados"
+else
+    log_skip "Bloqueo de modulos peligrosos"
 fi
 
 if ask "¿Bloquear Bluetooth también?"; then
@@ -138,9 +145,14 @@ if ask "¿Bloquear Bluetooth también?"; then
 install bluetooth /bin/false
 install btusb /bin/false
 EOF
+    log_change "Modificado" "/etc/modprobe.d/paranoid-blacklist.conf"
     systemctl stop bluetooth 2>/dev/null || true
+    log_change "Servicio" "bluetooth stop"
     systemctl disable bluetooth 2>/dev/null || true
+    log_change "Servicio" "bluetooth disable"
     log_info "Bluetooth bloqueado"
+else
+    log_skip "Bloqueo de Bluetooth"
 fi
 
 # ============================================================
@@ -150,23 +162,30 @@ log_section "3. DESHABILITAR CORE DUMPS"
 if ask "¿Deshabilitar core dumps completamente?"; then
     # limits.conf
     cp /etc/security/limits.conf "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/security/limits.conf"
     if ! grep -q "hard core 0" /etc/security/limits.conf; then
         echo "* hard core 0" >> /etc/security/limits.conf
         echo "* soft core 0" >> /etc/security/limits.conf
+        log_change "Modificado" "/etc/security/limits.conf"
     fi
 
     # systemd
     mkdir -p /etc/systemd/coredump.conf.d/
+    log_change "Creado" "/etc/systemd/coredump.conf.d/"
     cat > /etc/systemd/coredump.conf.d/disable.conf << 'EOF'
 [Coredump]
 Storage=none
 ProcessSizeMax=0
 EOF
+    log_change "Creado" "/etc/systemd/coredump.conf.d/disable.conf"
 
     # Profile
     echo "ulimit -c 0" > /etc/profile.d/disable-coredump.sh
+    log_change "Creado" "/etc/profile.d/disable-coredump.sh"
 
     log_info "Core dumps deshabilitados"
+else
+    log_skip "Deshabilitar core dumps"
 fi
 
 # ============================================================
@@ -180,8 +199,11 @@ TMOUT=900
 readonly TMOUT
 export TMOUT
 EOF
+    log_change "Creado" "/etc/profile.d/timeout.sh"
 
     log_info "Timeout de sesión: 15 minutos"
+else
+    log_skip "Timeout automatico de sesiones"
 fi
 
 # ============================================================
@@ -194,11 +216,14 @@ if ask "¿Restringir 'su' al grupo wheel?"; then
     # Crear archivo PAM para su si no existe
     if [[ -f /etc/pam.d/su ]]; then
         cp /etc/pam.d/su "$BACKUP_DIR/"
+        log_change "Backup" "/etc/pam.d/su"
         # Habilitar pam_wheel en su existente
         if grep -q "^#.*pam_wheel.so" /etc/pam.d/su; then
             sed -i 's/^#\(.*pam_wheel.so.*\)/\1/' /etc/pam.d/su
+            log_change "Modificado" "/etc/pam.d/su"
         elif ! grep -q "pam_wheel.so" /etc/pam.d/su; then
             sed -i '1a auth\t\trequired\tpam_wheel.so use_uid' /etc/pam.d/su
+            log_change "Modificado" "/etc/pam.d/su"
         fi
     else
         # Crear /etc/pam.d/su para openSUSE
@@ -213,11 +238,14 @@ password include        common-password
 session  include        common-session
 session  optional       pam_xauth.so
 EOF
+        log_change "Creado" "/etc/pam.d/su"
         log_info "Archivo /etc/pam.d/su creado"
     fi
 
     log_info "'su' restringido al grupo wheel"
     log_info "Solo usuarios en grupo wheel pueden usar 'su'"
+else
+    log_skip "Restringir su al grupo wheel"
 fi
 
 # ============================================================
@@ -227,16 +255,22 @@ log_section "6. RESTRINGIR CRON"
 if ask "¿Restringir cron solo a root y tu usuario?"; then
     echo "root" > /etc/cron.allow
     echo "${SUDO_USER:-root}" >> /etc/cron.allow
+    log_change "Creado" "/etc/cron.allow"
     chmod 600 /etc/cron.allow
+    log_change "Permisos" "/etc/cron.allow -> 600"
     rm -f /etc/cron.deny 2>/dev/null || true
 
     # at también
     echo "root" > /etc/at.allow
     echo "${SUDO_USER:-root}" >> /etc/at.allow
+    log_change "Creado" "/etc/at.allow"
     chmod 600 /etc/at.allow
+    log_change "Permisos" "/etc/at.allow -> 600"
     rm -f /etc/at.deny 2>/dev/null || true
 
     log_info "cron/at restringido a root y ${SUDO_USER:-root}"
+else
+    log_skip "Restringir cron/at"
 fi
 
 # ============================================================
@@ -255,17 +289,23 @@ if ask "¿Agregar banner de advertencia legal?"; then
 ╚═══════════════════════════════════════════════════════════════════╝
 "
     echo "$BANNER" > /etc/issue
+    log_change "Creado" "/etc/issue"
     echo "$BANNER" > /etc/issue.net
+    log_change "Creado" "/etc/issue.net"
 
     # SSH banner
     echo "$BANNER" > /etc/ssh/banner
+    log_change "Creado" "/etc/ssh/banner"
     if [[ -f /etc/ssh/sshd_config ]]; then
         if ! grep -q "^Banner" /etc/ssh/sshd_config; then
             echo "Banner /etc/ssh/banner" >> /etc/ssh/sshd_config
+            log_change "Modificado" "/etc/ssh/sshd_config"
         fi
     fi
 
     log_info "Banner legal configurado"
+else
+    log_skip "Banner de advertencia legal"
 fi
 
 # ============================================================
@@ -275,27 +315,43 @@ log_section "8. PERMISOS RESTRICTIVOS"
 if ask "¿Aplicar permisos restrictivos a archivos del sistema?"; then
     # Archivos de configuración críticos
     chmod 600 /etc/shadow 2>/dev/null || true
+    log_change "Permisos" "/etc/shadow -> 600"
     chmod 600 /etc/gshadow 2>/dev/null || true
+    log_change "Permisos" "/etc/gshadow -> 600"
     chmod 644 /etc/passwd 2>/dev/null || true
+    log_change "Permisos" "/etc/passwd -> 644"
     chmod 644 /etc/group 2>/dev/null || true
+    log_change "Permisos" "/etc/group -> 644"
 
     # Crontabs
     chmod 700 /etc/crontab 2>/dev/null || true
+    log_change "Permisos" "/etc/crontab -> 700"
     chmod 700 /etc/cron.d 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.d -> 700"
     chmod 700 /etc/cron.daily 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.daily -> 700"
     chmod 700 /etc/cron.hourly 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.hourly -> 700"
     chmod 700 /etc/cron.weekly 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.weekly -> 700"
     chmod 700 /etc/cron.monthly 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.monthly -> 700"
 
     # SSH
     chmod 700 /etc/ssh 2>/dev/null || true
+    log_change "Permisos" "/etc/ssh -> 700"
     chmod 600 /etc/ssh/sshd_config 2>/dev/null || true
+    log_change "Permisos" "/etc/ssh/sshd_config -> 600"
     chmod 600 /etc/ssh/ssh_host_*_key 2>/dev/null || true
+    log_change "Permisos" "/etc/ssh/ssh_host_*_key -> 600"
 
     # GRUB (si existe)
     chmod 600 $GRUB_CFG 2>/dev/null || true
+    log_change "Permisos" "$GRUB_CFG -> 600"
 
     log_info "Permisos restrictivos aplicados"
+else
+    log_skip "Permisos restrictivos a archivos del sistema"
 fi
 
 # ============================================================
@@ -310,6 +366,8 @@ if ask "¿Proteger GRUB con contraseña?"; then
 
     log_info "GRUB protegido con contraseña"
     log_warn "Necesitarás esta contraseña para editar entradas de GRUB"
+else
+    log_skip "Proteger GRUB con contrasena"
 fi
 
 # ============================================================
@@ -329,6 +387,8 @@ if ask "¿Instalar AIDE (verificador de integridad)?"; then
         mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db 2>/dev/null || true
         log_info "AIDE instalado. Ejecutar: aide --check"
     fi
+else
+    log_skip "Instalar AIDE"
 fi
 
 if ask "¿Instalar rkhunter (detector de rootkits)?"; then
@@ -337,12 +397,16 @@ if ask "¿Instalar rkhunter (detector de rootkits)?"; then
         rkhunter --propupd 2>/dev/null || true
         log_info "rkhunter instalado. Ejecutar: rkhunter --check"
     fi
+else
+    log_skip "Instalar rkhunter"
 fi
 
 if ask "¿Instalar lynis (auditor de seguridad)?"; then
     if pkg_install lynis; then
         log_info "lynis instalado. Ejecutar: lynis audit system"
     fi
+else
+    log_skip "Instalar lynis"
 fi
 
 # ============================================================
@@ -351,6 +415,7 @@ log_section "11. FIREWALL PARANOICO"
 
 if ask "¿Configurar firewall en modo paranoico (DROP por defecto)?"; then
     systemctl enable --now firewalld 2>/dev/null || true
+    log_change "Servicio" "firewalld enable --now"
 
     # Zona drop como default para interfaces no confiables
     fw_set_default_zone drop 2>/dev/null || true
@@ -371,6 +436,8 @@ if ask "¿Configurar firewall en modo paranoico (DROP por defecto)?"; then
 
     log_info "Firewall configurado en modo paranoico"
     log_warn "Zona por defecto: DROP (bloquea todo lo no explícito)"
+else
+    log_skip "Firewall en modo paranoico"
 fi
 
 # ============================================================
@@ -381,22 +448,33 @@ if systemctl is-active cups &>/dev/null; then
     echo "CUPS está activo (impresión)"
     if ask "¿Restringir CUPS solo a localhost?"; then
         cp /etc/cups/cupsd.conf "$BACKUP_DIR/" 2>/dev/null || true
+        log_change "Backup" "/etc/cups/cupsd.conf"
 
         # Asegurar que solo escuche en localhost
         sed -i 's/^Listen.*/Listen localhost:631/' /etc/cups/cupsd.conf 2>/dev/null || true
+        log_change "Modificado" "/etc/cups/cupsd.conf"
         sed -i 's/^Port.*/# Port 631/' /etc/cups/cupsd.conf 2>/dev/null || true
+        log_change "Modificado" "/etc/cups/cupsd.conf"
 
         # Deshabilitar browsing
         sed -i 's/^Browsing.*/Browsing Off/' /etc/cups/cupsd.conf 2>/dev/null || true
+        log_change "Modificado" "/etc/cups/cupsd.conf"
 
         systemctl restart cups
+        log_change "Servicio" "cups restart"
         log_info "CUPS restringido a localhost"
+    else
+        log_skip "Restringir CUPS a localhost"
     fi
 
     if ask "¿Deshabilitar CUPS completamente (no podrás imprimir)?"; then
         systemctl stop cups
+        log_change "Servicio" "cups stop"
         systemctl disable cups
+        log_change "Servicio" "cups disable"
         log_info "CUPS deshabilitado"
+    else
+        log_skip "Deshabilitar CUPS completamente"
     fi
 fi
 
@@ -408,17 +486,22 @@ if ask "¿Configurar umask restrictivo (027)?"; then
     # /etc/profile
     if ! grep -q "umask 027" /etc/profile; then
         echo "umask 027" >> /etc/profile
+        log_change "Modificado" "/etc/profile"
     fi
 
     # /etc/bashrc
     if [[ -f /etc/bashrc ]] && ! grep -q "umask 027" /etc/bashrc; then
         echo "umask 027" >> /etc/bashrc
+        log_change "Modificado" "/etc/bashrc"
     fi
 
     # login.defs
     sed -i 's/^UMASK.*/UMASK 027/' /etc/login.defs 2>/dev/null || true
+    log_change "Modificado" "/etc/login.defs"
 
     log_info "umask configurado a 027 (archivos: 640, directorios: 750)"
+else
+    log_skip "Umask restrictivo"
 fi
 
 # ============================================================
@@ -428,8 +511,11 @@ log_section "14. DESHABILITAR USB STORAGE (OPCIONAL)"
 log_warn "CUIDADO: Esto impedirá usar memorias USB"
 if ask "¿Bloquear almacenamiento USB (memorias, discos externos)?"; then
     echo "install usb-storage /bin/false" >> /etc/modprobe.d/paranoid-blacklist.conf
+    log_change "Modificado" "/etc/modprobe.d/paranoid-blacklist.conf"
     rmmod usb_storage 2>/dev/null || true
     log_info "USB storage bloqueado"
+else
+    log_skip "Bloquear almacenamiento USB"
 fi
 
 # ============================================================
@@ -509,10 +595,14 @@ if systemctl is-active auditd &>/dev/null; then
 # Hacer reglas inmutables (requiere reboot para cambiar)
 -e 2
 EOF
+        log_change "Creado" "/etc/audit/rules.d/99-paranoid.rules"
 
         augenrules --load 2>/dev/null || service auditd restart
+        log_change "Aplicado" "augenrules --load"
         log_info "Auditoría paranoica configurada"
         log_warn "Reglas inmutables: requiere reboot para modificar"
+    else
+        log_skip "Reglas de auditoria paranoicas"
     fi
 fi
 
@@ -547,10 +637,14 @@ logpath = /var/log/secure
 maxretry = 2
 bantime = 72h
 EOF
+        log_change "Creado" "/etc/fail2ban/jail.local"
 
         systemctl restart fail2ban
+        log_change "Servicio" "fail2ban restart"
         log_info "fail2ban configurado en modo agresivo"
         log_info "  - Ban general: 24h, SSH: 48h, DDoS: 72h"
+    else
+        log_skip "Configurar fail2ban agresivo"
     fi
 else
     log_warn "fail2ban no instalado. Instálalo primero."
@@ -559,6 +653,7 @@ fi
 # ============================================================
 # RESUMEN FINAL
 # ============================================================
+show_changes_summary
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║          HARDENING PARANOICO COMPLETADO                   ║"

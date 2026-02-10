@@ -24,19 +24,26 @@ log_info "1. Eliminando software de acceso remoto..."
 
 # Deshabilitar VNC
 sudo systemctl stop vncserver@* 2>/dev/null || true
+log_change "Servicio" "vncserver@* stop"
 sudo systemctl disable vncserver@* 2>/dev/null || true
+log_change "Servicio" "vncserver@* disable"
 sudo systemctl mask vncserver@* 2>/dev/null || true
+log_change "Servicio" "vncserver@* mask"
 sudo systemctl stop xvnc* 2>/dev/null || true
+log_change "Servicio" "xvnc* stop"
 sudo systemctl disable xvnc* 2>/dev/null || true
+log_change "Servicio" "xvnc* disable"
 
 # Deshabilitar KDE Remote Desktop (krfb)
 sudo systemctl stop krfb 2>/dev/null || true
+log_change "Servicio" "krfb stop"
 killall krfb 2>/dev/null || true
 
 # Bloquear X11 forwarding
 if [[ -f /etc/ssh/sshd_config ]]; then
     sudo sed -i 's/^X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config 2>/dev/null || true
     sudo sed -i 's/^#X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config 2>/dev/null || true
+    log_change "Modificado" "/etc/ssh/sshd_config (X11Forwarding no)"
 fi
 
 log_info "   VNC y acceso remoto deshabilitados"
@@ -67,6 +74,8 @@ if ask "¿Borrar cookies y datos de navegación de Firefox?"; then
 
     log_info "   Datos de Firefox eliminados"
     log_warn "   Deberás iniciar sesión nuevamente en los sitios web"
+else
+    log_skip "Borrar cookies y datos de navegación de Firefox"
 fi
 
 # ============================================================
@@ -76,12 +85,14 @@ log_info "3. Bloqueando compartición de pantalla..."
 
 # Deshabilitar PipeWire screen sharing portal
 mkdir -p ~/.config/xdg-desktop-portal
+log_change "Creado" "~/.config/xdg-desktop-portal/"
 cat > ~/.config/xdg-desktop-portal/portals.conf << 'EOF'
 [preferred]
 default=kde
 org.freedesktop.impl.portal.ScreenCast=none
 org.freedesktop.impl.portal.RemoteDesktop=none
 EOF
+log_change "Creado" "~/.config/xdg-desktop-portal/portals.conf"
 
 # Bloquear en KDE
 mkdir -p ~/.config
@@ -91,6 +102,7 @@ cat >> ~/.config/kwinrc << 'EOF'
 screencastEnabled=false
 remoteaccessEnabled=false
 EOF
+log_change "Modificado" "~/.config/kwinrc"
 
 log_info "   Screen sharing bloqueado"
 
@@ -101,20 +113,31 @@ log_info "4. Protegiendo archivos sensibles..."
 
 # Home directory solo accesible por ti
 chmod 700 ~
+log_change "Permisos" "~ -> 700"
 
 # Archivos de configuración
 chmod 700 ~/.config 2>/dev/null || true
+log_change "Permisos" "~/.config -> 700"
 chmod 700 ~/.local 2>/dev/null || true
+log_change "Permisos" "~/.local -> 700"
 chmod 700 ~/.cache 2>/dev/null || true
+log_change "Permisos" "~/.cache -> 700"
 chmod 700 ~/.mozilla 2>/dev/null || true
+log_change "Permisos" "~/.mozilla -> 700"
 chmod 700 ~/.ssh 2>/dev/null || true
+log_change "Permisos" "~/.ssh -> 700"
 chmod 600 ~/.ssh/* 2>/dev/null || true
+log_change "Permisos" "~/.ssh/* -> 600"
 chmod 700 ~/.gnupg 2>/dev/null || true
+log_change "Permisos" "~/.gnupg -> 700"
 
 # Documentos
 chmod 700 ~/Documentos 2>/dev/null || true
+log_change "Permisos" "~/Documentos -> 700"
 chmod 700 ~/Descargas 2>/dev/null || true
+log_change "Permisos" "~/Descargas -> 700"
 chmod 700 ~/Escritorio 2>/dev/null || true
+log_change "Permisos" "~/Escritorio -> 700"
 
 log_info "   Permisos restrictivos aplicados"
 
@@ -136,6 +159,10 @@ if command -v gocryptfs &>/dev/null; then
     if [[ ! -d "$VAULT_DIR" ]]; then
         mkdir -p "$VAULT_DIR" "$MOUNT_DIR"
         chmod 700 "$VAULT_DIR" "$MOUNT_DIR"
+        log_change "Creado" "$VAULT_DIR/"
+        log_change "Creado" "$MOUNT_DIR/"
+        log_change "Permisos" "$VAULT_DIR -> 700"
+        log_change "Permisos" "$MOUNT_DIR -> 700"
 
         echo ""
         log_warn "Configurando carpeta cifrada..."
@@ -162,12 +189,15 @@ if ask "¿Bloquear webcam y micrófono por software?"; then
     # Blacklist módulos de webcam
     echo "install uvcvideo /bin/false" | sudo tee /etc/modprobe.d/disable-webcam.conf > /dev/null
     echo "install snd_usb_audio /bin/false" | sudo tee -a /etc/modprobe.d/disable-webcam.conf > /dev/null
+    log_change "Creado" "/etc/modprobe.d/disable-webcam.conf"
 
     # Descargar módulos
     sudo rmmod uvcvideo 2>/dev/null || true
 
     log_info "   Webcam bloqueada (necesita reboot para efecto completo)"
     log_warn "   Para reactivar: sudo rm /etc/modprobe.d/disable-webcam.conf"
+else
+    log_skip "Bloquear webcam y micrófono"
 fi
 
 # ============================================================
@@ -191,6 +221,8 @@ if ask "¿Limpiar historial de bash y archivos recientes?"; then
     rm -rf ~/.local/share/Trash/* 2>/dev/null || true
 
     log_info "   Historiales limpiados"
+else
+    log_skip "Limpiar historial de bash y archivos recientes"
 fi
 
 # ============================================================
@@ -210,6 +242,7 @@ Timeout=1
 [Greeter][Wallpaper][org.kde.color][General]
 Color=0,0,0
 EOF
+log_change "Creado" "~/.config/kscreenlockerrc"
 
 log_info "   Bloqueo automático: 1 minuto de inactividad"
 log_info "   Atajo de teclado: Super+L (bloqueo inmediato)"
@@ -221,6 +254,7 @@ log_info "9. Configurando notificaciones de seguridad..."
 
 # Script de notificación en login
 mkdir -p ~/.config/autostart
+log_change "Creado" "~/.config/autostart/"
 cat > ~/.config/autostart/security-notify.desktop << 'EOF'
 [Desktop Entry]
 Type=Application
@@ -230,6 +264,7 @@ Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
 EOF
+log_change "Creado" "~/.config/autostart/security-notify.desktop"
 
 log_info "   Notificación de login habilitada"
 
@@ -306,5 +341,6 @@ echo "   Desmontar: fusermount -u ~/Privado"
 echo ""
 echo "7. CUBRIR LA WEBCAM físicamente si no la usas"
 echo ""
+show_changes_summary
 log_warn "Si sospechas de SEQUOIA o acceso no autorizado específico,"
 log_warn "considera contactar con las autoridades."

@@ -38,6 +38,7 @@ echo ""
 
 if [[ -f /etc/ssh/sshd_config ]]; then
     cp /etc/ssh/sshd_config "$BACKUP_DIR/"
+    log_change "Backup" "/etc/ssh/sshd_config"
     echo "Configuración actual relevante:"
     grep -E "^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|MaxAuthTries|X11Forwarding|AllowTcpForwarding|ClientAliveInterval|LoginGraceTime|Protocol|PermitEmptyPasswords|AllowAgentForwarding)" /etc/ssh/sshd_config 2>/dev/null | sed 's/^/  /' || echo "  (valores por defecto)"
     echo ""
@@ -45,6 +46,7 @@ if [[ -f /etc/ssh/sshd_config ]]; then
     if ask "¿Aplicar hardening SSH avanzado contra acceso inicial?"; then
         # Crear directorio de configuración modular
         mkdir -p /etc/ssh/sshd_config.d
+        log_change "Creado" "/etc/ssh/sshd_config.d/"
 
         # Detectar conflictos con otros drop-ins de securizar
         for _sshd_dropin in /etc/ssh/sshd_config.d/*-hardening*.conf; do
@@ -104,20 +106,26 @@ IgnoreRhosts yes
 # AllowGroups wheel
 EOF
 
+        log_change "Creado" "/etc/ssh/sshd_config.d/80-acceso-inicial.conf"
+
         # Verificar que la config incluye el directorio
         if ! grep -q "^Include /etc/ssh/sshd_config.d/" /etc/ssh/sshd_config 2>/dev/null; then
             # Insertar al inicio del archivo
             sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
+            log_change "Modificado" "/etc/ssh/sshd_config"
         fi
 
         # Verificar sintaxis antes de recargar
         if sshd -t 2>/dev/null; then
             systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
+            log_change "Servicio" "$SSH_SERVICE_NAME reload"
             log_info "SSH hardening aplicado (config modular en sshd_config.d/)"
         else
             log_error "Error de sintaxis en configuración SSH - revirtiendo"
             rm -f /etc/ssh/sshd_config.d/80-acceso-inicial.conf
         fi
+    else
+        log_skip "Hardening SSH avanzado"
     fi
 else
     log_warn "No se encontró /etc/ssh/sshd_config"
@@ -165,26 +173,35 @@ kernel.sysrq = 0
 fs.suid_dumpable = 0
 EOF
 
+        log_change "Creado" "/etc/sysctl.d/99-anti-exploit-web.conf"
+
         /usr/sbin/sysctl --system > /dev/null 2>&1
+        log_change "Aplicado" "sysctl --system"
         log_info "Protecciones anti-exploit aplicadas (sysctl)"
 
         # Limitar core dumps
         if [[ -f /etc/security/limits.conf ]]; then
             cp /etc/security/limits.conf "$BACKUP_DIR/"
+            log_change "Backup" "/etc/security/limits.conf"
             if ! grep -q "^\* hard core 0" /etc/security/limits.conf 2>/dev/null; then
                 echo "* hard core 0" >> /etc/security/limits.conf
+                log_change "Modificado" "/etc/security/limits.conf"
                 log_info "Core dumps deshabilitados en limits.conf"
             fi
         fi
 
         # Deshabilitar core dumps via systemd
         mkdir -p /etc/systemd/coredump.conf.d/
+        log_change "Creado" "/etc/systemd/coredump.conf.d/"
         cat > /etc/systemd/coredump.conf.d/disable.conf << 'EOF'
 [Coredump]
 Storage=none
 ProcessSizeMax=0
 EOF
+        log_change "Creado" "/etc/systemd/coredump.conf.d/disable.conf"
         log_info "Core dumps deshabilitados via systemd"
+    else
+        log_skip "Protecciones contra exploits web"
     fi
 else
     echo -e "  ${GREEN}OK${NC} No se detectan servicios web expuestos externamente"
@@ -223,9 +240,12 @@ if [[ $SYSTEM_SHELLS -gt 0 ]]; then
         while IFS=: read -r user _ uid _ _ _ shell; do
             if [[ "$uid" -ge 1 && "$uid" -lt 1000 ]] && [[ "$shell" == */bash || "$shell" == */sh || "$shell" == */zsh ]]; then
                 usermod -s /sbin/nologin "$user" 2>/dev/null || true
+                log_change "Usuario" "$user -> shell /sbin/nologin"
                 log_info "Shell cambiado a nologin: $user"
             fi
         done < /etc/passwd
+    else
+        log_skip "Asignar nologin a cuentas de sistema"
     fi
 else
     echo -e "  ${GREEN}OK${NC} No hay cuentas de sistema con shell inapropiado"
@@ -258,6 +278,7 @@ echo ""
 
 if ask "¿Agregar dominios de phishing conocidos al bloqueo de hosts?"; then
     cp /etc/hosts "$BACKUP_DIR/"
+    log_change "Backup" "/etc/hosts"
 
     # Verificar si ya existe el bloque
     if ! grep -q "ANTI-PHISHING" /etc/hosts 2>/dev/null; then
@@ -289,10 +310,13 @@ if ask "¿Agregar dominios de phishing conocidos al bloqueo de hosts?"; then
 # 0.0.0.0 tinyurl.com
 # 0.0.0.0 t.co
 EOF
+        log_change "Modificado" "/etc/hosts"
         log_info "Dominios de phishing bloqueados en /etc/hosts"
     else
         log_info "Bloqueo anti-phishing ya presente en /etc/hosts"
     fi
+else
+    log_skip "Bloqueo de dominios de phishing"
 fi
 
 # ============================================================
@@ -360,7 +384,9 @@ for dir_pattern in "${DOWNLOAD_DIRS[@]}"; do
 done
 DLEOF
 
+    log_change "Creado" "/usr/local/bin/monitor-descargas.sh"
     chmod +x /usr/local/bin/monitor-descargas.sh
+    log_change "Permisos" "/usr/local/bin/monitor-descargas.sh -> +x"
     log_info "Script creado: /usr/local/bin/monitor-descargas.sh"
 
     # Montar /tmp con noexec si no lo está
@@ -370,6 +396,8 @@ DLEOF
     elif mount | grep "on /tmp " | grep -q "noexec"; then
         echo -e "  ${GREEN}OK${NC} /tmp ya tiene noexec"
     fi
+else
+    log_skip "Protecciones contra drive-by compromise"
 fi
 
 # ============================================================
@@ -439,7 +467,9 @@ if ask "¿Verificar y securizar la cadena de suministro de software?"; then
                         [[ -f "$repo_file" ]] || continue
                         if grep -q "^gpgcheck=0" "$repo_file"; then
                             cp "$repo_file" "$BACKUP_DIR/"
+                            log_change "Backup" "$repo_file"
                             sed -i 's/^gpgcheck=0/gpgcheck=1/' "$repo_file"
+                            log_change "Modificado" "$repo_file"
                         fi
                     done
                     ;;
@@ -448,7 +478,9 @@ if ask "¿Verificar y securizar la cadena de suministro de software?"; then
                         [[ -f "$repo_file" ]] || continue
                         if grep -q "^gpgcheck=0" "$repo_file"; then
                             cp "$repo_file" "$BACKUP_DIR/"
+                            log_change "Backup" "$repo_file"
                             sed -i 's/^gpgcheck=0/gpgcheck=1/' "$repo_file"
+                            log_change "Modificado" "$repo_file"
                         fi
                     done
                     ;;
@@ -457,18 +489,24 @@ if ask "¿Verificar y securizar la cadena de suministro de software?"; then
                         [[ -f "$src_file" ]] || continue
                         if grep -qi "trusted=yes" "$src_file" 2>/dev/null; then
                             cp "$src_file" "$BACKUP_DIR/"
+                            log_change "Backup" "$src_file"
                             sed -i 's/\[trusted=yes\]//gi' "$src_file"
+                            log_change "Modificado" "$src_file"
                         fi
                     done
                     ;;
                 arch)
                     if grep -q "^SigLevel.*Never" /etc/pacman.conf 2>/dev/null; then
                         cp /etc/pacman.conf "$BACKUP_DIR/"
+                        log_change "Backup" "/etc/pacman.conf"
                         sed -i 's/^SigLevel.*Never/SigLevel = Required DatabaseOptional/' /etc/pacman.conf
+                        log_change "Modificado" "/etc/pacman.conf"
                     fi
                     ;;
             esac
             log_info "Verificación GPG habilitada en todos los repositorios"
+        else
+            log_skip "Habilitar verificación GPG en repositorios"
         fi
     fi
 
@@ -492,6 +530,8 @@ if ask "¿Verificar y securizar la cadena de suministro de software?"; then
     else
         echo -e "  ${GREEN}OK${NC} Todos los paquetes verificados tienen firma"
     fi
+else
+    log_skip "Verificar cadena de suministro de software"
 fi
 
 # ============================================================
@@ -510,8 +550,12 @@ if command -v usbguard &>/dev/null; then
         if ask "¿Activar USBGuard?"; then
             # Generar política base con dispositivos actuales
             usbguard generate-policy > /etc/usbguard/rules.conf 2>/dev/null || true
+            log_change "Creado" "/etc/usbguard/rules.conf"
             systemctl enable --now usbguard 2>/dev/null || true
+            log_change "Servicio" "usbguard enable --now"
             log_info "USBGuard activado con política base"
+        else
+            log_skip "Activar USBGuard"
         fi
     fi
 else
@@ -520,9 +564,13 @@ else
         pkg_install usbguard
         if command -v usbguard &>/dev/null; then
             usbguard generate-policy > /etc/usbguard/rules.conf 2>/dev/null || true
+            log_change "Creado" "/etc/usbguard/rules.conf"
             systemctl enable --now usbguard 2>/dev/null || true
+            log_change "Servicio" "usbguard enable --now"
             log_info "USBGuard instalado y configurado"
         fi
+    else
+        log_skip "Instalar USBGuard"
     fi
 fi
 
@@ -550,7 +598,10 @@ install firewire-ohci /bin/false
 install firewire-sbp2 /bin/false
 install thunderbolt /bin/false
 EOF
+        log_change "Creado" "/etc/modprobe.d/dma-hardening.conf"
         log_info "Módulos DMA bloqueados"
+    else
+        log_skip "Bloquear módulos DMA"
     fi
 fi
 
@@ -598,7 +649,11 @@ if ask "¿Crear reglas de firewall para limitar acceso a servicios detectados?";
     else
         log_warn "firewalld no activo - no se pueden aplicar reglas"
     fi
+else
+    log_skip "Reglas de firewall para servicios detectados"
 fi
+
+show_changes_summary
 
 # ============================================================
 # RESUMEN

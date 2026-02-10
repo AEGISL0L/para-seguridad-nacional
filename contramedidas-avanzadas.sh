@@ -58,7 +58,11 @@ while true; do
 done
 EOFTEMPEST
     chmod +x /usr/local/bin/tempest-noise.sh
+    log_change "Creado" "/usr/local/bin/tempest-noise.sh"
+    log_change "Permisos" "/usr/local/bin/tempest-noise.sh -> +x"
     log_info "Script de ruido TEMPEST creado: /usr/local/bin/tempest-noise.sh"
+else
+    log_skip "Contramedidas de software contra TEMPEST"
 fi
 
 # ============================================================
@@ -101,7 +105,11 @@ else
 fi
 EOFNOISE
     chmod +x /usr/local/bin/ruido-blanco.sh
+    log_change "Creado" "/usr/local/bin/ruido-blanco.sh"
+    log_change "Permisos" "/usr/local/bin/ruido-blanco.sh -> +x"
     log_info "Generador de ruido: /usr/local/bin/ruido-blanco.sh"
+else
+    log_skip "Generador de ruido acústico"
 fi
 
 # ============================================================
@@ -118,6 +126,7 @@ if ask "¿Instalar Tor Browser?"; then
 
     TOR_DIR=~/.local/share/tor-browser
     mkdir -p "$TOR_DIR"
+    log_change "Creado" "$TOR_DIR/"
 
     # Descargar Tor Browser
     wget -q --show-progress -O /tmp/tor.tar.xz \
@@ -132,6 +141,8 @@ if ask "¿Instalar Tor Browser?"; then
         log_info "Tor Browser instalado en: $TOR_DIR"
         log_info "Ejecutar: $TOR_DIR/start-tor-browser"
     fi
+else
+    log_skip "Instalar Tor Browser"
 fi
 
 if ask "¿Configurar DNS sobre Tor?"; then
@@ -140,6 +151,7 @@ if ask "¿Configurar DNS sobre Tor?"; then
 
     if command -v tor &>/dev/null; then
         sudo systemctl enable --now tor
+        log_change "Servicio" "tor enable --now"
 
         # Configurar resolución DNS por Tor
         cat > /tmp/tor-dns.conf << 'EOF'
@@ -148,12 +160,17 @@ AutomapHostsOnResolve 1
 EOF
         sudo cp /tmp/tor-dns.conf /etc/tor/torrc.d/dns.conf 2>/dev/null || \
         sudo bash -c 'cat /tmp/tor-dns.conf >> /etc/tor/torrc'
+        log_change "Creado" "/tmp/tor-dns.conf"
+        log_change "Modificado" "/etc/tor/torrc.d/dns.conf"
 
         sudo systemctl restart tor
+        log_change "Servicio" "tor restart"
 
         log_info "DNS sobre Tor configurado en puerto 9053"
         log_info "Para usar: edita /etc/resolv.conf -> nameserver 127.0.0.1"
     fi
+else
+    log_skip "Configurar DNS sobre Tor"
 fi
 
 # ============================================================
@@ -166,6 +183,7 @@ echo ""
 if ask "¿Configurar MAC aleatorio permanente?"; then
     # NetworkManager random MAC
     sudo mkdir -p /etc/NetworkManager/conf.d/
+    log_change "Creado" "/etc/NetworkManager/conf.d/"
     sudo tee /etc/NetworkManager/conf.d/99-random-mac.conf > /dev/null << 'EOF'
 [device]
 wifi.scan-rand-mac-address=yes
@@ -175,9 +193,13 @@ wifi.cloned-mac-address=random
 ethernet.cloned-mac-address=random
 connection.stable-id=${CONNECTION}/${BOOT}
 EOF
+    log_change "Creado" "/etc/NetworkManager/conf.d/99-random-mac.conf"
 
     sudo systemctl restart NetworkManager
+    log_change "Servicio" "NetworkManager restart"
     log_info "MAC aleatorio configurado para todas las conexiones"
+else
+    log_skip "MAC aleatorio permanente"
 fi
 
 # ============================================================
@@ -194,6 +216,8 @@ if ask "¿Instalar teclado virtual para contraseñas sensibles?"; then
     log_info "Teclado virtual instalado"
     log_info "Usa el teclado virtual para escribir contraseñas sensibles"
     log_info "Esto evita keyloggers de hardware y acoustic logging"
+else
+    log_skip "Teclado virtual para contraseñas"
 fi
 
 # ============================================================
@@ -254,8 +278,14 @@ while true; do
 done
 EOFDECOY
     chmod +x /usr/local/bin/trafico-decoy.sh
+    log_change "Creado" "/usr/local/bin/trafico-decoy.sh"
+    log_change "Permisos" "/usr/local/bin/trafico-decoy.sh -> +x"
     log_info "Generador de tráfico señuelo: trafico-decoy.sh"
+else
+    log_skip "Generador de tráfico señuelo"
 fi
+
+show_changes_summary
 
 # ============================================================
 # RESUMEN FINAL

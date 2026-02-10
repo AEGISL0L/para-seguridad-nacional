@@ -29,6 +29,7 @@ echo ""
 if ask "¿Aplicar hardening del kernel?"; then
     # Backup
     cp /etc/sysctl.conf "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/sysctl.conf"
 
     cat > /etc/sysctl.d/50-hardening-base.conf << 'EOF'
 # Hardening de red
@@ -71,10 +72,13 @@ net.ipv4.conf.all.log_martians = 1
 net.ipv4.conf.default.log_martians = 1
 net.ipv4.tcp_rfc1337 = 1
 EOF
+    log_change "Creado" "/etc/sysctl.d/50-hardening-base.conf"
 
     sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system"
     log_info "Kernel hardening aplicado"
 else
+    log_skip "Aplicar hardening del kernel"
     log_warn "Kernel hardening omitido"
 fi
 
@@ -92,8 +96,11 @@ for svc in $FTP_SERVICES; do
     if systemctl list-unit-files | grep -q "^${svc}.service"; then
         log_warn "Servicio FTP encontrado: $svc"
         systemctl stop "$svc" 2>/dev/null || true
+        log_change "Servicio" "$svc stop"
         systemctl disable "$svc" 2>/dev/null || true
+        log_change "Servicio" "$svc disable"
         systemctl mask "$svc" 2>/dev/null || true
+        log_change "Servicio" "$svc mask"
         log_info "$svc deshabilitado y enmascarado"
     fi
 done
@@ -114,6 +121,8 @@ if [[ -n "$FTP_PKGS" ]]; then
     if ask "¿Desinstalar paquetes FTP?"; then
         pkg_remove $FTP_PKGS
         log_info "Paquetes FTP eliminados"
+    else
+        log_skip "Desinstalar paquetes FTP"
     fi
 else
     log_info "No hay paquetes FTP instalados"
@@ -134,8 +143,12 @@ if systemctl is-enabled avahi-daemon &>/dev/null; then
     echo "  - Riesgo: Expone información del sistema en la red local"
     if ask "¿Deshabilitar avahi-daemon?"; then
         systemctl stop avahi-daemon 2>/dev/null || true
+        log_change "Servicio" "avahi-daemon stop"
         systemctl disable avahi-daemon
+        log_change "Servicio" "avahi-daemon disable"
         log_info "avahi-daemon deshabilitado"
+    else
+        log_skip "Deshabilitar avahi-daemon"
     fi
 fi
 
@@ -147,8 +160,12 @@ if systemctl is-enabled ModemManager &>/dev/null; then
     echo "  - Si no usas módems móviles, puedes deshabilitarlo"
     if ask "¿Deshabilitar ModemManager?"; then
         systemctl stop ModemManager 2>/dev/null || true
+        log_change "Servicio" "ModemManager stop"
         systemctl disable ModemManager
+        log_change "Servicio" "ModemManager disable"
         log_info "ModemManager deshabilitado"
+    else
+        log_skip "Deshabilitar ModemManager"
     fi
 fi
 
@@ -159,8 +176,12 @@ if systemctl is-enabled bluetooth &>/dev/null; then
     echo "  - Si no usas dispositivos Bluetooth, puedes deshabilitarlo"
     if ask "¿Deshabilitar bluetooth?"; then
         systemctl stop bluetooth 2>/dev/null || true
+        log_change "Servicio" "bluetooth stop"
         systemctl disable bluetooth
+        log_change "Servicio" "bluetooth disable"
         log_info "bluetooth deshabilitado"
+    else
+        log_skip "Deshabilitar bluetooth"
     fi
 fi
 
@@ -178,7 +199,10 @@ else
     log_warn "firewalld no está activo"
     if ask "¿Activar firewalld?"; then
         systemctl enable --now firewalld
+        log_change "Servicio" "firewalld enable --now"
         log_info "firewalld activado"
+    else
+        log_skip "Activar firewalld"
     fi
 fi
 
@@ -195,6 +219,7 @@ echo ""
 if [[ -f /etc/ssh/sshd_config ]]; then
     if ask "¿Aplicar configuración segura de SSH?"; then
         cp /etc/ssh/sshd_config "$BACKUP_DIR/"
+        log_change "Backup" "/etc/ssh/sshd_config"
 
         # Crear configuración de hardening compatible con GitHub/VPS
         cat > /etc/ssh/sshd_config.d/50-hardening-base.conf << 'EOF'
@@ -237,11 +262,13 @@ KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
 EOF
+        log_change "Creado" "/etc/ssh/sshd_config.d/50-hardening-base.conf"
 
         # Verificar sintaxis antes de reiniciar
         if sshd -t 2>/dev/null; then
             if systemctl is-active "$SSH_SERVICE_NAME" &>/dev/null; then
                 systemctl reload "$SSH_SERVICE_NAME"
+                log_change "Servicio" "$SSH_SERVICE_NAME reload"
             fi
             log_info "SSH hardening aplicado"
             log_info "  - Agent forwarding habilitado (GitHub compatible)"
@@ -251,6 +278,8 @@ EOF
             log_error "Error en configuración SSH, revirtiendo..."
             rm -f /etc/ssh/sshd_config.d/50-hardening-base.conf
         fi
+    else
+        log_skip "Aplicar configuración segura de SSH"
     fi
 else
     log_info "SSH no instalado (normal si no lo necesitas)"
@@ -274,11 +303,16 @@ Host github.com
     PreferredAuthentications publickey
 
 EOF
+            log_change "Modificado" "$SSH_CONFIG_DIR/config"
             chown "${SUDO_USER:-}:$(id -gn "${SUDO_USER:-}")" "$SSH_CONFIG_DIR/config"
+            log_change "Permisos" "$SSH_CONFIG_DIR/config -> owner ${SUDO_USER:-}"
             chmod 600 "$SSH_CONFIG_DIR/config"
+            log_change "Permisos" "$SSH_CONFIG_DIR/config -> 600"
             log_info "Configuración de cliente SSH para GitHub agregada"
             log_info "  Si no tienes llave SSH para GitHub, créala con:"
             log_info "  ssh-keygen -t ed25519 -C 'tu@email.com'"
+        else
+            log_skip "Agregar configuración de cliente SSH para GitHub"
         fi
     else
         log_info "Ya existe configuración para GitHub en ~/.ssh/config"
@@ -296,6 +330,7 @@ echo ""
 if [[ -f /etc/security/pwquality.conf ]]; then
     if ask "¿Fortalecer política de contraseñas?"; then
         cp /etc/security/pwquality.conf "$BACKUP_DIR/"
+        log_change "Backup" "/etc/security/pwquality.conf"
 
         cat > /etc/security/pwquality.conf << 'EOF'
 # Política de contraseñas
@@ -312,9 +347,12 @@ usercheck = 1
 enforcing = 1
 retry = 3
 EOF
+        log_change "Creado" "/etc/security/pwquality.conf"
         log_info "Política de contraseñas aplicada"
         log_info "  - Mínimo 12 caracteres"
         log_info "  - Al menos 3 tipos de caracteres (mayús, minús, números, símbolos)"
+    else
+        log_skip "Fortalecer política de contraseñas"
     fi
 fi
 
@@ -328,20 +366,29 @@ echo ""
 if ask "¿Verificar y corregir permisos de archivos críticos?"; then
     # /etc/passwd y /etc/group deben ser legibles
     chmod 644 /etc/passwd 2>/dev/null || true
+    log_change "Permisos" "/etc/passwd -> 644"
     chmod 644 /etc/group 2>/dev/null || true
+    log_change "Permisos" "/etc/group -> 644"
 
     # /etc/shadow y /etc/gshadow solo root
     chmod 640 /etc/shadow 2>/dev/null || true
+    log_change "Permisos" "/etc/shadow -> 640"
     chmod 640 /etc/gshadow 2>/dev/null || true
+    log_change "Permisos" "/etc/gshadow -> 640"
 
     # Crontabs
     chmod 700 /var/spool/cron 2>/dev/null || true
+    log_change "Permisos" "/var/spool/cron -> 700"
 
     # SSH host keys
     chmod 600 /etc/ssh/ssh_host_*_key 2>/dev/null || true
+    log_change "Permisos" "/etc/ssh/ssh_host_*_key -> 600"
     chmod 644 /etc/ssh/ssh_host_*_key.pub 2>/dev/null || true
+    log_change "Permisos" "/etc/ssh/ssh_host_*_key.pub -> 644"
 
     log_info "Permisos verificados y corregidos"
+else
+    log_skip "Verificar y corregir permisos de archivos críticos"
 fi
 
 # ============================================
@@ -379,9 +426,13 @@ logpath = ${_f2b_logpath}
 maxretry = 3
 bantime = 2h
 EOF
+        log_change "Creado" "/etc/fail2ban/jail.local"
 
         systemctl enable --now fail2ban
+        log_change "Servicio" "fail2ban enable --now"
         log_info "fail2ban instalado y configurado"
+    else
+        log_skip "Instalar fail2ban"
     fi
 else
     log_info "fail2ban ya instalado"
@@ -400,6 +451,8 @@ pkg_list_security_patches 2>/dev/null | head -10 || true
 if ask "¿Instalar actualizaciones de seguridad pendientes ahora?"; then
     pkg_patch_security
     log_info "Actualizaciones de seguridad aplicadas"
+else
+    log_skip "Instalar actualizaciones de seguridad"
 fi
 
 # ============================================
@@ -431,9 +484,13 @@ if systemctl is-active auditd &>/dev/null; then
 -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
 -a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
 EOF
+        log_change "Creado" "/etc/audit/rules.d/90-hardening.rules"
 
         augenrules --load 2>/dev/null || service auditd reload
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas de auditoría agregadas"
+    else
+        log_skip "Agregar reglas de auditoría básicas"
     fi
 else
     log_warn "auditd no está activo"
@@ -454,6 +511,7 @@ echo ""
 if [[ -f /etc/ssh/sshd_config ]]; then
     if ask "¿Activar MFA para SSH (llave + contraseña)?"; then
         cp /etc/ssh/sshd_config.d/50-hardening-base.conf "$BACKUP_DIR/" 2>/dev/null || true
+        log_change "Backup" "/etc/ssh/sshd_config.d/50-hardening-base.conf"
 
         # Crear configuración MFA como drop-in adicional
         cat > /etc/ssh/sshd_config.d/91-mfa.conf << 'EOF'
@@ -481,11 +539,13 @@ PasswordAuthentication yes
 # Las llaves -sk requieren presencia física del token
 PubkeyAcceptedAlgorithms +ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,rsa-sha2-512,rsa-sha2-256
 EOF
+        log_change "Creado" "/etc/ssh/sshd_config.d/91-mfa.conf"
 
         # Verificar sintaxis antes de aplicar
         if sshd -t 2>/dev/null; then
             if systemctl is-active "$SSH_SERVICE_NAME" &>/dev/null; then
                 systemctl reload "$SSH_SERVICE_NAME"
+                log_change "Servicio" "$SSH_SERVICE_NAME reload (MFA)"
             fi
             log_info "MFA para SSH activado"
             log_info "  - Se requiere: llave SSH + contraseña"
@@ -555,7 +615,9 @@ echo "Contenido de la llave pública:"
 cat "${KEYFILE}.pub"
 echo ""
 EOFFIDO
+        log_change "Creado" "/usr/local/bin/generar-llave-fido2.sh"
         chmod +x /usr/local/bin/generar-llave-fido2.sh
+        log_change "Permisos" "/usr/local/bin/generar-llave-fido2.sh -> +x"
 
         log_info "Script auxiliar: /usr/local/bin/generar-llave-fido2.sh"
 
@@ -580,6 +642,7 @@ EOFFIDO
                     rm -f /etc/ssh/sshd_config.d/91-mfa.conf
                     if sshd -t 2>/dev/null; then
                         systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
+                        log_change "Servicio" "$SSH_SERVICE_NAME reload (MFA desactivado)"
                     fi
                     log_warn "MFA desactivado. Actívalo después con:"
                     log_warn "  sudo cp $BACKUP_DIR/91-mfa.conf /etc/ssh/sshd_config.d/"
@@ -590,9 +653,14 @@ PubkeyAuthentication yes
 PasswordAuthentication yes
 PubkeyAcceptedAlgorithms +ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,rsa-sha2-512,rsa-sha2-256
 EOF2
+                    log_change "Creado" "$BACKUP_DIR/91-mfa.conf"
+                else
+                    log_skip "Desactivar MFA temporalmente"
                 fi
             fi
         fi
+    else
+        log_skip "Activar MFA para SSH"
     fi
 else
     log_info "SSH no instalado, MFA no aplicable"
@@ -626,16 +694,19 @@ if ask "¿Instalar y configurar ClamAV?"; then
         # Configurar freshclam (actualizador de firmas)
         if [[ -f /etc/freshclam.conf ]]; then
             cp /etc/freshclam.conf "$BACKUP_DIR/" 2>/dev/null || true
+            log_change "Backup" "/etc/freshclam.conf"
         fi
 
         # Asegurar que freshclam no tiene la línea Example activa
         if [[ -f /etc/freshclam.conf ]]; then
             sed -i 's/^Example/#Example/' /etc/freshclam.conf 2>/dev/null || true
+            log_change "Modificado" "/etc/freshclam.conf"
         fi
 
         # Configurar directorio de cuarentena
         mkdir -p /var/lib/clamav/quarantine
         chmod 700 /var/lib/clamav/quarantine
+        log_change "Permisos" "/var/lib/clamav/quarantine -> 700"
 
         # Actualizar firmas por primera vez
         log_info "Actualizando base de datos de firmas de virus..."
@@ -644,6 +715,7 @@ if ask "¿Instalar y configurar ClamAV?"; then
         # Habilitar servicio de actualización automática
         if systemctl list-unit-files | grep -q "clamav-freshclam"; then
             systemctl enable --now clamav-freshclam 2>/dev/null || true
+            log_change "Servicio" "clamav-freshclam enable --now"
             log_info "Actualización automática de firmas activada"
         fi
 
@@ -747,7 +819,9 @@ echo ""
 echo -e "Log completo: $LOGFILE"
 echo ""
 EOFCLAM
+        log_change "Creado" "/usr/local/bin/clamav-escanear.sh"
         chmod +x /usr/local/bin/clamav-escanear.sh
+        log_change "Permisos" "/usr/local/bin/clamav-escanear.sh -> +x"
 
         # Crear cron diario para escaneo automático
         cat > /etc/cron.daily/clamav-scan << 'EOFCRON'
@@ -780,7 +854,9 @@ fi
 # Mantener solo 30 días de logs
 find "$LOGDIR" -name "scan-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFCRON
+        log_change "Creado" "/etc/cron.daily/clamav-scan"
         chmod +x /etc/cron.daily/clamav-scan
+        log_change "Permisos" "/etc/cron.daily/clamav-scan -> +x"
 
         log_info "ClamAV configurado correctamente"
         log_info "  - Escaneo bajo demanda: /usr/local/bin/clamav-escanear.sh"
@@ -789,6 +865,7 @@ EOFCRON
         log_info "  - Actualización de firmas: automática (freshclam)"
     fi
 else
+    log_skip "Instalar y configurar ClamAV"
     log_warn "ClamAV omitido"
 fi
 
@@ -827,6 +904,7 @@ if ask "¿Instalar y configurar OpenSCAP?"; then
         # Crear directorio para reportes
         mkdir -p /var/log/openscap/reports
         chmod 700 /var/log/openscap
+        log_change "Permisos" "/var/log/openscap -> 700"
 
         # Crear script de auditoría SCAP
         cat > /usr/local/bin/openscap-auditar.sh << 'EOFSCAP'
@@ -1049,7 +1127,9 @@ fi
 
 echo ""
 EOFSCAP
+        log_change "Creado" "/usr/local/bin/openscap-auditar.sh"
         chmod +x /usr/local/bin/openscap-auditar.sh
+        log_change "Permisos" "/usr/local/bin/openscap-auditar.sh -> +x"
 
         # Crear cron semanal para auditoría periódica
         cat > /etc/cron.weekly/openscap-audit << 'EOFCRON2'
@@ -1101,12 +1181,16 @@ fi
 # Mantener solo 12 semanas de reportes
 find "$REPORT_DIR" -name "weekly-*" -mtime +84 -delete 2>/dev/null || true
 EOFCRON2
+        log_change "Creado" "/etc/cron.weekly/openscap-audit"
         chmod +x /etc/cron.weekly/openscap-audit
+        log_change "Permisos" "/etc/cron.weekly/openscap-audit -> +x"
 
         # Ejecutar auditoría inicial si el usuario quiere
         echo ""
         if ask "¿Ejecutar auditoría OpenSCAP inicial ahora?"; then
             /usr/local/bin/openscap-auditar.sh || log_warn "La auditoría inicial generó advertencias (normal)"
+        else
+            log_skip "Ejecutar auditoría OpenSCAP inicial"
         fi
 
         log_info "OpenSCAP configurado correctamente"
@@ -1117,12 +1201,14 @@ EOFCRON2
         log_warn "OpenSCAP no se pudo instalar"
     fi
 else
+    log_skip "Instalar y configurar OpenSCAP"
     log_warn "OpenSCAP omitido"
 fi
 
 # ============================================
 # RESUMEN
 # ============================================
+show_changes_summary
 echo ""
 echo "=========================================="
 log_info "HARDENING COMPLETADO"

@@ -181,16 +181,21 @@ fi
 find /var/log -name "exfiltration-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFEXFIL
 
+    log_change "Creado" "/usr/local/bin/detectar-exfiltracion.sh"
     chmod 700 /usr/local/bin/detectar-exfiltracion.sh
+    log_change "Permisos" "/usr/local/bin/detectar-exfiltracion.sh -> 700"
 
     cat > /etc/cron.daily/detectar-exfiltracion << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-exfiltracion.sh 2>&1 | logger -t detectar-exfiltracion
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-exfiltracion"
     chmod 700 /etc/cron.daily/detectar-exfiltracion
+    log_change "Permisos" "/etc/cron.daily/detectar-exfiltracion -> 700"
 
     log_info "Detección diaria de exfiltración configurada"
 else
+    log_skip "Monitoreo de tráfico saliente"
     log_warn "Monitoreo de tráfico saliente no configurado"
 fi
 
@@ -234,6 +239,7 @@ if ask "¿Bloquear acceso a servicios de cloud storage para exfiltración?"; the
             echo ""
             echo -e "${BOLD}Bloqueando dominios de exfiltración...${NC}"
             cp /etc/hosts "$BACKUP_DIR/"
+            log_change "Backup" "/etc/hosts"
 
             echo "" >> /etc/hosts
             echo "# Bloqueo de servicios de exfiltración - T1567" >> /etc/hosts
@@ -244,6 +250,7 @@ if ask "¿Bloquear acceso a servicios de cloud storage para exfiltración?"; the
                 fi
             done
 
+            log_change "Modificado" "/etc/hosts"
             log_info "Dominios de exfiltración bloqueados en /etc/hosts"
             ;;
         *)
@@ -278,12 +285,15 @@ if ask "¿Bloquear acceso a servicios de cloud storage para exfiltración?"; the
 -w /usr/bin/nslookup -p x -k dns-tool
 -w /usr/bin/host -p x -k dns-tool
 EOF
+        log_change "Creado" "/etc/audit/rules.d/66-exfiltration.rules"
 
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas auditd de exfiltración creadas"
     fi
 
 else
+    log_skip "Bloqueo de cloud storage para exfiltración"
     log_warn "Bloqueo de cloud storage no configurado"
 fi
 
@@ -303,6 +313,7 @@ if ask "¿Configurar protección contra DNS tunneling?"; then
 
     # Configurar DNS-over-TLS con stub resolver controlado
     mkdir -p /etc/systemd/resolved.conf.d
+    log_change "Creado" "/etc/systemd/resolved.conf.d/"
 
     cat > /etc/systemd/resolved.conf.d/01-anti-exfil.conf << 'EOF'
 # Protección contra DNS tunneling - T1048.003
@@ -321,7 +332,9 @@ MulticastDNS=no
 #Domains=~.
 EOF
 
+    log_change "Creado" "/etc/systemd/resolved.conf.d/01-anti-exfil.conf"
     systemctl restart systemd-resolved 2>/dev/null || true
+    log_change "Servicio" "systemd-resolved restart"
     log_info "DNS configurado con proveedores confiables"
 
     # 3b. Regla iptables para limitar tráfico DNS saliente
@@ -410,16 +423,21 @@ fi
 find /var/log -name "dns-tunnel-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFDNS
 
+    log_change "Creado" "/usr/local/bin/detectar-dns-tunnel.sh"
     chmod 700 /usr/local/bin/detectar-dns-tunnel.sh
+    log_change "Permisos" "/usr/local/bin/detectar-dns-tunnel.sh -> 700"
 
     cat > /etc/cron.daily/detectar-dns-tunnel << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-dns-tunnel.sh 2>&1 | logger -t detectar-dns-tunnel
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-dns-tunnel"
     chmod 700 /etc/cron.daily/detectar-dns-tunnel
+    log_change "Permisos" "/etc/cron.daily/detectar-dns-tunnel -> 700"
 
     log_info "Detección de DNS tunneling configurada"
 else
+    log_skip "Protección contra DNS tunneling"
     log_warn "Protección contra DNS tunneling no configurada"
 fi
 
@@ -445,8 +463,10 @@ if ask "¿Restringir escritura a medios extraíbles?"; then
 ACTION=="add", SUBSYSTEMS=="usb", SUBSYSTEM=="block", RUN+="/usr/bin/logger -t usb-storage 'ALERTA: Dispositivo USB conectado: %k (%E{ID_VENDOR} %E{ID_MODEL})'"
 ACTION=="remove", SUBSYSTEMS=="usb", SUBSYSTEM=="block", RUN+="/usr/bin/logger -t usb-storage 'Dispositivo USB desconectado: %k'"
 EOF
+    log_change "Creado" "/etc/udev/rules.d/91-usb-readonly.rules"
 
     udevadm control --reload-rules 2>/dev/null || true
+    log_change "Aplicado" "udevadm control --reload-rules"
 
     # Auditar montaje de medios
     if command -v auditctl &>/dev/null; then
@@ -457,11 +477,14 @@ EOF
 -w /media/ -p w -k physical-media-write
 -w /run/media/ -p w -k physical-media-write
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/66-exfiltration.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     log_info "Control de escritura USB configurado"
 else
+    log_skip "Restricción de escritura a medios extraíbles"
     log_warn "Control de medios físicos no configurado"
 fi
 
@@ -502,7 +525,9 @@ if [[ "\$2" == "up" ]]; then
     tc qdisc add dev "\$1" root tbf rate 10mbit burst 32kbit latency 400ms 2>/dev/null || true
 fi
 EOFBW
+                log_change "Creado" "/etc/NetworkManager/dispatcher.d/91-bandwidth-limit.sh"
                 chmod 755 /etc/NetworkManager/dispatcher.d/91-bandwidth-limit.sh
+                log_change "Permisos" "/etc/NetworkManager/dispatcher.d/91-bandwidth-limit.sh -> 755"
             fi
             ;;
         2)
@@ -518,7 +543,9 @@ if [[ "\$2" == "up" ]]; then
     tc qdisc add dev "\$1" root tbf rate 50mbit burst 64kbit latency 400ms 2>/dev/null || true
 fi
 EOFBW
+                log_change "Creado" "/etc/NetworkManager/dispatcher.d/91-bandwidth-limit.sh"
                 chmod 755 /etc/NetworkManager/dispatcher.d/91-bandwidth-limit.sh
+                log_change "Permisos" "/etc/NetworkManager/dispatcher.d/91-bandwidth-limit.sh -> 755"
             fi
             ;;
         *)
@@ -570,7 +597,9 @@ done
 find /var/log -name "transfer-monitor-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFMON
 
+    log_change "Creado" "/usr/local/bin/monitorear-transferencias.sh"
     chmod 700 /usr/local/bin/monitorear-transferencias.sh
+    log_change "Permisos" "/usr/local/bin/monitorear-transferencias.sh -> 700"
 
     # Timer systemd cada hora
     cat > /etc/systemd/system/monitorear-transferencias.service << 'EOFSVC'
@@ -580,6 +609,7 @@ Description=Monitoreo de transferencias de datos (T1030)
 Type=oneshot
 ExecStart=/usr/local/bin/monitorear-transferencias.sh
 EOFSVC
+    log_change "Creado" "/etc/systemd/system/monitorear-transferencias.service"
 
     cat > /etc/systemd/system/monitorear-transferencias.timer << 'EOFTIMER'
 [Unit]
@@ -591,12 +621,16 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOFTIMER
+    log_change "Creado" "/etc/systemd/system/monitorear-transferencias.timer"
 
     systemctl daemon-reload
+    log_change "Servicio" "systemctl daemon-reload"
     systemctl enable --now monitorear-transferencias.timer 2>/dev/null || true
+    log_change "Servicio" "monitorear-transferencias.timer enable --now"
 
     log_info "Monitoreo horario de volumen de transferencias activo"
 else
+    log_skip "Limitación de transferencias salientes"
     log_warn "Limitación de transferencias no configurada"
 fi
 
@@ -642,6 +676,8 @@ if [[ -x /usr/local/bin/monitorear-transferencias.sh ]]; then
 else
     echo -e "  ${YELLOW}[--]${NC} T1030 - Volumen de transferencias no monitoreado"
 fi
+
+show_changes_summary
 
 echo ""
 log_info "Script de mitigación de exfiltración completado"

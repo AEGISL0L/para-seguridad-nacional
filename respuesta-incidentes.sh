@@ -191,11 +191,13 @@ echo "Archivos: $(find "$IR_DIR" -type f | wc -l)" | tee -a "$LOG"
 EOFFORENSE
 
     chmod 700 /usr/local/bin/ir-recolectar-forense.sh
+    log_change "Creado" "/usr/local/bin/ir-recolectar-forense.sh"
+    log_change "Permisos" "/usr/local/bin/ir-recolectar-forense.sh -> 700"
     log_info "Toolkit forense instalado: /usr/local/bin/ir-recolectar-forense.sh"
     echo -e "${DIM}Uso: ir-recolectar-forense.sh [ID-INCIDENTE]${NC}"
 
 else
-    log_warn "Toolkit forense no instalado"
+    log_skip "Toolkit de recolección forense"
 fi
 
 # ============================================================
@@ -216,6 +218,7 @@ echo ""
 if ask "¿Instalar playbooks de contención?"; then
 
     mkdir -p /usr/local/lib/incident-response/playbooks
+    log_change "Creado" "/usr/local/lib/incident-response/playbooks/"
 
     # --- Playbook: Compromiso de cuenta ---
     cat > /usr/local/lib/incident-response/playbooks/pb-cuenta-comprometida.sh << 'EOFPB1'
@@ -295,6 +298,8 @@ echo "  5. Revisar logs de acceso: last $USUARIO" | tee -a "$LOG"
 EOFPB1
 
     chmod 700 /usr/local/lib/incident-response/playbooks/pb-cuenta-comprometida.sh
+    log_change "Creado" "/usr/local/lib/incident-response/playbooks/pb-cuenta-comprometida.sh"
+    log_change "Permisos" "/usr/local/lib/incident-response/playbooks/pb-cuenta-comprometida.sh -> 700"
 
     # --- Playbook: Malware/Ransomware ---
     cat > /usr/local/lib/incident-response/playbooks/pb-malware-activo.sh << 'EOFPB2'
@@ -402,6 +407,8 @@ echo "  5. Restaurar datos desde backup si hay cifrado" | tee -a "$LOG"
 EOFPB2
 
     chmod 700 /usr/local/lib/incident-response/playbooks/pb-malware-activo.sh
+    log_change "Creado" "/usr/local/lib/incident-response/playbooks/pb-malware-activo.sh"
+    log_change "Permisos" "/usr/local/lib/incident-response/playbooks/pb-malware-activo.sh -> 700"
 
     # --- Playbook: C2 / Exfiltración ---
     cat > /usr/local/lib/incident-response/playbooks/pb-c2-exfiltracion.sh << 'EOFPB3'
@@ -489,6 +496,8 @@ echo "  5. Ejecutar detectar-c2-completo.sh para buscar más C2" | tee -a "$LOG"
 EOFPB3
 
     chmod 700 /usr/local/lib/incident-response/playbooks/pb-c2-exfiltracion.sh
+    log_change "Creado" "/usr/local/lib/incident-response/playbooks/pb-c2-exfiltracion.sh"
+    log_change "Permisos" "/usr/local/lib/incident-response/playbooks/pb-c2-exfiltracion.sh -> 700"
 
     # --- Playbook: Movimiento lateral ---
     cat > /usr/local/lib/incident-response/playbooks/pb-movimiento-lateral.sh << 'EOFPB4'
@@ -552,6 +561,8 @@ echo "  4. Verificar otros hosts que pudieron ser comprometidos" | tee -a "$LOG"
 EOFPB4
 
     chmod 700 /usr/local/lib/incident-response/playbooks/pb-movimiento-lateral.sh
+    log_change "Creado" "/usr/local/lib/incident-response/playbooks/pb-movimiento-lateral.sh"
+    log_change "Permisos" "/usr/local/lib/incident-response/playbooks/pb-movimiento-lateral.sh -> 700"
 
     # --- Script dispatcher de playbooks ---
     cat > /usr/local/bin/ir-responder.sh << 'EOFDISPATCH'
@@ -602,11 +613,13 @@ esac
 EOFDISPATCH
 
     chmod 700 /usr/local/bin/ir-responder.sh
+    log_change "Creado" "/usr/local/bin/ir-responder.sh"
+    log_change "Permisos" "/usr/local/bin/ir-responder.sh -> 700"
     log_info "Playbooks de contención instalados"
     log_info "Dispatcher: /usr/local/bin/ir-responder.sh"
 
 else
-    log_warn "Playbooks de contención no instalados"
+    log_skip "Playbooks de contención"
 fi
 
 # ============================================================
@@ -733,11 +746,13 @@ rm -f "$TEMP_TL"
 EOFTIMELINE
 
     chmod 700 /usr/local/bin/ir-timeline.sh
+    log_change "Creado" "/usr/local/bin/ir-timeline.sh"
+    log_change "Permisos" "/usr/local/bin/ir-timeline.sh -> 700"
     log_info "Generador de timeline instalado: /usr/local/bin/ir-timeline.sh"
     echo -e "${DIM}Uso: ir-timeline.sh [horas-atrás] [ID-incidente]${NC}"
 
 else
-    log_warn "Generador de timeline no instalado"
+    log_skip "Generador de timeline"
 fi
 
 # ============================================================
@@ -854,12 +869,16 @@ EOFRESTORE
 
     chmod 700 /usr/local/bin/ir-aislar-red.sh
     chmod 700 /usr/local/bin/ir-restaurar-red.sh
+    log_change "Creado" "/usr/local/bin/ir-aislar-red.sh"
+    log_change "Permisos" "/usr/local/bin/ir-aislar-red.sh -> 700"
+    log_change "Creado" "/usr/local/bin/ir-restaurar-red.sh"
+    log_change "Permisos" "/usr/local/bin/ir-restaurar-red.sh -> 700"
     log_info "Scripts de aislamiento instalados"
     echo -e "${DIM}Aislar: ir-aislar-red.sh [IP-operador]${NC}"
     echo -e "${DIM}Restaurar: ir-restaurar-red.sh${NC}"
 
 else
-    log_warn "Scripts de aislamiento no instalados"
+    log_skip "Scripts de aislamiento de red"
 fi
 
 # ============================================================
@@ -950,10 +969,12 @@ fi
 EOFRECOV
 
     chmod 700 /usr/local/bin/ir-recuperacion.sh
+    log_change "Creado" "/usr/local/bin/ir-recuperacion.sh"
+    log_change "Permisos" "/usr/local/bin/ir-recuperacion.sh -> 700"
     log_info "Guía de recuperación instalada: /usr/local/bin/ir-recuperacion.sh"
 
 else
-    log_warn "Guía de recuperación no instalada"
+    log_skip "Guía de recuperación post-incidente"
 fi
 
 # ============================================================
@@ -1002,4 +1023,5 @@ echo -e "  ${DIM}Ver timeline:${NC}     ir-timeline.sh 48 INC-001"
 echo -e "  ${DIM}Aislar host:${NC}      ir-aislar-red.sh 192.168.1.100"
 echo -e "  ${DIM}Recuperar:${NC}        ir-recuperacion.sh INC-001"
 echo ""
+show_changes_summary
 log_info "Módulo de respuesta a incidentes completado"

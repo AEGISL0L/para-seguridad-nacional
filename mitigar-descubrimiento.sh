@@ -87,6 +87,7 @@ if ask "¿Configurar detección de port scanning interno?"; then
 -w /usr/bin/ping -p x -k network-discovery
 -w /usr/bin/arping -p x -k network-discovery
 EOF
+        log_change "Creado" "/etc/audit/rules.d/63-discovery.rules"
 
         augenrules --load 2>/dev/null || true
         log_info "Reglas auditd de descubrimiento creadas"
@@ -157,16 +158,21 @@ fi
 find /var/log -name "portscan-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFPS
 
+    log_change "Creado" "/usr/local/bin/detectar-portscan.sh"
     chmod 700 /usr/local/bin/detectar-portscan.sh
+    log_change "Permisos" "/usr/local/bin/detectar-portscan.sh -> 700"
 
     cat > /etc/cron.daily/detectar-portscan << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-portscan.sh 2>&1 | logger -t detectar-portscan
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-portscan"
     chmod 700 /etc/cron.daily/detectar-portscan
+    log_change "Permisos" "/etc/cron.daily/detectar-portscan -> 700"
 
     log_info "Detección diaria de port scanning configurada"
 else
+    log_skip "Detección de port scanning interno"
     log_warn "Detección de port scanning no configurada"
 fi
 
@@ -183,10 +189,12 @@ if ask "¿Restringir enumeración de procesos?"; then
     # hidepid en /proc (ya puede estar de credenciales)
     if ! grep -q "hidepid" /etc/fstab 2>/dev/null; then
         cp /etc/fstab "$BACKUP_DIR/"
+        log_change "Backup" "/etc/fstab"
         _priv_group=$(get_privileged_group)
         echo "" >> /etc/fstab
         echo "# T1057 - Restringir visibilidad de procesos" >> /etc/fstab
         echo "proc    /proc    proc    defaults,hidepid=2,gid=${_priv_group}    0    0" >> /etc/fstab
+        log_change "Modificado" "/etc/fstab"
         mount -o "remount,hidepid=2,gid=${_priv_group}" /proc 2>/dev/null || true
         log_info "hidepid=2 aplicado: usuarios solo ven sus propios procesos (grupo ${_priv_group})"
         unset _priv_group
@@ -204,11 +212,13 @@ if ask "¿Restringir enumeración de procesos?"; then
 -w /usr/bin/htop -p x -k process-discovery
 -a always,exit -F arch=b64 -S sched_getaffinity -k process-enum
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/63-discovery.rules"
         augenrules --load 2>/dev/null || true
     fi
 
     log_info "Restricción de enumeración de procesos aplicada"
 else
+    log_skip "Restricción de enumeración de procesos"
     log_warn "Enumeración de procesos no restringida"
 fi
 
@@ -243,7 +253,9 @@ kernel.dmesg_restrict = 1
 kernel.perf_event_paranoid = 3
 EOF
 
+    log_change "Creado" "$SYSCTL_DISC"
     sysctl -p "$SYSCTL_DISC" 2>/dev/null || true
+    log_change "Aplicado" "sysctl -p $SYSCTL_DISC"
     log_info "Información del kernel restringida"
 
     # 3b. Eliminar banners de versión de servicios
@@ -259,6 +271,7 @@ EOF
 Banner none
 DebianBanner no
 EOF
+            log_change "Creado" "/etc/ssh/sshd_config.d/05-no-banner.conf"
             log_info "Banner SSH desactivado"
         fi
     fi
@@ -267,7 +280,9 @@ EOF
     for issue_file in /etc/issue /etc/issue.net; do
         if [[ -f "$issue_file" ]]; then
             cp "$issue_file" "$BACKUP_DIR/"
+            log_change "Backup" "$issue_file"
             echo "Authorized access only. All activity is monitored." > "$issue_file"
+            log_change "Modificado" "$issue_file"
         fi
     done
     log_info "Banners de login simplificados"
@@ -284,11 +299,13 @@ EOF
 -w /usr/bin/dmidecode -p x -k system-info-discovery
 -w /etc/os-release -p r -k system-info-discovery
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/63-discovery.rules"
         augenrules --load 2>/dev/null || true
     fi
 
     log_info "Información del sistema restringida"
 else
+    log_skip "Limitar información del sistema"
     log_warn "Información del sistema no restringida"
 fi
 
@@ -325,6 +342,7 @@ if ask "¿Monitorear comandos de reconocimiento de red?"; then
 -w /usr/bin/arp -p x -k remote-discovery
 -w /usr/sbin/arp -p x -k remote-discovery
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/63-discovery.rules"
 
         augenrules --load 2>/dev/null || true
         log_info "Auditoría de herramientas de reconocimiento de red configurada"
@@ -390,16 +408,21 @@ fi
 find /var/log -name "recon-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFRECON
 
+    log_change "Creado" "/usr/local/bin/detectar-reconocimiento.sh"
     chmod 700 /usr/local/bin/detectar-reconocimiento.sh
+    log_change "Permisos" "/usr/local/bin/detectar-reconocimiento.sh -> 700"
 
     cat > /etc/cron.daily/detectar-reconocimiento << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-reconocimiento.sh 2>&1 | logger -t detectar-reconocimiento
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-reconocimiento"
     chmod 700 /etc/cron.daily/detectar-reconocimiento
+    log_change "Permisos" "/etc/cron.daily/detectar-reconocimiento -> 700"
 
     log_info "Detección diaria de reconocimiento configurada"
 else
+    log_skip "Monitoreo de reconocimiento de red"
     log_warn "Monitoreo de reconocimiento no configurado"
 fi
 
@@ -437,6 +460,7 @@ if ask "¿Restringir enumeración de cuentas y grupos?"; then
 -w /etc/sudoers -p r -k privilege-discovery
 -w /etc/sudoers.d/ -p r -k privilege-discovery
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/63-discovery.rules"
 
         augenrules --load 2>/dev/null || true
         log_info "Auditoría de enumeración de cuentas configurada"
@@ -449,12 +473,14 @@ EOF
     for cmd in /usr/bin/who /usr/bin/w /usr/bin/last /usr/bin/lastlog; do
         if [[ -x "$cmd" ]]; then
             chmod 750 "$cmd" 2>/dev/null || true
+            log_change "Permisos" "$cmd -> 750"
             echo -e "  ${GREEN}OK${NC} Restringido: $cmd"
         fi
     done
 
     log_info "Enumeración de cuentas restringida y monitoreada"
 else
+    log_skip "Restricción de enumeración de cuentas"
     log_warn "Enumeración de cuentas no restringida"
 fi
 
@@ -482,6 +508,7 @@ if ask "¿Restringir descubrimiento de software?"; then
 -w /usr/bin/rpm -p x -k software-discovery
 -w /usr/bin/dpkg -p x -k software-discovery
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/63-discovery.rules"
         augenrules --load 2>/dev/null || true
     fi
 
@@ -492,8 +519,11 @@ EOF
 
     log_info "Monitoreo de descubrimiento de software configurado"
 else
+    log_skip "Restricción de descubrimiento de software"
     log_warn "Descubrimiento de software no restringido"
 fi
+
+show_changes_summary
 
 # ============================================================
 log_section "RESUMEN DE MITIGACIONES TA0007"

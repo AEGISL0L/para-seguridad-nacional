@@ -64,22 +64,28 @@ if [[ "$AA_STATUS" == "no_instalado" ]]; then
         pkg_install apparmor-profiles apparmor-utils apparmor-parser
         if command -v aa-status &>/dev/null; then
             systemctl enable --now apparmor 2>/dev/null || true
+            log_change "Servicio" "apparmor enable --now"
             log_info "AppArmor instalado y habilitado"
             AA_STATUS="activo"
         else
             log_error "No se pudo instalar AppArmor"
         fi
+    else
+        log_skip "Instalar AppArmor"
     fi
 elif [[ "$AA_STATUS" == "instalado_inactivo" ]]; then
     if ask "¿Activar AppArmor?"; then
         systemctl enable --now apparmor 2>/dev/null || true
         if aa-status --enabled 2>/dev/null; then
+            log_change "Servicio" "apparmor enable --now"
             log_info "AppArmor activado"
             AA_STATUS="activo"
         else
             log_warn "No se pudo activar AppArmor. Verificar parámetros de kernel."
             log_warn "Puede necesitar: apparmor=1 security=apparmor en GRUB_CMDLINE_LINUX"
         fi
+    else
+        log_skip "Activar AppArmor"
     fi
 fi
 
@@ -89,6 +95,8 @@ if [[ "$AA_STATUS" == "activo" ]]; then
         if ask "¿Instalar paquete de perfiles adicionales de AppArmor?"; then
             pkg_install apparmor-profiles
             log_info "Paquete apparmor-profiles instalado"
+        else
+            log_skip "Instalar perfiles adicionales AppArmor"
         fi
     fi
 
@@ -109,6 +117,8 @@ if [[ "$AA_STATUS" == "activo" ]]; then
         else
             log_info "Todos los perfiles ya están en enforce"
         fi
+    else
+        log_skip "Perfiles AppArmor en modo enforce"
     fi
 
     # Crear perfiles personalizados para herramientas de red
@@ -150,7 +160,9 @@ if [[ "$AA_STATUS" == "activo" ]]; then
   deny @{HOME}/.gnupg/** r,
 }
 EOF
+            log_change "Creado" "/etc/apparmor.d/usr.bin.curl"
             apparmor_parser -r /etc/apparmor.d/usr.bin.curl 2>/dev/null || true
+            log_change "Aplicado" "apparmor_parser -r usr.bin.curl"
             log_info "Perfil AppArmor para curl creado (enforce)"
         fi
 
@@ -191,9 +203,13 @@ EOF
   deny @{HOME}/.gnupg/** r,
 }
 EOF
+            log_change "Creado" "/etc/apparmor.d/usr.bin.wget"
             apparmor_parser -r /etc/apparmor.d/usr.bin.wget 2>/dev/null || true
+            log_change "Aplicado" "apparmor_parser -r usr.bin.wget"
             log_info "Perfil AppArmor para wget creado (enforce)"
         fi
+    else
+        log_skip "Perfiles AppArmor para curl/wget"
     fi
 
     # Verificar parámetros de kernel para AppArmor
@@ -203,14 +219,19 @@ EOF
             log_warn "Parámetro 'apparmor=1' NO encontrado en GRUB"
             if ask "¿Agregar 'apparmor=1 security=apparmor' a GRUB?"; then
                 cp /etc/default/grub "$BACKUP_DIR/"
+                log_change "Backup" "/etc/default/grub"
                 if grep -q "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub; then
                     sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 apparmor=1 security=apparmor"/' /etc/default/grub
+                    log_change "Modificado" "/etc/default/grub"
                 else
                     echo 'GRUB_CMDLINE_LINUX_DEFAULT="apparmor=1 security=apparmor"' >> /etc/default/grub
+                    log_change "Modificado" "/etc/default/grub"
                 fi
                 grub_regenerate
                 log_info "Parámetros de AppArmor agregados a GRUB"
                 log_warn "Se requiere reiniciar para activar AppArmor en el kernel"
+            else
+                log_skip "Agregar AppArmor a GRUB"
             fi
         else
             echo -e "  ${GREEN}OK${NC} AppArmor ya configurado en parámetros de GRUB"
@@ -256,9 +277,12 @@ if [[ $SYSTEM_WITH_BASH -gt 0 ]]; then
         while IFS=: read -r user _ uid _ _ _ shell; do
             if [[ "$uid" -ge 1 && "$uid" -lt 1000 ]] && [[ "$shell" == */bash || "$shell" == */sh || "$shell" == */zsh ]]; then
                 usermod -s /sbin/nologin "$user" 2>/dev/null || true
+                log_change "Usuario" "$user shell -> /sbin/nologin"
                 log_info "Shell cambiado a nologin: $user (UID=$uid)"
             fi
         done < /etc/passwd
+    else
+        log_skip "Cambiar shell de cuentas de sistema"
     fi
 else
     echo -e "  ${GREEN}OK${NC} Ninguna cuenta de sistema tiene shell interactivo"
@@ -300,6 +324,7 @@ if ask "¿Restringir acceso a /bin/bash mediante grupo 'shell-users'?"; then
 
     chgrp shell-users "$BASH_PATH"
     chmod 750 "$BASH_PATH"
+    log_change "Permisos" "$BASH_PATH -> 750 shell-users"
     log_info "/bin/bash restringido al grupo shell-users (750)"
 
     # Si /bin/sh es symlink a bash, advertir
@@ -311,6 +336,8 @@ if ask "¿Restringir acceso a /bin/bash mediante grupo 'shell-users'?"; then
     fi
 
     log_warn "Para añadir usuarios: usermod -aG shell-users USUARIO"
+else
+    log_skip "Restringir /bin/bash mediante grupo shell-users"
 fi
 
 # ============================================================
@@ -350,12 +377,14 @@ echo ""
 
 if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
     cp /etc/fstab "$BACKUP_DIR/fstab.backup"
+    log_change "Backup" "/etc/fstab"
 
     # --- /tmp ---
     if grep -qE "^\s*[^#].*\s+/tmp\s+" /etc/fstab; then
         # Existe entrada para /tmp - verificar y modificar opciones
         if ! grep -E "^\s*[^#].*\s+/tmp\s+" /etc/fstab | grep -q "noexec"; then
             sed -i '/^\s*[^#].*\s\+\/tmp\s/ s/defaults/defaults,noexec,nosuid,nodev/' /etc/fstab
+            log_change "Modificado" "/etc/fstab"
             log_info "/tmp: opciones noexec,nosuid,nodev añadidas a fstab"
         else
             echo -e "  ${GREEN}OK${NC} /tmp ya tiene noexec en fstab"
@@ -365,6 +394,7 @@ if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
         echo "" >> /etc/fstab
         echo "# TA0002/T1204 - Prevenir ejecución en /tmp" >> /etc/fstab
         echo "tmpfs /tmp tmpfs defaults,noexec,nosuid,nodev,size=2G 0 0" >> /etc/fstab
+        log_change "Modificado" "/etc/fstab"
         log_info "/tmp: montaje tmpfs con noexec,nosuid,nodev añadido"
     fi
 
@@ -372,6 +402,7 @@ if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
     if grep -qE "^\s*[^#].*\s+/var/tmp\s+" /etc/fstab; then
         if ! grep -E "^\s*[^#].*\s+/var/tmp\s+" /etc/fstab | grep -q "noexec"; then
             sed -i '/^\s*[^#].*\s\+\/var\/tmp\s/ s/defaults/defaults,noexec,nosuid,nodev/' /etc/fstab
+            log_change "Modificado" "/etc/fstab"
             log_info "/var/tmp: opciones noexec,nosuid,nodev añadidas"
         else
             echo -e "  ${GREEN}OK${NC} /var/tmp ya tiene noexec en fstab"
@@ -379,6 +410,7 @@ if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
     else
         echo "# TA0002/T1204 - Prevenir ejecución en /var/tmp" >> /etc/fstab
         echo "tmpfs /var/tmp tmpfs defaults,noexec,nosuid,nodev,size=1G 0 0" >> /etc/fstab
+        log_change "Modificado" "/etc/fstab"
         log_info "/var/tmp: montaje tmpfs con noexec,nosuid,nodev añadido"
     fi
 
@@ -386,6 +418,7 @@ if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
     if grep -qE "^\s*[^#].*\s+/dev/shm\s+" /etc/fstab; then
         if ! grep -E "^\s*[^#].*\s+/dev/shm\s+" /etc/fstab | grep -q "noexec"; then
             sed -i '/^\s*[^#].*\s\+\/dev\/shm\s/ s/defaults/defaults,noexec,nosuid,nodev/' /etc/fstab
+            log_change "Modificado" "/etc/fstab"
             log_info "/dev/shm: opciones noexec,nosuid,nodev añadidas"
         else
             echo -e "  ${GREEN}OK${NC} /dev/shm ya tiene noexec en fstab"
@@ -393,6 +426,7 @@ if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
     else
         echo "# TA0002/T1204 - Prevenir ejecución en /dev/shm" >> /etc/fstab
         echo "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" >> /etc/fstab
+        log_change "Modificado" "/etc/fstab"
         log_info "/dev/shm: montaje tmpfs con noexec,nosuid,nodev añadido"
     fi
 
@@ -427,6 +461,8 @@ if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
             fi
         fi
     done
+else
+    log_skip "Configurar noexec en montajes temporales"
 fi
 
 # ============================================================
@@ -465,6 +501,7 @@ if ask "¿Aplicar restricciones sobre LD_PRELOAD y LD_LIBRARY_PATH?"; then
     fi
     chmod 644 /etc/ld.so.preload
     chown root:root /etc/ld.so.preload
+    log_change "Permisos" "/etc/ld.so.preload -> 644 root:root"
     log_info "/etc/ld.so.preload permisos asegurados (644, root:root)"
 
     # 2. Script en profile.d para limpiar variables de carga
@@ -486,7 +523,9 @@ if [ "$(id -u)" -ne 0 ]; then
     readonly LD_AUDIT 2>/dev/null || true
 fi
 EOF
+    log_change "Creado" "/etc/profile.d/restrict-ld-env.sh"
     chmod 644 /etc/profile.d/restrict-ld-env.sh
+    log_change "Permisos" "/etc/profile.d/restrict-ld-env.sh -> 644"
     log_info "Script /etc/profile.d/restrict-ld-env.sh creado"
 
     # 3. Reglas de auditoría para detectar uso de LD_PRELOAD
@@ -499,7 +538,9 @@ EOF
 -w /etc/ld.so.conf.d/ -p wa -k ld_config_modify
 -w /sbin/ldconfig -p x -k ldconfig_exec
 EOF
+            log_change "Creado" "/etc/audit/rules.d/98-ld-preload.rules"
             augenrules --load 2>/dev/null || service auditd restart 2>/dev/null || true
+            log_change "Aplicado" "augenrules --load"
             log_info "Reglas de auditoría para LD_PRELOAD configuradas"
         else
             echo -e "  ${GREEN}OK${NC} Reglas de auditoría para LD_PRELOAD ya existen"
@@ -530,7 +571,10 @@ EOF
         chmod 644 "$conf_file" 2>/dev/null || true
         chown root:root "$conf_file" 2>/dev/null || true
     done
+    log_change "Permisos" "/etc/ld.so.conf.d/ -> 755 root:root"
     log_info "Permisos de /etc/ld.so.conf.d/ asegurados"
+else
+    log_skip "Restricciones LD_PRELOAD y LD_LIBRARY_PATH"
 fi
 
 # ============================================================
@@ -581,10 +625,13 @@ else
 
             chgrp interp-users "$interp_path" 2>/dev/null || true
             chmod 750 "$interp_path" 2>/dev/null || true
+            log_change "Permisos" "$interp_path -> 750 interp-users"
             log_info "Restringido: $interp_path (750, grupo: interp-users)"
         done
 
         log_warn "Para dar acceso a otro usuario: usermod -aG interp-users USUARIO"
+    else
+        log_skip "Restringir intérpretes al grupo interp-users"
     fi
 fi
 
@@ -734,9 +781,13 @@ echo ""
 echo -e "${DIM}Fecha del análisis: $(date)${NC}"
 EXECEOF
 
+    log_change "Creado" "/usr/local/bin/monitor-ejecucion.sh"
     chmod +x /usr/local/bin/monitor-ejecucion.sh
+    log_change "Permisos" "/usr/local/bin/monitor-ejecucion.sh -> +x"
     log_info "Script creado: /usr/local/bin/monitor-ejecucion.sh"
     log_info "Ejecutar con: sudo /usr/local/bin/monitor-ejecucion.sh"
+else
+    log_skip "Script de monitoreo de ejecución sospechosa"
 fi
 
 # ============================================================
@@ -830,5 +881,7 @@ echo ""
 echo "Grupos de control creados:"
 echo "  shell-users   → Acceso a /bin/bash"
 echo "  interp-users  → Acceso a intérpretes (python, perl, ruby...)"
+show_changes_summary
+
 echo ""
 log_info "Backups en: $BACKUP_DIR"

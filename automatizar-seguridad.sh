@@ -58,7 +58,11 @@ find /var/log -name "aide-check-*.log" -mtime +30 -delete 2>/dev/null
 EOFAIDE
 
         chmod 700 /etc/cron.daily/aide-check
+        log_change "Creado" "/etc/cron.daily/aide-check"
+        log_change "Permisos" "/etc/cron.daily/aide-check -> 700"
         log_info "Cron diario AIDE creado: /etc/cron.daily/aide-check"
+    else
+        log_skip "Crear /etc/cron.daily/aide-check"
     fi
 else
     log_warn "AIDE no instalado. Instálalo primero con el módulo 6 (paranoico)"
@@ -115,7 +119,11 @@ find /var/log -name "security-update-*.log" -mtime +30 -delete 2>/dev/null
 EOFZYPPER
 
     chmod 700 /etc/cron.daily/zypper-security-update
+    log_change "Creado" "/etc/cron.daily/zypper-security-update"
+    log_change "Permisos" "/etc/cron.daily/zypper-security-update -> 700"
     log_info "Cron diario creado: /etc/cron.daily/zypper-security-update"
+else
+    log_skip "Crear /etc/cron.daily/zypper-security-update"
 fi
 
 # ============================================================
@@ -153,7 +161,11 @@ find /var/log -name "lynis-report-*.log" -mtime +60 -delete 2>/dev/null
 EOFLYNIS
 
         chmod 700 /etc/cron.weekly/lynis-audit
+        log_change "Creado" "/etc/cron.weekly/lynis-audit"
+        log_change "Permisos" "/etc/cron.weekly/lynis-audit -> 700"
         log_info "Cron semanal lynis creado: /etc/cron.weekly/lynis-audit"
+    else
+        log_skip "Crear /etc/cron.weekly/lynis-audit"
     fi
 else
     log_warn "lynis no instalado. Instálalo primero con el módulo 6 (paranoico)"
@@ -195,7 +207,11 @@ find /var/log -name "rkhunter-check-*.log" -mtime +30 -delete 2>/dev/null
 EOFRKHUNTER
 
         chmod 700 /etc/cron.daily/rkhunter-check
+        log_change "Creado" "/etc/cron.daily/rkhunter-check"
+        log_change "Permisos" "/etc/cron.daily/rkhunter-check -> 700"
         log_info "Cron diario rkhunter creado: /etc/cron.daily/rkhunter-check"
+    else
+        log_skip "Crear /etc/cron.daily/rkhunter-check"
     fi
 else
     log_warn "rkhunter no instalado. Instálalo primero con el módulo 6 (paranoico)"
@@ -293,6 +309,8 @@ fi
 EOFNOTIFY
 
     chmod +x /usr/local/bin/seguridad-notificar.sh
+    log_change "Creado" "/usr/local/bin/seguridad-notificar.sh"
+    log_change "Permisos" "/usr/local/bin/seguridad-notificar.sh -> +x"
     log_info "Script creado: /usr/local/bin/seguridad-notificar.sh"
 
     # Timer systemd
@@ -305,6 +323,7 @@ After=network.target
 Type=oneshot
 ExecStart=/usr/local/bin/seguridad-notificar.sh
 EOF
+    log_change "Creado" "/etc/systemd/system/seguridad-notificar.service"
 
     cat > /etc/systemd/system/seguridad-notificar.timer << 'EOF'
 [Unit]
@@ -318,10 +337,15 @@ RandomizedDelaySec=300
 [Install]
 WantedBy=timers.target
 EOF
+    log_change "Creado" "/etc/systemd/system/seguridad-notificar.timer"
 
     systemctl daemon-reload
+    log_change "Aplicado" "systemctl daemon-reload"
     systemctl enable --now seguridad-notificar.timer 2>/dev/null || true
+    log_change "Servicio" "seguridad-notificar.timer enable --now"
     log_info "Timer horario habilitado: seguridad-notificar.timer"
+else
+    log_skip "Sistema de notificaciones de seguridad"
 fi
 
 # ============================================================
@@ -368,7 +392,11 @@ find /var/log -name "verificar-logrotate-*.log" -mtime +60 -delete 2>/dev/null
 EOFLOGROTATE
 
     chmod 700 /etc/cron.weekly/verificar-logrotate
+    log_change "Creado" "/etc/cron.weekly/verificar-logrotate"
+    log_change "Permisos" "/etc/cron.weekly/verificar-logrotate -> 700"
     log_info "Cron semanal creado: /etc/cron.weekly/verificar-logrotate"
+else
+    log_skip "Crear /etc/cron.weekly/verificar-logrotate"
 fi
 
 # ============================================================
@@ -465,8 +493,14 @@ find /var/log -name "seguridad-resumen-*.log" -mtime +30 -delete 2>/dev/null
 EOFRESUMEN
 
     chmod 700 /etc/cron.daily/seguridad-resumen
+    log_change "Creado" "/etc/cron.daily/seguridad-resumen"
+    log_change "Permisos" "/etc/cron.daily/seguridad-resumen -> 700"
     log_info "Cron diario creado: /etc/cron.daily/seguridad-resumen"
+else
+    log_skip "Crear /etc/cron.daily/seguridad-resumen"
 fi
+
+show_changes_summary
 
 echo ""
 log_info "Automatización de seguridad completada"

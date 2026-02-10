@@ -79,18 +79,21 @@ echo ""
 # ============================================================
 log_info "1. /etc/issue (login TTY local)"
 echo "$BANNER" > /etc/issue
+log_change "Creado" "/etc/issue"
 
 # ============================================================
 # 2. LOGIN REMOTO (telnet, etc)
 # ============================================================
 log_info "2. /etc/issue.net (login remoto)"
 echo "$BANNER" > /etc/issue.net
+log_change "Creado" "/etc/issue.net"
 
 # ============================================================
 # 3. MESSAGE OF THE DAY (post-login)
 # ============================================================
 log_info "3. /etc/motd (mensaje post-login)"
 echo "$BANNER" > /etc/motd
+log_change "Creado" "/etc/motd"
 
 # ============================================================
 # 4. SSH BANNER (pre-autenticación)
@@ -98,23 +101,30 @@ echo "$BANNER" > /etc/motd
 log_info "4. SSH Banner (pre-auth)"
 mkdir -p /etc/ssh
 echo "$BANNER" > /etc/ssh/banner
+log_change "Creado" "/etc/ssh/banner"
 chmod 644 /etc/ssh/banner
+log_change "Permisos" "/etc/ssh/banner -> 644"
 
 # Configurar en sshd_config
 if [[ -f /etc/ssh/sshd_config ]]; then
     # Eliminar banners anteriores
     sed -i '/^Banner/d' /etc/ssh/sshd_config
+    log_change "Modificado" "/etc/ssh/sshd_config"
     echo "Banner /etc/ssh/banner" >> /etc/ssh/sshd_config
+    log_change "Modificado" "/etc/ssh/sshd_config"
 
     # También mostrar en PrintMotd
     sed -i 's/^PrintMotd.*/PrintMotd yes/' /etc/ssh/sshd_config
+    log_change "Modificado" "/etc/ssh/sshd_config"
     if ! grep -q "^PrintMotd" /etc/ssh/sshd_config; then
         echo "PrintMotd yes" >> /etc/ssh/sshd_config
+        log_change "Modificado" "/etc/ssh/sshd_config"
     fi
 
     # Verificar y recargar SSH
     if sshd -t 2>/dev/null; then
         systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
+        log_change "Servicio" "$SSH_SERVICE_NAME reload"
         log_info "   SSH configurado correctamente"
     else
         log_warn "   Error en config SSH, verificar manualmente"
@@ -183,7 +193,9 @@ if [[ -z "$SECURITY_BANNER_SHOWN" ]]; then
 BANNER
 fi
 EOFPROFILE
+log_change "Creado" "/etc/profile.d/z-security-banner.sh"
 chmod +x /etc/profile.d/z-security-banner.sh
+log_change "Permisos" "/etc/profile.d/z-security-banner.sh -> +x"
 
 # ============================================================
 # 6. BASHRC GLOBAL
@@ -198,6 +210,7 @@ if [[ $- == *i* ]] && [[ -z "$SECURITY_BANNER_SHOWN" ]]; then
     export SECURITY_BANNER_SHOWN=1
 fi
 EOFBASH
+        log_change "Modificado" "/etc/bash.bashrc"
     fi
 fi
 
@@ -207,17 +220,20 @@ fi
 if [[ -d /etc/sddm.conf.d ]] || command -v sddm &>/dev/null; then
     log_info "7. SDDM (Display Manager)"
     mkdir -p /etc/sddm.conf.d
+    log_change "Creado" "/etc/sddm.conf.d/"
 
     # Crear tema con mensaje
     SDDM_THEME_DIR="/usr/share/sddm/themes/warning-theme"
     if [[ -d /usr/share/sddm/themes ]]; then
         mkdir -p "$SDDM_THEME_DIR"
+        log_change "Creado" "$SDDM_THEME_DIR/"
 
         # Mensaje para SDDM
         cat > "$SDDM_THEME_DIR/theme.conf" << 'EOF'
 [General]
 background=/usr/share/sddm/themes/warning-theme/background.png
 EOF
+        log_change "Creado" "$SDDM_THEME_DIR/theme.conf"
 
         # Crear QML con advertencia completa
         cat > "$SDDM_THEME_DIR/Main.qml" << 'EOF'
@@ -272,6 +288,7 @@ Rectangle {
     }
 }
 EOF
+        log_change "Creado" "$SDDM_THEME_DIR/Main.qml"
         log_info "   Tema SDDM con advertencia completa creado"
     fi
 fi
@@ -282,14 +299,17 @@ fi
 if command -v gdm &>/dev/null || [[ -d /etc/gdm ]]; then
     log_info "8. GDM (GNOME Display Manager)"
     mkdir -p /etc/dconf/db/gdm.d
+    log_change "Creado" "/etc/dconf/db/gdm.d/"
 
     cat > /etc/dconf/db/gdm.d/01-banner << 'EOF'
 [org/gnome/login-screen]
 banner-message-enable=true
 banner-message-text='══════════════════════════════════════════════════════════════════\n\n▓▓▓ SISTEMA PRIVADO DE ALTA SEGURIDAD ▓▓▓\n▓▓▓ ACCESO ESTRICTAMENTE RESTRINGIDO ▓▓▓\n\n══════════════════════════════════════════════════════════════════\n\nADVERTENCIA LEGAL:\n\nEste sistema informático es propiedad PRIVADA y está protegido\npor la legislación vigente en materia de delitos informáticos.\n\n● El acceso NO AUTORIZADO está PROHIBIDO\n● Todas las conexiones son MONITOREADAS y REGISTRADAS\n● Las direcciones IP son capturadas y almacenadas\n● Se tomarán acciones legales contra intrusos\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nNOTIFICACIÓN ESPECÍFICA:\n\n██  SEQUOIA: ACCESO PERMANENTEMENTE DENEGADO  ██\n\nCualquier intento de acceso por parte de "Sequoia" o entidades\nasociadas será considerado como intrusión maliciosa y se\nprocederá con denuncia inmediata ante las autoridades competentes.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nSi has llegado aquí por error, DESCONÉCTATE INMEDIATAMENTE.\n\nCódigo Penal - Delitos Informáticos:\nArt. 197 bis, 264, 264 bis CP (España)\nLey Orgánica de Protección de Datos (LOPD/RGPD)\n\n▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓'
 EOF
+    log_change "Creado" "/etc/dconf/db/gdm.d/01-banner"
 
     dconf update 2>/dev/null || true
+    log_change "Aplicado" "dconf update"
 fi
 
 # ============================================================
@@ -304,12 +324,14 @@ showMediaControls=false
 [Greeter][Wallpaper][org.kde.color]
 Color=26,26,46
 EOF
+log_change "Creado" "/etc/xdg/kscreenlockerrc"
 
 # ============================================================
 # 10. POLKIT (autenticación gráfica)
 # ============================================================
 log_info "10. Polkit (diálogos de autenticación)"
 mkdir -p /etc/polkit-1/rules.d
+log_change "Creado" "/etc/polkit-1/rules.d/"
 cat > /etc/polkit-1/rules.d/00-banner.rules << 'EOF'
 // Banner de seguridad para Polkit
 polkit.addRule(function(action, subject) {
@@ -318,6 +340,7 @@ polkit.addRule(function(action, subject) {
     return polkit.Result.NOT_HANDLED;
 });
 EOF
+log_change "Creado" "/etc/polkit-1/rules.d/00-banner.rules"
 
 # ============================================================
 # 11. SUDO
@@ -374,7 +397,9 @@ if [[ -f /etc/sudoers ]]; then
     ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
 
 EOF
+    log_change "Creado" "/etc/sudo_lecture"
     chmod 644 /etc/sudo_lecture
+    log_change "Permisos" "/etc/sudo_lecture -> 644"
 
     # Añadir a sudoers si no existe
     if ! grep -q "lecture_file" /etc/sudoers.d/99-hardening 2>/dev/null; then
@@ -385,7 +410,9 @@ EOF
 Defaults lecture=always
 Defaults lecture_file=/etc/sudo_lecture
 EOF
+        log_change "Modificado" "/etc/sudoers.d/99-hardening"
         chmod 440 /etc/sudoers.d/99-hardening
+        log_change "Permisos" "/etc/sudoers.d/99-hardening -> 440"
     fi
 fi
 
@@ -403,6 +430,7 @@ for i in {1..6}; do
 ExecStart=
 ExecStart=-/sbin/agetty --nohostname -o '-p -- \\u' %I \$TERM
 EOF
+    log_change "Creado" "/etc/systemd/system/getty@tty${i}.service.d/override.conf"
 done
 
 # ============================================================
@@ -411,6 +439,7 @@ done
 log_info "13. Faillock mensaje"
 if [[ -f /etc/security/faillock.conf ]]; then
     sed -i 's/^# *audit/audit/' /etc/security/faillock.conf
+    log_change "Modificado" "/etc/security/faillock.conf"
 fi
 
 # ============================================================
@@ -422,7 +451,9 @@ cat > /etc/rsyslog.d/99-security-banner.conf << 'EOF'
 auth,authpriv.*                 /var/log/auth.log
 *.warn                          /var/log/warnings.log
 EOF
+log_change "Creado" "/etc/rsyslog.d/99-security-banner.conf"
 systemctl restart rsyslog 2>/dev/null || true
+log_change "Servicio" "rsyslog restart"
 
 # ============================================================
 # 15. FIREWALL REJECT MESSAGE (en logs)
@@ -462,6 +493,7 @@ cat > /etc/hosts.deny << 'EOF'
 # Denegar todo por defecto y registrar
 ALL: ALL: spawn /bin/echo "[ALERTA] Intento de acceso no autorizado desde %a a %d - $(date)" >> /var/log/tcpwrappers.log : DENY
 EOF
+log_change "Creado" "/etc/hosts.deny"
 
 cat > /etc/hosts.allow << 'EOF'
 # ══════════════════════════════════════════════════════════════════
@@ -475,6 +507,7 @@ ALL: [::1]
 # Permitir red local (ajustar según necesidad)
 # sshd: 192.168.1.0/24
 EOF
+log_change "Creado" "/etc/hosts.allow"
 
 # ============================================================
 # 17. USB EVENTS (udev)
@@ -484,7 +517,9 @@ cat > /etc/udev/rules.d/99-usb-security.rules << 'EOF'
 # Log de dispositivos USB conectados
 ACTION=="add", SUBSYSTEM=="usb", RUN+="/bin/sh -c 'echo USB conectado: $env{ID_VENDOR} $env{ID_MODEL} >> /var/log/usb-events.log'"
 EOF
+log_change "Creado" "/etc/udev/rules.d/99-usb-security.rules"
 udevadm control --reload-rules 2>/dev/null || true
+log_change "Aplicado" "udevadm control --reload-rules"
 
 # ============================================================
 # 18. CRON (banner en ejecución)
@@ -494,6 +529,7 @@ cat > /etc/cron.d/security-reminder << 'EOF'
 # Recordatorio de seguridad diario en logs
 0 0 * * * root echo "=== SISTEMA MONITOREADO - SEQUOIA DENEGADO ===" >> /var/log/security-reminder.log
 EOF
+log_change "Creado" "/etc/cron.d/security-reminder"
 
 # ============================================================
 # 19. AUDIT WELCOME (si auditd está activo)
@@ -513,6 +549,7 @@ if [[ -f /etc/default/grub ]]; then
     if ! grep -q "GRUB_INIT_TUNE" /etc/default/grub; then
         echo '# Beep de advertencia en boot' >> /etc/default/grub
         echo 'GRUB_INIT_TUNE="480 440 1"' >> /etc/default/grub
+        log_change "Modificado" "/etc/default/grub"
     fi
 
     # Actualizar GRUB
@@ -522,6 +559,7 @@ fi
 # ============================================================
 # RESUMEN
 # ============================================================
+show_changes_summary
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║          BANNER APLICADO EN TODOS LOS PUNTOS              ║"

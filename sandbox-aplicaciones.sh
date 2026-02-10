@@ -47,6 +47,8 @@ if ask "¿Instalar Firejail?"; then
     if command -v firejail &>/dev/null; then
         log_info "Firejail instalado: $(firejail --version 2>&1 | head -1)"
     fi
+else
+    log_skip "Instalar Firejail"
 fi
 
 # Verificar que firejail está disponible para las secciones siguientes
@@ -69,6 +71,7 @@ if command -v firejail &>/dev/null; then
 
     if ask "¿Crear perfil de Firejail para Firefox?"; then
         mkdir -p /etc/firejail
+        log_change "Creado" "/etc/firejail/"
 
         cat > /etc/firejail/firefox.local << 'EOF'
 # Perfil local de Firefox para Firejail
@@ -99,7 +102,10 @@ nogroups
 nonewprivs
 EOF
 
+        log_change "Creado" "/etc/firejail/firefox.local"
         log_info "Perfil Firefox creado: /etc/firejail/firefox.local"
+    else
+        log_skip "Perfil Firejail para Firefox"
     fi
 
     # ============================================================
@@ -140,7 +146,10 @@ nogroups
 nonewprivs
 EOF
 
+        log_change "Creado" "/etc/firejail/thunderbird.local"
         log_info "Perfil Thunderbird creado: /etc/firejail/thunderbird.local"
+    else
+        log_skip "Perfil Firejail para Thunderbird"
     fi
 
     # ============================================================
@@ -183,7 +192,10 @@ nogroups
 nonewprivs
 EOF
 
+        log_change "Creado" "/etc/firejail/libreoffice.local"
         log_info "Perfil LibreOffice creado: /etc/firejail/libreoffice.local"
+    else
+        log_skip "Perfil Firejail para LibreOffice"
     fi
 
     # ============================================================
@@ -220,7 +232,10 @@ noroot
 nonewprivs
 EOF
 
+        log_change "Creado" "/etc/firejail/dolphin.local"
         log_info "Perfil Dolphin creado: /etc/firejail/dolphin.local"
+    else
+        log_skip "Perfil Firejail para Dolphin"
     fi
 
     # ============================================================
@@ -237,11 +252,14 @@ EOF
     if ask "¿Ejecutar firecfg para aplicar Firejail por defecto?"; then
         if command -v firecfg &>/dev/null; then
             firecfg 2>/dev/null || log_warn "firecfg tuvo errores (algunos symlinks pueden ya existir)"
+            log_change "Aplicado" "firecfg (Firejail por defecto)"
             log_info "firecfg ejecutado - Firejail aplicado por defecto"
             log_info "Para revertir: firecfg --clean"
         else
             log_error "firecfg no disponible"
         fi
+    else
+        log_skip "Aplicar Firejail por defecto (firecfg)"
     fi
 fi
 
@@ -319,12 +337,16 @@ exec bwrap "${BWRAP_ARGS[@]}" -- "$@"
 EOFBWRAP
 
         chmod +x /usr/local/bin/bwrap-sandbox.sh
+        log_change "Creado" "/usr/local/bin/bwrap-sandbox.sh"
+        log_change "Permisos" "/usr/local/bin/bwrap-sandbox.sh -> +x"
         log_info "Script creado: /usr/local/bin/bwrap-sandbox.sh"
         echo ""
         echo "Ejemplo de uso:"
         echo "  bwrap-sandbox.sh bash          # Shell aislada sin red"
         echo "  BWRAP_NET=1 bwrap-sandbox.sh curl https://example.com"
     fi
+else
+    log_skip "Instalar bubblewrap y script de sandbox"
 fi
 
 # ============================================================
@@ -433,10 +455,15 @@ echo -e "${BOLD}Verificación completada: $(date)${NC}"
 EOFVERIFY
 
     chmod +x /usr/local/bin/verificar-sandbox.sh
+    log_change "Creado" "/usr/local/bin/verificar-sandbox.sh"
+    log_change "Permisos" "/usr/local/bin/verificar-sandbox.sh -> +x"
     log_info "Script creado: /usr/local/bin/verificar-sandbox.sh"
+else
+    log_skip "Script de verificación de sandbox"
 fi
 
 echo ""
+show_changes_summary
 log_info "Sandboxing de aplicaciones completado"
 echo ""
 echo "Resumen:"

@@ -67,6 +67,7 @@ echo ""
 if systemctl list-unit-files "${SSH_SERVICE_NAME}.service" &>/dev/null 2>&1; then
     if ask "¿Aplicar sandboxing a sshd?"; then
         mkdir -p "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/"
+        log_change "Creado" "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/"
 
         cat > "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/hardening.conf" << 'EOF'
 [Service]
@@ -83,10 +84,14 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 ReadWritePaths=/var/log /run/sshd /var/run/sshd /etc/ssh
 EOF
+        log_change "Creado" "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/hardening.conf"
 
         systemctl daemon-reload
+        log_change "Aplicado" "systemctl daemon-reload"
         log_info "Drop-in de sshd creado"
         log_warn "Reinicia sshd para aplicar: systemctl restart $SSH_SERVICE_NAME"
+    else
+        log_skip "Sandboxing de sshd"
     fi
 else
     log_warn "${SSH_SERVICE_NAME}.service no encontrado"
@@ -104,6 +109,7 @@ if systemctl list-unit-files fail2ban.service &>/dev/null 2>&1; then
 
     if ask "¿Aplicar sandboxing a fail2ban?"; then
         mkdir -p /etc/systemd/system/fail2ban.service.d/
+        log_change "Creado" "/etc/systemd/system/fail2ban.service.d/"
 
         cat > /etc/systemd/system/fail2ban.service.d/hardening.conf << 'EOF'
 [Service]
@@ -121,10 +127,14 @@ RestrictSUIDSGID=yes
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_AUDIT_WRITE
 ReadWritePaths=/var/log /var/lib/fail2ban /run/fail2ban /var/run/fail2ban
 EOF
+        log_change "Creado" "/etc/systemd/system/fail2ban.service.d/hardening.conf"
 
         systemctl daemon-reload
+        log_change "Aplicado" "systemctl daemon-reload"
         log_info "Drop-in de fail2ban creado"
         log_warn "Reinicia fail2ban para aplicar: systemctl restart fail2ban"
+    else
+        log_skip "Sandboxing de fail2ban"
     fi
 else
     log_warn "fail2ban.service no encontrado"
@@ -142,6 +152,7 @@ if systemctl list-unit-files firewalld.service &>/dev/null 2>&1; then
 
     if ask "¿Aplicar sandboxing conservador a firewalld?"; then
         mkdir -p /etc/systemd/system/firewalld.service.d/
+        log_change "Creado" "/etc/systemd/system/firewalld.service.d/"
 
         cat > /etc/systemd/system/firewalld.service.d/hardening.conf << 'EOF'
 [Service]
@@ -151,10 +162,14 @@ NoNewPrivileges=yes
 ProtectHome=yes
 ProtectKernelModules=yes
 EOF
+        log_change "Creado" "/etc/systemd/system/firewalld.service.d/hardening.conf"
 
         systemctl daemon-reload
+        log_change "Aplicado" "systemctl daemon-reload"
         log_info "Drop-in de firewalld creado (conservador)"
         log_warn "Reinicia firewalld para aplicar: systemctl restart firewalld"
+    else
+        log_skip "Sandboxing de firewalld"
     fi
 else
     log_warn "firewalld.service no encontrado"
@@ -172,6 +187,7 @@ if systemctl list-unit-files NetworkManager.service &>/dev/null 2>&1; then
 
     if ask "¿Aplicar sandboxing conservador a NetworkManager?"; then
         mkdir -p /etc/systemd/system/NetworkManager.service.d/
+        log_change "Creado" "/etc/systemd/system/NetworkManager.service.d/"
 
         cat > /etc/systemd/system/NetworkManager.service.d/hardening.conf << 'EOF'
 [Service]
@@ -180,10 +196,14 @@ PrivateTmp=yes
 ProtectHome=yes
 ProtectKernelModules=yes
 EOF
+        log_change "Creado" "/etc/systemd/system/NetworkManager.service.d/hardening.conf"
 
         systemctl daemon-reload
+        log_change "Aplicado" "systemctl daemon-reload"
         log_info "Drop-in de NetworkManager creado (conservador)"
         log_warn "Reinicia NM para aplicar: systemctl restart NetworkManager"
+    else
+        log_skip "Sandboxing de NetworkManager"
     fi
 else
     log_warn "NetworkManager.service no encontrado"
@@ -200,6 +220,7 @@ if systemctl list-unit-files security-monitor.service &>/dev/null 2>&1; then
 
     if ask "¿Aplicar sandboxing a security-monitor?"; then
         mkdir -p /etc/systemd/system/security-monitor.service.d/
+        log_change "Creado" "/etc/systemd/system/security-monitor.service.d/"
 
         cat > /etc/systemd/system/security-monitor.service.d/hardening.conf << 'EOF'
 [Service]
@@ -216,10 +237,14 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 ReadWritePaths=/var/log
 EOF
+        log_change "Creado" "/etc/systemd/system/security-monitor.service.d/hardening.conf"
 
         systemctl daemon-reload
+        log_change "Aplicado" "systemctl daemon-reload"
         log_info "Drop-in de security-monitor creado"
         log_warn "Reinicia para aplicar: systemctl restart security-monitor"
+    else
+        log_skip "Sandboxing de security-monitor"
     fi
 else
     log_info "security-monitor.service no encontrado (se creará con módulo 5 extremo)"
@@ -293,14 +318,20 @@ done
 echo ""
 echo -e "${BOLD}Análisis completado: $(date)${NC}"
 EOFANALYZE
+    log_change "Creado" "/usr/local/bin/analizar-servicios-seguridad.sh"
 
     chmod +x /usr/local/bin/analizar-servicios-seguridad.sh
+    log_change "Permisos" "/usr/local/bin/analizar-servicios-seguridad.sh -> +x"
     log_info "Script creado: /usr/local/bin/analizar-servicios-seguridad.sh"
+else
+    log_skip "Crear script de analisis de servicios"
 fi
 
 # Recargar daemon final
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 
+show_changes_summary
 echo ""
 log_info "Sandboxing de servicios completado"
 log_info "Ejecuta 'systemd-analyze security' para ver mejoras"

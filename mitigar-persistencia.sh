@@ -86,9 +86,13 @@ if ask "¿Configurar monitoreo de cambios en tareas programadas?"; then
 -w /var/spool/cron/tabs/ -p wa -k persist_cron
 -w /etc/anacrontab -p wa -k persist_cron
 EOF
+        log_change "Creado" "/etc/audit/rules.d/persistence-cron.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Monitoreo de cron configurado en auditd"
     fi
+else
+    log_skip "Monitoreo de tareas programadas no configurado"
 fi
 
 # ============================================================
@@ -144,9 +148,13 @@ if ask "¿Configurar monitoreo de cambios en servicios systemd?"; then
 -w /run/systemd/system/ -p wa -k persist_systemd
 -w /etc/systemd/system.conf -p wa -k persist_systemd
 EOF
+        log_change "Creado" "/etc/audit/rules.d/persistence-systemd.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Monitoreo de servicios systemd configurado"
     fi
+else
+    log_skip "Monitoreo de servicios systemd no configurado"
 fi
 
 # ============================================================
@@ -228,9 +236,13 @@ if ask "¿Configurar monitoreo de scripts de autostart?"; then
 -w /etc/init.d/ -p wa -k persist_boot
 -w /etc/xdg/autostart/ -p wa -k persist_autostart
 EOF
+        log_change "Creado" "/etc/audit/rules.d/persistence-autostart.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Monitoreo de autostart configurado"
     fi
+else
+    log_skip "Monitoreo de scripts de autostart no configurado"
 fi
 
 # ============================================================
@@ -301,9 +313,13 @@ if ask "¿Configurar monitoreo de creación/modificación de cuentas?"; then
 -a always,exit -F arch=b64 -S execve -F path=/usr/sbin/userdel -k account_delete
 -a always,exit -F arch=b64 -S execve -F path=/usr/sbin/groupadd -k group_create
 EOF
+        log_change "Creado" "/etc/audit/rules.d/persistence-accounts.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Monitoreo de cuentas configurado"
     fi
+else
+    log_skip "Monitoreo de cuentas no configurado"
 fi
 
 # ============================================================
@@ -365,17 +381,22 @@ if ask "¿Configurar monitoreo de autenticación?"; then
 -w /etc/ssh/sshd_config.d/ -p wa -k persist_ssh
 EOF
 
+        log_change "Creado" "/etc/audit/rules.d/persistence-auth.rules"
         # Monitorear authorized_keys de todos los usuarios
         for home_dir in /root /home/*; do
             AUTH_DIR="$home_dir/.ssh"
             if [[ -d "$AUTH_DIR" ]]; then
                 echo "-w $AUTH_DIR/authorized_keys -p wa -k persist_ssh_keys" >> /etc/audit/rules.d/persistence-auth.rules
+                log_change "Modificado" "/etc/audit/rules.d/persistence-auth.rules"
             fi
         done
 
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Monitoreo de autenticación configurado"
     fi
+else
+    log_skip "Monitoreo de autenticación no configurado"
 fi
 
 # ============================================================
@@ -510,7 +531,9 @@ echo "Alertas: $ALERTS" | tee -a "$LOGFILE"
 echo "Log: $LOGFILE" | tee -a "$LOGFILE"
 PERSIST_EOF
 
+    log_change "Creado" "/usr/local/bin/detectar-persistencia.sh"
     chmod +x /usr/local/bin/detectar-persistencia.sh
+    log_change "Permisos" "/usr/local/bin/detectar-persistencia.sh -> +x"
     log_info "Script creado: /usr/local/bin/detectar-persistencia.sh"
 
     # Programar ejecución diaria
@@ -519,10 +542,18 @@ PERSIST_EOF
 #!/bin/bash
 /usr/local/bin/detectar-persistencia.sh > /dev/null 2>&1
 DCRON_EOF
+        log_change "Creado" "/etc/cron.daily/detectar-persistencia"
         chmod +x /etc/cron.daily/detectar-persistencia
+        log_change "Permisos" "/etc/cron.daily/detectar-persistencia -> +x"
         log_info "Detección diaria programada"
+    else
+        log_skip "Detección diaria de persistencia no programada"
     fi
+else
+    log_skip "Script de detección de persistencia no creado"
 fi
+
+show_changes_summary
 
 # ============================================================
 # RESUMEN

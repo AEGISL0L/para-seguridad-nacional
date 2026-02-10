@@ -48,6 +48,8 @@ echo ""
 if ask "¿Instalar sistema UEBA de baseline comportamental?"; then
 
     mkdir -p "$HUNT_DIR/ueba/baselines" "$HUNT_DIR/ueba/anomalias"
+    log_change "Creado" "$HUNT_DIR/ueba/baselines/"
+    log_change "Creado" "$HUNT_DIR/ueba/anomalias/"
 
     cat > /usr/local/bin/ueba-crear-baseline.sh << 'EOFUEBA_BL'
 #!/bin/bash
@@ -143,6 +145,8 @@ echo "Usuarios analizados: $(echo "$USERS" | wc -w)"
 EOFUEBA_BL
 
     chmod 700 /usr/local/bin/ueba-crear-baseline.sh
+    log_change "Creado" "/usr/local/bin/ueba-crear-baseline.sh"
+    log_change "Permisos" "/usr/local/bin/ueba-crear-baseline.sh -> 700"
 
     # Script de detección de anomalías
     cat > /usr/local/bin/ueba-detectar-anomalias.sh << 'EOFUEBA_DET'
@@ -283,6 +287,8 @@ echo "Reporte: $REPORT"
 EOFUEBA_DET
 
     chmod 700 /usr/local/bin/ueba-detectar-anomalias.sh
+    log_change "Creado" "/usr/local/bin/ueba-detectar-anomalias.sh"
+    log_change "Permisos" "/usr/local/bin/ueba-detectar-anomalias.sh -> 700"
 
     # Cron diario para UEBA
     cat > /etc/cron.daily/ueba-anomalias << 'EOFUEBA_CRON'
@@ -294,11 +300,14 @@ fi
 EOFUEBA_CRON
 
     chmod 700 /etc/cron.daily/ueba-anomalias
+    log_change "Creado" "/etc/cron.daily/ueba-anomalias"
+    log_change "Permisos" "/etc/cron.daily/ueba-anomalias -> 700"
     log_info "UEBA instalado: ueba-crear-baseline.sh / ueba-detectar-anomalias.sh"
     echo -e "${DIM}1. Crear baseline: ueba-crear-baseline.sh 30${NC}"
     echo -e "${DIM}2. Detectar anomalías: ueba-detectar-anomalias.sh 24${NC}"
 
 else
+    log_skip "Sistema UEBA de baseline comportamental"
     log_warn "UEBA no instalado"
 fi
 
@@ -320,6 +329,7 @@ echo ""
 if ask "¿Instalar playbooks de caza de amenazas?"; then
 
     mkdir -p /usr/local/lib/threat-hunting/playbooks
+    log_change "Creado" "/usr/local/lib/threat-hunting/playbooks/"
 
     cat > /usr/local/bin/cazar-amenazas.sh << 'EOFHUNT'
 #!/bin/bash
@@ -605,9 +615,12 @@ echo "Reporte: $REPORT"
 EOFHUNT
 
     chmod 700 /usr/local/bin/cazar-amenazas.sh
+    log_change "Creado" "/usr/local/bin/cazar-amenazas.sh"
+    log_change "Permisos" "/usr/local/bin/cazar-amenazas.sh -> 700"
     log_info "Framework de caza instalado: /usr/local/bin/cazar-amenazas.sh"
 
 else
+    log_skip "Playbooks de caza de amenazas"
     log_warn "Framework de caza no instalado"
 fi
 
@@ -784,6 +797,8 @@ fi
 EOFPERS
 
     chmod 700 /usr/local/bin/detectar-persistencia-avanzada.sh
+    log_change "Creado" "/usr/local/bin/detectar-persistencia-avanzada.sh"
+    log_change "Permisos" "/usr/local/bin/detectar-persistencia-avanzada.sh -> 700"
 
     # Timer systemd cada 15 minutos
     cat > /etc/systemd/system/detectar-persistencia.service << 'EOFPERSSVC'
@@ -810,13 +825,20 @@ OnUnitActiveSec=15min
 WantedBy=timers.target
 EOFPERSTMR
 
+    log_change "Creado" "/etc/systemd/system/detectar-persistencia.service"
+    log_change "Creado" "/etc/systemd/system/detectar-persistencia.timer"
+
     systemctl daemon-reload 2>/dev/null
+    log_change "Aplicado" "systemctl daemon-reload"
     systemctl enable detectar-persistencia.timer 2>/dev/null
+    log_change "Servicio" "detectar-persistencia.timer enable"
     systemctl start detectar-persistencia.timer 2>/dev/null
+    log_change "Servicio" "detectar-persistencia.timer start"
     log_info "Detección de persistencia instalada (timer 15min)"
     log_info "Script: /usr/local/bin/detectar-persistencia-avanzada.sh"
 
 else
+    log_skip "Detección de persistencia avanzada"
     log_warn "Detección de persistencia avanzada no instalada"
 fi
 
@@ -999,10 +1021,13 @@ echo "Reporte: $REPORT" | tee -a "$REPORT"
 EOFRETRO
 
     chmod 700 /usr/local/bin/buscar-retrospectivo.sh
+    log_change "Creado" "/usr/local/bin/buscar-retrospectivo.sh"
+    log_change "Permisos" "/usr/local/bin/buscar-retrospectivo.sh -> 700"
     log_info "Búsqueda retrospectiva: /usr/local/bin/buscar-retrospectivo.sh"
     echo -e "${DIM}Uso: buscar-retrospectivo.sh ip 192.168.1.100 60${NC}"
 
 else
+    log_skip "Herramienta de búsqueda retrospectiva"
     log_warn "Búsqueda retrospectiva no instalada"
 fi
 
@@ -1149,6 +1174,8 @@ echo "Reporte: $REPORT"
 EOFNETANOM
 
     chmod 700 /usr/local/bin/detectar-anomalias-red.sh
+    log_change "Creado" "/usr/local/bin/detectar-anomalias-red.sh"
+    log_change "Permisos" "/usr/local/bin/detectar-anomalias-red.sh -> 700"
 
     cat > /etc/cron.daily/detectar-anomalias-red << 'EOFNETCRON'
 #!/bin/bash
@@ -1159,9 +1186,12 @@ fi
 EOFNETCRON
 
     chmod 700 /etc/cron.daily/detectar-anomalias-red
+    log_change "Creado" "/etc/cron.daily/detectar-anomalias-red"
+    log_change "Permisos" "/etc/cron.daily/detectar-anomalias-red -> 700"
     log_info "Detección estadística de red instalada"
 
 else
+    log_skip "Detección estadística de anomalías de red"
     log_warn "Detección estadística de red no instalada"
 fi
 
@@ -1217,4 +1247,5 @@ echo -e "  ${DIM}Cazar amenazas:${NC}    cazar-amenazas.sh"
 echo -e "  ${DIM}Buscar IoC:${NC}        buscar-retrospectivo.sh ip 1.2.3.4 60"
 echo -e "  ${DIM}Anomalías red:${NC}     detectar-anomalias-red.sh"
 echo ""
+show_changes_summary
 log_info "Módulo de caza de amenazas completado"

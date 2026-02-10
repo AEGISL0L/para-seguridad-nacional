@@ -90,6 +90,73 @@ else
     log_alert()   { echo -e "${RED}${BOLD}[!!!]${NC} $1"; }
 fi
 
+# ── Feedback visual de cambios ────────────────────────────────
+_SECURIZAR_CHANGES=()
+_SECURIZAR_SKIPPED=()
+
+# log_change "Verbo" "detalle" -> imprime "  -> Verbo: detalle" en bold blanco
+log_change() {
+    local verb="$1" detail="$2"
+    local line="  -> ${verb}: ${detail}"
+    _SECURIZAR_CHANGES+=("$line")
+    if [[ -n "${SECURIZAR_LOG_TO_FILE:-}" ]]; then
+        echo -e "  ${BOLD}${WHITE}->${NC} ${BOLD}${verb}:${NC} ${detail}" | tee -a "$SECURIZAR_LOG_TO_FILE"
+    else
+        echo -e "  ${BOLD}${WHITE}->${NC} ${BOLD}${verb}:${NC} ${detail}"
+    fi
+}
+
+# log_skip "descripcion" -> imprime "  -- Omitido: desc" en dim
+log_skip() {
+    local desc="$1"
+    local line="  -- Omitido: ${desc}"
+    _SECURIZAR_SKIPPED+=("$line")
+    if [[ -n "${SECURIZAR_LOG_TO_FILE:-}" ]]; then
+        echo -e "  ${DIM}-- Omitido: ${desc}${NC}" | tee -a "$SECURIZAR_LOG_TO_FILE"
+    else
+        echo -e "  ${DIM}-- Omitido: ${desc}${NC}"
+    fi
+}
+
+# show_changes_summary - Resumen con contadores al final del script
+show_changes_summary() {
+    local n_changes=${#_SECURIZAR_CHANGES[@]}
+    local n_skipped=${#_SECURIZAR_SKIPPED[@]}
+
+    [[ $n_changes -eq 0 && $n_skipped -eq 0 ]] && return 0
+
+    local _out=""
+    _out+="\n  ${CYAN}┌── RESUMEN DE CAMBIOS ──────────────────────────────────${NC}\n"
+    _out+="  ${CYAN}│${NC}  ${BOLD}${n_changes} cambios aplicados${NC} · ${DIM}${n_skipped} omitidos${NC}\n"
+    _out+="  ${CYAN}│${NC}\n"
+
+    local entry
+    for entry in "${_SECURIZAR_CHANGES[@]}"; do
+        _out+="  ${CYAN}│${NC} ${entry}\n"
+    done
+
+    if [[ $n_skipped -gt 0 ]]; then
+        _out+="  ${CYAN}│${NC}\n"
+        for entry in "${_SECURIZAR_SKIPPED[@]}"; do
+            _out+="  ${CYAN}│${NC} ${DIM}${entry}${NC}\n"
+        done
+    fi
+
+    _out+="  ${CYAN}└────────────────────────────────────────────────────────${NC}"
+
+    if [[ -n "${SECURIZAR_LOG_TO_FILE:-}" ]]; then
+        echo -e "$_out" | tee -a "$SECURIZAR_LOG_TO_FILE"
+    else
+        echo -e "$_out"
+    fi
+}
+
+# reset_changes - Vacia arrays (para modulos inline del menu)
+reset_changes() {
+    _SECURIZAR_CHANGES=()
+    _SECURIZAR_SKIPPED=()
+}
+
 # ── ask() ───────────────────────────────────────────────────
 ask() {
     read -p "$1 [s/N]: " resp
@@ -133,6 +200,7 @@ init_backup() {
         return 1
     fi
     log_info "Backup en: $BACKUP_DIR"
+    log_change "Backup" "directorio: $BACKUP_DIR"
     export BACKUP_DIR
 }
 
@@ -188,6 +256,11 @@ _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-pkg-map.sh"
 _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-pkg.sh"
 _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-firewall.sh"
 _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-paths.sh"
+
+# Metasploit (opcional - no fatal si no existe)
+if [[ -f "${_SECURIZAR_LIB_DIR}/securizar-msf.sh" ]]; then
+    _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-msf.sh"
+fi
 
 # ── SSH_SERVICE_NAME ─────────────────────────────────────────
 # Debian usa ssh.service, el resto usa sshd.service

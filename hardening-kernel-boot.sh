@@ -36,6 +36,7 @@ echo ""
 if ask "¿Añadir parámetros de seguridad al cmdline del kernel?"; then
     if [[ -f /etc/default/grub ]]; then
         cp /etc/default/grub "$BACKUP_DIR/"
+        log_change "Backup" "/etc/default/grub"
 
         # Parámetros a añadir
         SECURITY_PARAMS="init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 pti=on vsyscall=none debugfs=off oops=panic randomize_kstack_offset=on lockdown=confidentiality"
@@ -57,11 +58,13 @@ if ask "¿Añadir parámetros de seguridad al cmdline del kernel?"; then
         if [[ -n "$new_params" ]]; then
             new_cmdline="${current_cmdline}${new_params}"
             sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"${new_cmdline}\"|" /etc/default/grub
+            log_change "Modificado" "/etc/default/grub"
             log_info "Parámetros añadidos:$new_params"
 
             # Regenerar grub.cfg
             log_info "Regenerando grub.cfg..."
             grub_regenerate
+            log_change "Aplicado" "grub_regenerate"
             log_info "grub.cfg regenerado"
             log_warn "Los cambios se aplicarán en el próximo reinicio"
         else
@@ -70,6 +73,8 @@ if ask "¿Añadir parámetros de seguridad al cmdline del kernel?"; then
     else
         log_error "/etc/default/grub no encontrado"
     fi
+else
+    log_skip "Añadir parámetros de seguridad al cmdline del kernel"
 fi
 
 # ============================================================
@@ -99,6 +104,8 @@ else
         else
             log_error "No se pudo instalar mokutil"
         fi
+    else
+        log_skip "Instalar mokutil para verificar Secure Boot"
     fi
 fi
 
@@ -172,8 +179,12 @@ echo ""
 echo -e "${BOLD}Verificación completada: $(date)${NC}"
 EOFMOD
 
+    log_change "Creado" "/usr/local/bin/verificar-modulos-firmados.sh"
     chmod +x /usr/local/bin/verificar-modulos-firmados.sh
+    log_change "Permisos" "/usr/local/bin/verificar-modulos-firmados.sh -> +x"
     log_info "Script creado: /usr/local/bin/verificar-modulos-firmados.sh"
+else
+    log_skip "Crear /usr/local/bin/verificar-modulos-firmados.sh"
 fi
 
 # ============================================================
@@ -197,10 +208,13 @@ else
         echo "Introduce una contraseña para GRUB:"
         grub_set_password 2>/dev/null || true
         if [[ -f $GRUB_USER_CFG ]]; then
+            log_change "Aplicado" "grub_set_password"
             log_info "Contraseña de GRUB establecida"
         else
             log_error "No se pudo establecer la contraseña de GRUB"
         fi
+    else
+        log_skip "Proteger GRUB con contraseña"
     fi
 fi
 
@@ -213,7 +227,10 @@ else
     log_warn "/boot tiene permisos: $boot_perm (recomendado: 700)"
     if ask "¿Aplicar permisos 700 a /boot?"; then
         chmod 700 /boot
+        log_change "Permisos" "/boot -> 700"
         log_info "/boot -> 700"
+    else
+        log_skip "Aplicar permisos 700 a /boot"
     fi
 fi
 
@@ -226,7 +243,10 @@ if [[ -f $GRUB_CFG ]]; then
         log_warn "$GRUB_CFG tiene permisos: $grub_perm (recomendado: 600)"
         if ask "¿Aplicar permisos 600 a $GRUB_CFG?"; then
             chmod 600 $GRUB_CFG
+            log_change "Permisos" "$GRUB_CFG -> 600"
             log_info "$GRUB_CFG -> 600"
+        else
+            log_skip "Aplicar permisos 600 a $GRUB_CFG"
         fi
     fi
 fi
@@ -239,3 +259,4 @@ echo "  $(cat /proc/cmdline 2>/dev/null || echo 'No disponible')"
 echo ""
 log_info "Hardening de kernel boot completado"
 log_info "Backup en: $BACKUP_DIR"
+show_changes_summary

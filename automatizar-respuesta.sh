@@ -22,6 +22,7 @@ require_root
 securizar_setup_traps
 SOAR_DIR="/var/lib/soar"
 mkdir -p "$SOAR_DIR/actions" "$SOAR_DIR/queue" "$SOAR_DIR/log"
+log_change "Creado" "$SOAR_DIR/{actions,queue,log}/"
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -278,9 +279,12 @@ esac
 EOFSOAR
 
     chmod 700 /usr/local/bin/soar-responder.sh
+    log_change "Creado" "/usr/local/bin/soar-responder.sh"
+    log_change "Permisos" "/usr/local/bin/soar-responder.sh -> 700"
     log_info "Motor SOAR instalado: /usr/local/bin/soar-responder.sh"
 
 else
+    log_skip "Motor de respuesta automática"
     log_warn "Motor SOAR no instalado"
 fi
 
@@ -305,6 +309,7 @@ ExecStart=/usr/local/bin/soar-responder.sh procesar
 StandardOutput=journal
 StandardError=journal
 EOFSVC
+    log_change "Creado" "/etc/systemd/system/soar-responder.service"
 
     cat > /etc/systemd/system/soar-responder.timer << 'EOFTMR'
 [Unit]
@@ -317,13 +322,18 @@ OnUnitActiveSec=10min
 [Install]
 WantedBy=timers.target
 EOFTMR
+    log_change "Creado" "/etc/systemd/system/soar-responder.timer"
 
     systemctl daemon-reload 2>/dev/null
+    log_change "Aplicado" "systemctl daemon-reload"
     systemctl enable soar-responder.timer 2>/dev/null
+    log_change "Servicio" "soar-responder.timer enable"
     systemctl start soar-responder.timer 2>/dev/null
+    log_change "Servicio" "soar-responder.timer start"
     log_info "SOAR automático activado (cada 10 minutos)"
 
 else
+    log_skip "Procesamiento automático cada 10 minutos"
     log_warn "SOAR automático no configurado"
 fi
 
@@ -432,9 +442,12 @@ esac
 EOFBLOCK
 
     chmod 700 /usr/local/bin/soar-gestionar-bloqueos.sh
+    log_change "Creado" "/usr/local/bin/soar-gestionar-bloqueos.sh"
+    log_change "Permisos" "/usr/local/bin/soar-gestionar-bloqueos.sh -> 700"
     log_info "Gestión de bloqueos: /usr/local/bin/soar-gestionar-bloqueos.sh"
 
 else
+    log_skip "Gestión de IPs bloqueadas"
     log_warn "Gestión de bloqueos no instalada"
 fi
 
@@ -546,10 +559,13 @@ echo "$(date -Iseconds)|C=$CRITICAL|H=$HIGH|M=$MEDIUM|L=$LOW|TOTAL=$TOTAL" >> "$
 EOFNOTIFY
 
     chmod 700 /usr/local/bin/soar-notificar.sh
+    log_change "Creado" "/usr/local/bin/soar-notificar.sh"
+    log_change "Permisos" "/usr/local/bin/soar-notificar.sh -> 700"
     log_info "Notificaciones: /usr/local/bin/soar-notificar.sh"
     echo -e "${DIM}Uso: soar-notificar.sh [horas-atrás]${NC}"
 
 else
+    log_skip "Notificaciones consolidadas"
     log_warn "Notificaciones no instaladas"
 fi
 
@@ -614,12 +630,17 @@ c2-detected|CRITICO|block-ip,preserve-evidence|duration=permanent
 EOFRULES
 
     chmod 600 /etc/security/soar-rules.conf
+    log_change "Creado" "/etc/security/soar-rules.conf"
+    log_change "Permisos" "/etc/security/soar-rules.conf -> 600"
     log_info "Reglas SOAR creadas: /etc/security/soar-rules.conf"
     echo -e "${DIM}Editar reglas: nano /etc/security/soar-rules.conf${NC}"
 
 else
+    log_skip "Archivo de reglas de respuesta"
     log_warn "Reglas SOAR no creadas"
 fi
+
+show_changes_summary
 
 # ============================================================
 log_section "RESUMEN DE AUTOMATIZACIÓN DE RESPUESTA"

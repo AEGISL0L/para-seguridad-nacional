@@ -62,20 +62,26 @@ if ask "¿Bloquear Bluetooth completamente?"; then
 
     # Desactivar servicio
     sudo systemctl stop bluetooth 2>/dev/null
+    log_change "Servicio" "bluetooth stop"
     sudo systemctl disable bluetooth 2>/dev/null
+    log_change "Servicio" "bluetooth disable"
     sudo systemctl mask bluetooth 2>/dev/null
+    log_change "Servicio" "bluetooth mask"
 
     # Bloquear módulos
     echo "install bluetooth /bin/false" | sudo tee /etc/modprobe.d/disable-bluetooth.conf > /dev/null
     echo "install btusb /bin/false" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
     echo "install btrtl /bin/false" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
     echo "install btintel /bin/false" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
+    log_change "Creado" "/etc/modprobe.d/disable-bluetooth.conf"
 
     # Descargar módulos
     sudo rmmod btusb 2>/dev/null
     sudo rmmod bluetooth 2>/dev/null
 
     log_info "Bluetooth bloqueado completamente"
+else
+    log_skip "Bloquear Bluetooth"
 fi
 
 # ============================================================
@@ -103,6 +109,7 @@ wifi.cloned-mac-address=random
 wifi.p2p-management=false
 EOF
     sudo cp /tmp/no-wifi-direct.conf /etc/NetworkManager/conf.d/99-no-mesh.conf
+    log_change "Creado" "/etc/NetworkManager/conf.d/99-no-mesh.conf"
 
     # Deshabilitar autoconexión a redes abiertas
     for conn in $(nmcli -t -f NAME,TYPE con show | grep wireless | cut -d: -f1); do
@@ -110,8 +117,11 @@ EOF
     done
 
     sudo systemctl restart NetworkManager
+    log_change "Servicio" "NetworkManager restart"
 
     log_info "WiFi Mesh/P2P deshabilitado"
+else
+    log_skip "Deshabilitar conexiones WiFi automáticas"
 fi
 
 # ============================================================
@@ -134,10 +144,13 @@ if ask "¿Bloquear comunicación con dispositivos IoT conocidos?"; then
 
     # Bloquear Zigbee/Z-Wave (si hay adaptador)
     echo "install ieee802154 /bin/false" | sudo tee /etc/modprobe.d/disable-zigbee.conf > /dev/null
+    log_change "Creado" "/etc/modprobe.d/disable-zigbee.conf"
 
     fw_reload 2>/dev/null
 
     log_info "Puertos IoT bloqueados"
+else
+    log_skip "Bloquear comunicación con dispositivos IoT"
 fi
 
 # ============================================================
@@ -151,14 +164,19 @@ echo ""
 
 if ask "¿Deshabilitar mDNS/Avahi?"; then
     sudo systemctl stop avahi-daemon 2>/dev/null
+    log_change "Servicio" "avahi-daemon stop"
     sudo systemctl disable avahi-daemon 2>/dev/null
+    log_change "Servicio" "avahi-daemon disable"
     sudo systemctl mask avahi-daemon 2>/dev/null
+    log_change "Servicio" "avahi-daemon mask"
 
     # Bloquear en firewall
     fw_add_rich_rule 'rule family="ipv4" destination address="224.0.0.251" drop'
     fw_reload 2>/dev/null
 
     log_info "mDNS/Avahi deshabilitado"
+else
+    log_skip "Deshabilitar mDNS/Avahi"
 fi
 
 # ============================================================
@@ -178,6 +196,8 @@ if ask "¿Bloquear UPnP?"; then
     fw_reload 2>/dev/null
 
     log_info "UPnP bloqueado"
+else
+    log_skip "Bloquear UPnP"
 fi
 
 # ============================================================
@@ -199,10 +219,14 @@ wifi.cloned-mac-address=random
 ethernet.cloned-mac-address=random
 connection.stable-id=${CONNECTION}/${BOOT}/${RANDOM}
 EOF
+    log_change "Creado" "/etc/NetworkManager/conf.d/99-random-mac-full.conf"
 
     sudo systemctl restart NetworkManager
+    log_change "Servicio" "NetworkManager restart"
 
     log_info "MAC aleatorio en cada conexión"
+else
+    log_skip "Cambio de MAC cada reconexión"
 fi
 
 # ============================================================
@@ -253,7 +277,11 @@ ss -u | grep -E "224\.|239\." 2>/dev/null || echo "Ninguno (bien)"
 echo ""
 EOF
     chmod +x /usr/local/bin/monitor-mesh.sh
+    log_change "Creado" "/usr/local/bin/monitor-mesh.sh"
+    log_change "Permisos" "/usr/local/bin/monitor-mesh.sh -> +x"
     log_info "Monitor creado: monitor-mesh.sh"
+else
+    log_skip "Script de monitoreo de redes mesh"
 fi
 
 # ============================================================
@@ -290,12 +318,17 @@ echo ""
 if ask "¿Bloquear NFC?"; then
     echo "install nfc /bin/false" | sudo tee /etc/modprobe.d/disable-nfc.conf > /dev/null
     echo "install pn533 /bin/false" | sudo tee -a /etc/modprobe.d/disable-nfc.conf > /dev/null
+    log_change "Creado" "/etc/modprobe.d/disable-nfc.conf"
 
     sudo rmmod pn533 2>/dev/null
     sudo rmmod nfc 2>/dev/null
 
     log_info "NFC bloqueado"
+else
+    log_skip "Bloquear NFC"
 fi
+
+show_changes_summary
 
 # ============================================================
 # RESUMEN

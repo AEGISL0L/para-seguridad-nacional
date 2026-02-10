@@ -97,6 +97,8 @@ if [[ -n "$DEPS_NEEDED" ]]; then
             log_error "Error instalando dependencias. Verifica repositorios."
         }
         log_info "Dependencias instaladas"
+    else
+        log_skip "Dependencias faltantes:${DEPS_NEEDED}"
     fi
 else
     log_info "Todas las dependencias presentes"
@@ -121,17 +123,24 @@ if ask "Crear estructura de directorios?"; then
     mkdir -p "$CIBERINT_BASE"/data/{attack-surface,reports,alerts,credentials}
     mkdir -p "$CIBERINT_BASE"/log
     mkdir -p "$CIBERINT_LIB_DIR"
+    log_change "Creado" "$CIBERINT_BASE/ (estructura completa)"
 
     # Permisos restrictivos
     chmod 750 "$CIBERINT_BASE"
+    log_change "Permisos" "$CIBERINT_BASE -> 750"
     chmod 700 "$CIBERINT_BASE/config"
+    log_change "Permisos" "$CIBERINT_BASE/config -> 700"
     chmod 750 "$CIBERINT_BASE/data"
+    log_change "Permisos" "$CIBERINT_BASE/data -> 750"
 
     # Crear historial de conexiones
     touch "$CIBERINT_BASE/data/connection-history.log"
     chmod 640 "$CIBERINT_BASE/data/connection-history.log"
+    log_change "Permisos" "$CIBERINT_BASE/data/connection-history.log -> 640"
 
     log_info "Estructura de directorios creada"
+else
+    log_skip "Estructura de directorios de ciberinteligencia"
 fi
 
 # ============================================================
@@ -183,6 +192,8 @@ CIBERINT_HISTORY_DAYS=90
 EOFCONF
 
     chmod 640 "$CIBERINT_BASE/config/ciberint.conf"
+    log_change "Creado" "$CIBERINT_BASE/config/ciberint.conf"
+    log_change "Permisos" "$CIBERINT_BASE/config/ciberint.conf -> 640"
     log_info "Configuracion base creada"
 fi
 
@@ -195,6 +206,8 @@ if [[ ! -f "$CIBERINT_BASE/config/api-keys.conf" ]]; then
 #VIRUSTOTAL=tu-clave-aqui
 EOFKEYS
     chmod 600 "$CIBERINT_BASE/config/api-keys.conf"
+    log_change "Creado" "$CIBERINT_BASE/config/api-keys.conf"
+    log_change "Permisos" "$CIBERINT_BASE/config/api-keys.conf -> 600"
     log_info "Fichero de claves API creado (editar para activar servicios)"
 fi
 
@@ -208,6 +221,8 @@ KP
 IR
 EOFHR
     chmod 640 "$CIBERINT_BASE/config/high-risk-countries.conf"
+    log_change "Creado" "$CIBERINT_BASE/config/high-risk-countries.conf"
+    log_change "Permisos" "$CIBERINT_BASE/config/high-risk-countries.conf -> 640"
 fi
 
 if [[ ! -f "$CIBERINT_BASE/config/scoring-weights.conf" ]]; then
@@ -224,6 +239,8 @@ WEIGHT_HIGH_RISK_COUNTRY=5
 WEIGHT_EXTRA_FEED=5
 EOFSW
     chmod 640 "$CIBERINT_BASE/config/scoring-weights.conf"
+    log_change "Creado" "$CIBERINT_BASE/config/scoring-weights.conf"
+    log_change "Permisos" "$CIBERINT_BASE/config/scoring-weights.conf -> 640"
 fi
 
 # ============================================================
@@ -233,7 +250,9 @@ log_section "BIBLIOTECA COMPARTIDA"
 
 echo "Instalando biblioteca en $CIBERINT_LIB_DIR/"
 cp "${SCRIPT_DIR}/lib/ciberint-lib.sh" "$CIBERINT_LIB_DIR/ciberint-lib.sh"
+log_change "Creado" "$CIBERINT_LIB_DIR/ciberint-lib.sh"
 chmod 644 "$CIBERINT_LIB_DIR/ciberint-lib.sh"
+log_change "Permisos" "$CIBERINT_LIB_DIR/ciberint-lib.sh -> 644"
 log_info "Biblioteca compartida instalada"
 
 # ============================================================
@@ -503,8 +522,12 @@ fi
 EOFS1
 
 chmod 755 "$CIBERINT_BIN/ciberint-enriquecer-ioc.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-enriquecer-ioc.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-enriquecer-ioc.sh -> 755"
 log_info "S1: Motor de enriquecimiento instalado"
 
+else
+    log_skip "Motor de enriquecimiento de IoC (S1)"
 fi  # S1
 
 # ============================================================
@@ -633,6 +656,8 @@ ciberint_log "INFO" "Red inteligente: ${#SEEN_IPS[@]} IPs, $ALERTS_GENERATED ale
 EOFS2A
 
 chmod 755 "$CIBERINT_BIN/ciberint-red-inteligente.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-red-inteligente.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-red-inteligente.sh -> 755"
 
 # ── ciberint-geoip-update.sh ──
 cat > "$CIBERINT_BIN/ciberint-geoip-update.sh" << 'EOFS2B'
@@ -675,6 +700,8 @@ rm -f "$TMP_GZ"
 EOFS2B
 
 chmod 755 "$CIBERINT_BIN/ciberint-geoip-update.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-geoip-update.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-geoip-update.sh -> 755"
 
 # ── ciberint-conexiones-historico.sh (para S5) ──
 cat > "$CIBERINT_BIN/ciberint-conexiones-historico.sh" << 'EOFS2C'
@@ -724,6 +751,8 @@ fi
 EOFS2C
 
 chmod 755 "$CIBERINT_BIN/ciberint-conexiones-historico.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-conexiones-historico.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-conexiones-historico.sh -> 755"
 
 # Timer systemd: cada 15 min
 cat > /etc/systemd/system/ciberint-red.service << EOFSVC
@@ -751,8 +780,13 @@ Persistent=true
 WantedBy=timers.target
 EOFTMR
 
+log_change "Creado" "/etc/systemd/system/ciberint-red.service"
+log_change "Creado" "/etc/systemd/system/ciberint-red.timer"
+
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now ciberint-red.timer 2>/dev/null || true
+log_change "Servicio" "ciberint-red.timer enable+start"
 
 # Cron mensual para GeoIP
 cat > /etc/cron.monthly/ciberint-geoip-update << EOFCRON
@@ -760,6 +794,8 @@ cat > /etc/cron.monthly/ciberint-geoip-update << EOFCRON
 $CIBERINT_BIN/ciberint-geoip-update.sh >> $CIBERINT_BASE/log/geoip-update.log 2>&1
 EOFCRON
 chmod 700 /etc/cron.monthly/ciberint-geoip-update
+log_change "Creado" "/etc/cron.monthly/ciberint-geoip-update"
+log_change "Permisos" "/etc/cron.monthly/ciberint-geoip-update -> 700"
 
 log_info "S2: Inteligencia de red instalada (timer 15min + GeoIP mensual)"
 
@@ -767,8 +803,12 @@ log_info "S2: Inteligencia de red instalada (timer 15min + GeoIP mensual)"
 echo ""
 if ask "Descargar base GeoIP ahora? (recomendado)"; then
     "$CIBERINT_BIN/ciberint-geoip-update.sh" || true
+else
+    log_skip "Descarga inicial de base GeoIP"
 fi
 
+else
+    log_skip "Inteligencia de red proactiva (S2)"
 fi  # S2
 
 # ============================================================
@@ -890,6 +930,8 @@ echo "$SCORE $SEVERITY $ENTROPY $RATIO $HLEN $TLD $DOMAIN"
 EOFS3A
 
 chmod 755 "$CIBERINT_BIN/ciberint-dga-avanzado.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-dga-avanzado.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-dga-avanzado.sh -> 755"
 
 # ── ciberint-nrd-monitor.sh ──
 cat > "$CIBERINT_BIN/ciberint-nrd-monitor.sh" << 'EOFS3B'
@@ -946,6 +988,8 @@ echo "Matches NRD encontrados: $MATCHES"
 EOFS3B
 
 chmod 755 "$CIBERINT_BIN/ciberint-nrd-monitor.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-nrd-monitor.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-nrd-monitor.sh -> 755"
 
 # ── ciberint-dns-inteligencia.sh ──
 cat > "$CIBERINT_BIN/ciberint-dns-inteligencia.sh" << 'EOFS3C'
@@ -1048,6 +1092,8 @@ ciberint_log "INFO" "DNS inteligencia: DGA=$DGA_SUSPECTS Tunnel=$TUNNEL_SUSPECTS
 EOFS3C
 
 chmod 755 "$CIBERINT_BIN/ciberint-dns-inteligencia.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-dns-inteligencia.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-dns-inteligencia.sh -> 755"
 
 # Timer: cada 30 min
 cat > /etc/systemd/system/ciberint-dns.service << EOFSVC
@@ -1075,11 +1121,18 @@ Persistent=true
 WantedBy=timers.target
 EOFTMR
 
+log_change "Creado" "/etc/systemd/system/ciberint-dns.service"
+log_change "Creado" "/etc/systemd/system/ciberint-dns.timer"
+
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now ciberint-dns.timer 2>/dev/null || true
+log_change "Servicio" "ciberint-dns.timer enable+start"
 
 log_info "S3: Inteligencia DNS instalada (timer 30min)"
 
+else
+    log_skip "Inteligencia DNS (S3)"
 fi  # S3
 
 # ============================================================
@@ -1218,6 +1271,8 @@ ciberint_log "INFO" "Superficie: snapshot $TIMESTAMP (ports=$PORTS_COUNT certs=$
 EOFS4A
 
 chmod 755 "$CIBERINT_BIN/ciberint-superficie-ataque.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-superficie-ataque.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-superficie-ataque.sh -> 755"
 
 # ── ciberint-superficie-comparar.sh ──
 cat > "$CIBERINT_BIN/ciberint-superficie-comparar.sh" << 'EOFS4B'
@@ -1344,6 +1399,8 @@ echo -e "${DIM}Cambios totales: $CHANGES${NC}"
 EOFS4B
 
 chmod 755 "$CIBERINT_BIN/ciberint-superficie-comparar.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-superficie-comparar.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-superficie-comparar.sh -> 755"
 
 # Timer: cada 6h
 cat > /etc/systemd/system/ciberint-superficie.service << EOFSVC
@@ -1372,11 +1429,18 @@ Persistent=true
 WantedBy=timers.target
 EOFTMR
 
+log_change "Creado" "/etc/systemd/system/ciberint-superficie.service"
+log_change "Creado" "/etc/systemd/system/ciberint-superficie.timer"
+
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now ciberint-superficie.timer 2>/dev/null || true
+log_change "Servicio" "ciberint-superficie.timer enable+start"
 
 log_info "S4: Monitorizacion de superficie instalada (timer 6h + 06:00)"
 
+else
+    log_skip "Monitorizacion de superficie de ataque (S4)"
 fi  # S4
 
 # ============================================================
@@ -1455,6 +1519,8 @@ ciberint_log "INFO" "Alerta temprana: $MATCHES retro-matches de $TOTAL_IPS IPs h
 EOFS5A
 
 chmod 755 "$CIBERINT_BIN/ciberint-alerta-temprana.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-alerta-temprana.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-alerta-temprana.sh -> 755"
 
 # ── ciberint-cve-monitor.sh ──
 cat > "$CIBERINT_BIN/ciberint-cve-monitor.sh" << 'EOFS5B'
@@ -1562,6 +1628,8 @@ ciberint_log "INFO" "CVE monitor: $VULNS_FOUND vulnerables, $CRITICAL_VULNS crit
 EOFS5B
 
 chmod 755 "$CIBERINT_BIN/ciberint-cve-monitor.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-cve-monitor.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-cve-monitor.sh -> 755"
 
 # Timer: diario 04:30
 cat > /etc/systemd/system/ciberint-alerta-temprana.service << EOFSVC
@@ -1588,8 +1656,13 @@ Persistent=true
 WantedBy=timers.target
 EOFTMR
 
+log_change "Creado" "/etc/systemd/system/ciberint-alerta-temprana.service"
+log_change "Creado" "/etc/systemd/system/ciberint-alerta-temprana.timer"
+
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now ciberint-alerta-temprana.timer 2>/dev/null || true
+log_change "Servicio" "ciberint-alerta-temprana.timer enable+start"
 
 # Cron diario CVE
 cat > /etc/cron.daily/ciberint-cve-monitor << EOFCRON
@@ -1597,9 +1670,13 @@ cat > /etc/cron.daily/ciberint-cve-monitor << EOFCRON
 $CIBERINT_BIN/ciberint-cve-monitor.sh >> $CIBERINT_BASE/log/cve-monitor.log 2>&1
 EOFCRON
 chmod 700 /etc/cron.daily/ciberint-cve-monitor
+log_change "Creado" "/etc/cron.daily/ciberint-cve-monitor"
+log_change "Permisos" "/etc/cron.daily/ciberint-cve-monitor -> 700"
 
 log_info "S5: Sistema de alerta temprana instalado (timer 04:30 + CVE diario)"
 
+else
+    log_skip "Sistema de alerta temprana (S5)"
 fi  # S5
 
 # ============================================================
@@ -1751,6 +1828,8 @@ ciberint_log "INFO" "Reporte diario generado: $REPORT"
 EOFS6A
 
 chmod 755 "$CIBERINT_BIN/ciberint-reporte-diario.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-reporte-diario.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-reporte-diario.sh -> 755"
 
 # ── ciberint-reporte-semanal.sh ──
 cat > "$CIBERINT_BIN/ciberint-reporte-semanal.sh" << 'EOFS6B'
@@ -1865,6 +1944,8 @@ ciberint_log "INFO" "Reporte semanal generado: $REPORT"
 EOFS6B
 
 chmod 755 "$CIBERINT_BIN/ciberint-reporte-semanal.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-reporte-semanal.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-reporte-semanal.sh -> 755"
 
 # Timer diario 07:00
 cat > /etc/systemd/system/ciberint-reporte-diario.service << EOFSVC
@@ -1891,8 +1972,13 @@ Persistent=true
 WantedBy=timers.target
 EOFTMR
 
+log_change "Creado" "/etc/systemd/system/ciberint-reporte-diario.service"
+log_change "Creado" "/etc/systemd/system/ciberint-reporte-diario.timer"
+
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now ciberint-reporte-diario.timer 2>/dev/null || true
+log_change "Servicio" "ciberint-reporte-diario.timer enable+start"
 
 # Cron semanal
 cat > /etc/cron.weekly/ciberint-reporte-semanal << EOFCRON
@@ -1900,9 +1986,13 @@ cat > /etc/cron.weekly/ciberint-reporte-semanal << EOFCRON
 $CIBERINT_BIN/ciberint-reporte-semanal.sh >> $CIBERINT_BASE/log/reportes.log 2>&1
 EOFCRON
 chmod 700 /etc/cron.weekly/ciberint-reporte-semanal
+log_change "Creado" "/etc/cron.weekly/ciberint-reporte-semanal"
+log_change "Permisos" "/etc/cron.weekly/ciberint-reporte-semanal -> 700"
 
 log_info "S6: Informes de inteligencia instalados (timer diario 07:00 + semanal)"
 
+else
+    log_skip "Informes de inteligencia automatizados (S6)"
 fi  # S6
 
 # ============================================================
@@ -2012,6 +2102,8 @@ ciberint_log "INFO" "HIBP check: $CHECKED usuarios, $EXPOSED expuestos"
 EOFS7A
 
 chmod 755 "$CIBERINT_BIN/ciberint-credenciales-expuestas.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-credenciales-expuestas.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-credenciales-expuestas.sh -> 755"
 
 # ── ciberint-secretos-locales.sh ──
 cat > "$CIBERINT_BIN/ciberint-secretos-locales.sh" << 'EOFS7B'
@@ -2128,6 +2220,8 @@ ciberint_log "INFO" "Secretos locales: $FINDINGS hallazgos"
 EOFS7B
 
 chmod 755 "$CIBERINT_BIN/ciberint-secretos-locales.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-secretos-locales.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-secretos-locales.sh -> 755"
 
 # Cron semanal
 cat > /etc/cron.weekly/ciberint-credenciales << EOFCRON
@@ -2136,9 +2230,13 @@ $CIBERINT_BIN/ciberint-credenciales-expuestas.sh >> $CIBERINT_BASE/log/credencia
 $CIBERINT_BIN/ciberint-secretos-locales.sh >> $CIBERINT_BASE/log/secretos.log 2>&1
 EOFCRON
 chmod 700 /etc/cron.weekly/ciberint-credenciales
+log_change "Creado" "/etc/cron.weekly/ciberint-credenciales"
+log_change "Permisos" "/etc/cron.weekly/ciberint-credenciales -> 700"
 
 log_info "S7: Monitorizacion de credenciales instalada (cron semanal)"
 
+else
+    log_skip "Monitorizacion de credenciales expuestas (S7)"
 fi  # S7
 
 # ============================================================
@@ -2238,6 +2336,8 @@ find "$PROCESSED_DIR" -mtime +7 -delete 2>/dev/null || true
 EOFS8
 
 chmod 755 "$CIBERINT_BIN/ciberint-soar-bridge.sh"
+log_change "Creado" "$CIBERINT_BIN/ciberint-soar-bridge.sh"
+log_change "Permisos" "$CIBERINT_BIN/ciberint-soar-bridge.sh -> 755"
 
 # Timer: cada 10 min
 cat > /etc/systemd/system/ciberint-soar-bridge.service << EOFSVC
@@ -2265,11 +2365,18 @@ Persistent=true
 WantedBy=timers.target
 EOFTMR
 
+log_change "Creado" "/etc/systemd/system/ciberint-soar-bridge.service"
+log_change "Creado" "/etc/systemd/system/ciberint-soar-bridge.timer"
+
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now ciberint-soar-bridge.timer 2>/dev/null || true
+log_change "Servicio" "ciberint-soar-bridge.timer enable+start"
 
 log_info "S8: Integracion SOAR instalada (timer 10min)"
 
+else
+    log_skip "Integracion SOAR (S8)"
 fi  # S8
 
 # ============================================================
@@ -2389,3 +2496,5 @@ echo "Configuracion: $CIBERINT_BASE/config/"
 echo "  ciberint.conf       - Configuracion principal"
 echo "  api-keys.conf       - Claves API opcionales (AbuseIPDB, VirusTotal)"
 echo ""
+
+show_changes_summary

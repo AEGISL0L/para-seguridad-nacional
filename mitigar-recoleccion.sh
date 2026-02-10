@@ -56,23 +56,31 @@ if ask "¿Proteger datos locales sensibles?"; then
 
     # Restringir /root
     chmod 700 /root 2>/dev/null && echo -e "  ${GREEN}OK${NC} /root: 700"
+    log_change "Permisos" "/root -> 700"
 
     # Restringir homes de usuarios
     for home in /home/*/; do
         if [[ -d "$home" ]]; then
             chmod 700 "$home" 2>/dev/null && echo -e "  ${GREEN}OK${NC} $home: 700"
+            log_change "Permisos" "$home -> 700"
         fi
     done
 
     # Restringir acceso a logs
     chmod 750 /var/log 2>/dev/null && echo -e "  ${GREEN}OK${NC} /var/log: 750"
+    log_change "Permisos" "/var/log -> 750"
     chmod 640 /var/log/messages 2>/dev/null || true
+    log_change "Permisos" "/var/log/messages -> 640"
     chmod 640 /var/log/secure 2>/dev/null || true
+    log_change "Permisos" "/var/log/secure -> 640"
 
     # Restringir cron
     chmod 700 /etc/cron.d 2>/dev/null && echo -e "  ${GREEN}OK${NC} /etc/cron.d: 700"
+    log_change "Permisos" "/etc/cron.d -> 700"
     chmod 700 /etc/cron.daily 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.daily -> 700"
     chmod 700 /etc/cron.weekly 2>/dev/null || true
+    log_change "Permisos" "/etc/cron.weekly -> 700"
 
     # 1b. Auditoría de acceso a datos sensibles
     if command -v auditctl &>/dev/null; then
@@ -94,12 +102,15 @@ if ask "¿Proteger datos locales sensibles?"; then
 -w /var/lib/redis/ -p r -k db-access
 EOF
 
+        log_change "Creado" "/etc/audit/rules.d/65-collection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas auditd de protección de datos creadas"
     fi
 
     log_info "Protección de datos locales aplicada"
 else
+    log_skip "Protección de datos locales no aplicada"
     log_warn "Protección de datos locales no aplicada"
 fi
 
@@ -121,7 +132,9 @@ if ask "¿Monitorear acceso a datos compartidos?"; then
 -w /srv/samba/ -p r -k network-share-access
 -w /srv/nfs/ -p r -k network-share-access
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/65-collection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     # Verificar que shares montan con permisos restrictivos
@@ -139,6 +152,7 @@ EOF
 
     log_info "Monitoreo de acceso a shares configurado"
 else
+    log_skip "Monitoreo de shares no configurado"
     log_warn "Monitoreo de shares no configurado"
 fi
 
@@ -165,9 +179,13 @@ if ask "¿Restringir medios extraíbles para prevenir exfiltración?"; then
             if command -v usbguard &>/dev/null; then
                 # Generar política inicial (permitir dispositivos conectados)
                 usbguard generate-policy > /etc/usbguard/rules.conf 2>/dev/null || true
+                log_change "Creado" "/etc/usbguard/rules.conf"
                 systemctl enable --now usbguard 2>/dev/null || true
+                log_change "Servicio" "usbguard enable --now"
                 log_info "USBGuard instalado y configurado (dispositivos actuales permitidos)"
             fi
+        else
+            log_skip "Instalación de USBGuard omitida"
         fi
     fi
 
@@ -176,6 +194,7 @@ if ask "¿Restringir medios extraíbles para prevenir exfiltración?"; then
     echo -e "${BOLD}Configurando restricciones de automontaje...${NC}"
 
     mkdir -p /etc/udisks2
+    log_change "Creado" "/etc/udisks2/"
     cat > /etc/udisks2/mount_options.conf << 'EOF'
 # Restricciones de montaje USB - T1025
 [defaults]
@@ -183,6 +202,7 @@ if ask "¿Restringir medios extraíbles para prevenir exfiltración?"; then
 defaults=nosuid,nodev,noexec
 allow=exec,noexec,nodev,nosuid,atime,noatime,nodiratime,ro,sync,dirsync,noload
 EOF
+    log_change "Creado" "/etc/udisks2/mount_options.conf"
 
     # 3c. Auditd para acceso a USB
     if command -v auditctl &>/dev/null; then
@@ -193,11 +213,14 @@ EOF
 -w /run/media/ -p rw -k removable-media-access
 -a always,exit -F arch=b64 -S mount -S umount2 -k media-mount
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/65-collection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     log_info "Control de medios extraíbles configurado"
 else
+    log_skip "Control de medios extraíbles no configurado"
     log_warn "Control de medios extraíbles no configurado"
 fi
 
@@ -297,7 +320,9 @@ fi
 find /var/log -name "data-staging-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFSTAG
 
+    log_change "Creado" "/usr/local/bin/detectar-staging.sh"
     chmod 700 /usr/local/bin/detectar-staging.sh
+    log_change "Permisos" "/usr/local/bin/detectar-staging.sh -> 700"
 
     # Auditar herramientas de compresión
     if command -v auditctl &>/dev/null; then
@@ -312,17 +337,22 @@ EOFSTAG
 -w /usr/bin/7z -p x -k data-archive
 -w /usr/bin/rar -p x -k data-archive
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/65-collection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     cat > /etc/cron.daily/detectar-staging << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-staging.sh 2>&1 | logger -t detectar-staging
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-staging"
     chmod 700 /etc/cron.daily/detectar-staging
+    log_change "Permisos" "/etc/cron.daily/detectar-staging -> 700"
 
     log_info "Detección diaria de data staging configurada"
 else
+    log_skip "Detección de staging no configurada"
     log_warn "Detección de staging no configurada"
 fi
 
@@ -363,7 +393,9 @@ if ask "¿Restringir herramientas de captura multimedia?"; then
 -w /usr/bin/arecord -p x -k audio-capture
 -w /usr/bin/parecord -p x -k audio-capture
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/65-collection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     # 5b. Restringir acceso a /dev/video* y /dev/snd/*
@@ -373,6 +405,7 @@ EOF
     # Crear grupo multimedia para acceso controlado
     if ! getent group multimedia-access &>/dev/null; then
         groupadd multimedia-access 2>/dev/null || true
+        log_change "Usuario" "groupadd multimedia-access"
     fi
 
     # Regla udev para restringir dispositivos de video
@@ -381,14 +414,17 @@ EOF
 KERNEL=="video[0-9]*", GROUP="multimedia-access", MODE="0660"
 SUBSYSTEM=="sound", GROUP="multimedia-access", MODE="0660"
 EOF
+    log_change "Creado" "/etc/udev/rules.d/90-multimedia-restrict.rules"
 
     udevadm control --reload-rules 2>/dev/null || true
+    log_change "Aplicado" "udevadm control --reload-rules"
     udevadm trigger 2>/dev/null || true
 
     echo -e "${DIM}Usuarios que necesiten cámara/micro: usermod -aG multimedia-access <usuario>${NC}"
 
     log_info "Protección contra captura multimedia configurada"
 else
+    log_skip "Protección contra captura multimedia no configurada"
     log_warn "Protección contra captura multimedia no configurada"
 fi
 
@@ -479,16 +515,21 @@ fi
 find /var/log -name "collection-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFREC
 
+    log_change "Creado" "/usr/local/bin/detectar-recoleccion.sh"
     chmod 700 /usr/local/bin/detectar-recoleccion.sh
+    log_change "Permisos" "/usr/local/bin/detectar-recoleccion.sh -> 700"
 
     cat > /etc/cron.daily/detectar-recoleccion << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-recoleccion.sh 2>&1 | logger -t detectar-recoleccion
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-recoleccion"
     chmod 700 /etc/cron.daily/detectar-recoleccion
+    log_change "Permisos" "/etc/cron.daily/detectar-recoleccion -> 700"
 
     log_info "Detección diaria de recolección automatizada configurada"
 else
+    log_skip "Detección de recolección no configurada"
     log_warn "Detección de recolección no configurada"
 fi
 
@@ -541,6 +582,8 @@ if [[ -x /usr/local/bin/detectar-recoleccion.sh ]]; then
 else
     echo -e "  ${YELLOW}[--]${NC} T1119 - Recolección automatizada no monitoreada"
 fi
+
+show_changes_summary
 
 echo ""
 log_info "Script de mitigación de recolección completado"

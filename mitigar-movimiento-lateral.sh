@@ -56,7 +56,9 @@ if ask "¿Endurecer servicios remotos contra movimiento lateral?"; then
     echo -e "${BOLD}Endureciendo SSH contra movimiento lateral...${NC}"
 
     mkdir -p /etc/ssh/sshd_config.d
+    log_change "Creado" "/etc/ssh/sshd_config.d/"
     cp /etc/ssh/sshd_config "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/ssh/sshd_config"
 
     cat > /etc/ssh/sshd_config.d/06-lateral-movement.conf << 'EOF'
 # Protección contra movimiento lateral - T1021.004
@@ -82,10 +84,12 @@ MaxSessions 3
 # Forzar re-autenticación (no reusar sesiones)
 RekeyLimit 1G 1h
 EOF
+    log_change "Creado" "/etc/ssh/sshd_config.d/06-lateral-movement.conf"
 
     # Reiniciar SSH con cuidado
     if sshd -t 2>/dev/null; then
         systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
+        log_change "Servicio" "$SSH_SERVICE_NAME reload"
         log_info "SSH endurecido contra movimiento lateral"
     else
         log_warn "Error en configuración SSH - revirtiendo"
@@ -101,7 +105,10 @@ EOF
             echo -e "  ${YELLOW}!!${NC} $svc habilitado"
             if ask "  ¿Deshabilitar $svc?"; then
                 systemctl disable --now "$svc" 2>/dev/null || true
+                log_change "Servicio" "$svc disable --now"
                 log_info "$svc deshabilitado"
+            else
+                log_skip "Deshabilitar $svc"
             fi
         fi
     done
@@ -113,6 +120,7 @@ EOF
 
         if [[ -f /etc/samba/smb.conf ]]; then
             cp /etc/samba/smb.conf "$BACKUP_DIR/"
+            log_change "Backup" "/etc/samba/smb.conf"
 
             # Verificar si ya está endurecido
             if ! grep -q "server signing = mandatory" /etc/samba/smb.conf 2>/dev/null; then
@@ -133,8 +141,12 @@ EOF
     # Logging de acceso
     log level = 1 auth:3
 EOF
+                    log_change "Modificado" "/etc/samba/smb.conf"
                     systemctl restart smb 2>/dev/null || true
+                    log_change "Servicio" "smb restart"
                     log_info "Samba endurecido (firma obligatoria, sin SMBv1)"
+                else
+                    log_skip "Endurecer Samba"
                 fi
             else
                 echo -e "  ${GREEN}OK${NC} Samba ya tiene firma obligatoria"
@@ -158,12 +170,14 @@ EOF
 -w /usr/bin/xfreerdp -p x -k lateral-rdp
 -w /usr/bin/vncviewer -p x -k lateral-vnc
 EOF
+        log_change "Creado" "/etc/audit/rules.d/64-lateral-movement.rules"
 
         augenrules --load 2>/dev/null || true
         log_info "Reglas auditd para servicios remotos creadas"
     fi
 
 else
+    log_skip "Hardening de servicios remotos"
     log_warn "Hardening de servicios remotos no aplicado"
 fi
 
@@ -194,13 +208,16 @@ if [[ -n "$SSH_AUTH_SOCK" ]]; then
 fi
 EOFSSH
 
+    log_change "Creado" "/etc/profile.d/ssh-agent-protection.sh"
     chmod 644 /etc/profile.d/ssh-agent-protection.sh
+    log_change "Permisos" "/etc/profile.d/ssh-agent-protection.sh -> 644"
 
     # 2b. Restringir permisos de sockets SSH
     cat > /etc/tmpfiles.d/ssh-agent-security.conf << 'EOF'
 # Proteger directorios de SSH agent sockets
 d /tmp/ssh-* 0700 - - -
 EOF
+    log_change "Creado" "/etc/tmpfiles.d/ssh-agent-security.conf"
 
     log_info "Protección contra SSH hijacking configurada"
 
@@ -214,10 +231,12 @@ EOF
 # Monitorear SSH_AUTH_SOCK
 -w /tmp/ssh- -p rwa -k ssh-agent-socket
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/64-lateral-movement.rules"
         augenrules --load 2>/dev/null || true
     fi
 
 else
+    log_skip "Protección contra SSH hijacking"
     log_warn "Protección contra SSH hijacking no aplicada"
 fi
 
@@ -283,13 +302,18 @@ fi
 find /var/log -name "share-scan-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFSCAN
 
+            log_change "Creado" "/usr/local/bin/escanear-shares.sh"
             chmod 700 /usr/local/bin/escanear-shares.sh
+            log_change "Permisos" "/usr/local/bin/escanear-shares.sh -> 700"
             log_info "Escaneo de shares configurado"
+        else
+            log_skip "Escaneo ClamAV de directorios compartidos"
         fi
     fi
 
     log_info "Protección de contenido compartido configurada"
 else
+    log_skip "Protección de contenido compartido"
     log_warn "Protección de contenido compartido no aplicada"
 fi
 
@@ -376,10 +400,13 @@ ss -tlnp 2>/dev/null | tail -n+2 | awk '{print $4" "$6}' | tee -a "$LOG"
 find /var/log -name "network-segmentation-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFSEG
 
+    log_change "Creado" "/usr/local/bin/segmentacion-red.sh"
     chmod 700 /usr/local/bin/segmentacion-red.sh
+    log_change "Permisos" "/usr/local/bin/segmentacion-red.sh -> 700"
     log_info "Script de verificación de segmentación creado"
 
 else
+    log_skip "Segmentación de red host-based"
     log_warn "Segmentación de red no configurada"
 fi
 
@@ -489,16 +516,21 @@ fi
 find /var/log -name "lateral-movement-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFLAT
 
+    log_change "Creado" "/usr/local/bin/detectar-lateral.sh"
     chmod 700 /usr/local/bin/detectar-lateral.sh
+    log_change "Permisos" "/usr/local/bin/detectar-lateral.sh -> 700"
 
     cat > /etc/cron.daily/detectar-lateral << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-lateral.sh 2>&1 | logger -t detectar-lateral
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-lateral"
     chmod 700 /etc/cron.daily/detectar-lateral
+    log_change "Permisos" "/etc/cron.daily/detectar-lateral -> 700"
 
     log_info "Detección diaria de movimiento lateral configurada"
 else
+    log_skip "Detección de movimiento lateral"
     log_warn "Detección de movimiento lateral no configurada"
 fi
 
@@ -526,13 +558,17 @@ if ask "¿Restringir herramientas de software deployment?"; then
 -w /usr/bin/pssh -p x -k deploy-tool
 -w /usr/bin/cssh -p x -k deploy-tool
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/64-lateral-movement.rules"
         augenrules --load 2>/dev/null || true
         log_info "Auditoría de herramientas de deployment configurada"
     fi
 
 else
+    log_skip "Restricción de herramientas de deployment"
     log_warn "Restricción de deployment no configurada"
 fi
+
+show_changes_summary
 
 # ============================================================
 log_section "RESUMEN DE MITIGACIONES TA0008"

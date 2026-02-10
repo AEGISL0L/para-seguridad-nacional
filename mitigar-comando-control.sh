@@ -78,6 +78,7 @@ if ask "¿Restringir tráfico saliente a puertos estándar?"; then
     fi
 
 else
+    log_skip "Restricción de puertos salientes no aplicada"
     log_warn "Restricción de puertos salientes no aplicada"
 fi
 
@@ -99,6 +100,7 @@ if ask "¿Configurar detección de C2 sobre HTTP/HTTPS?"; then
 
         SURICATA_RULES="/etc/suricata/rules/local-c2.rules"
         mkdir -p /etc/suricata/rules
+        log_change "Creado" "/etc/suricata/rules/"
 
         cat > "$SURICATA_RULES" << 'EOF'
 # Detección de C2 sobre HTTP - T1071.001
@@ -121,15 +123,18 @@ alert tcp any any -> any any (msg:"C2 - Posible reverse shell bash"; content:"|2
 alert tcp any any -> any any (msg:"C2 - Posible reverse shell python"; content:"import socket"; content:"subprocess"; within:200; sid:9000007; rev:1;)
 EOF
 
+        log_change "Creado" "$SURICATA_RULES"
         # Incluir reglas locales en suricata
         if [[ -f /etc/suricata/suricata.yaml ]]; then
             if ! grep -q "local-c2.rules" /etc/suricata/suricata.yaml 2>/dev/null; then
                 echo "  - rules/local-c2.rules" >> /etc/suricata/suricata.yaml
+                log_change "Modificado" "/etc/suricata/suricata.yaml"
                 log_info "Reglas C2 añadidas a Suricata"
             fi
         fi
 
         systemctl reload suricata 2>/dev/null || true
+        log_change "Servicio" "suricata reload"
     else
         echo -e "  ${YELLOW}!!${NC} Suricata no instalado (recomendado para detección de C2)"
     fi
@@ -232,16 +237,21 @@ fi
 find /var/log -name "beaconing-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFBEACON
 
+    log_change "Creado" "/usr/local/bin/detectar-beaconing.sh"
     chmod 700 /usr/local/bin/detectar-beaconing.sh
+    log_change "Permisos" "/usr/local/bin/detectar-beaconing.sh -> 700"
 
     cat > /etc/cron.daily/detectar-beaconing << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-beaconing.sh 2>&1 | logger -t detectar-beaconing
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-beaconing"
     chmod 700 /etc/cron.daily/detectar-beaconing
+    log_change "Permisos" "/etc/cron.daily/detectar-beaconing -> 700"
 
     log_info "Detección de C2 beaconing configurada"
 else
+    log_skip "Detección de C2 HTTP/HTTPS no configurada"
     log_warn "Detección de C2 HTTP/HTTPS no configurada"
 fi
 
@@ -276,7 +286,9 @@ if ask "¿Configurar control de descarga de herramientas?"; then
 -a always,exit -F arch=b64 -S chmod -S fchmod -F dir=/dev/shm -k tmp-chmod-exec
 EOF
 
+        log_change "Creado" "/etc/audit/rules.d/67-command-control.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas auditd para transferencia de herramientas creadas"
     fi
 
@@ -293,6 +305,9 @@ EOF
                     mount -o remount,noexec,nosuid,nodev "$tmpdir" 2>/dev/null && \
                         log_info "$tmpdir remontado con noexec" || \
                         log_warn "No se pudo remontar $tmpdir"
+                    log_change "Aplicado" "mount -o remount,noexec,nosuid,nodev $tmpdir"
+                else
+                    log_skip "Remontar $tmpdir con noexec"
                 fi
             else
                 echo -e "  ${GREEN}OK${NC} $tmpdir tiene noexec"
@@ -373,16 +388,21 @@ fi
 find /var/log -name "tool-transfer-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFTOOL
 
+    log_change "Creado" "/usr/local/bin/detectar-tool-transfer.sh"
     chmod 700 /usr/local/bin/detectar-tool-transfer.sh
+    log_change "Permisos" "/usr/local/bin/detectar-tool-transfer.sh -> 700"
 
     cat > /etc/cron.daily/detectar-tool-transfer << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-tool-transfer.sh 2>&1 | logger -t detectar-tool-transfer
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-tool-transfer"
     chmod 700 /etc/cron.daily/detectar-tool-transfer
+    log_change "Permisos" "/etc/cron.daily/detectar-tool-transfer -> 700"
 
     log_info "Detección de tool transfer configurada"
 else
+    log_skip "Control de descarga de herramientas no configurado"
     log_warn "Control de descarga de herramientas no configurado"
 fi
 
@@ -497,7 +517,9 @@ fi
 find /var/log -name "tunneling-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFTUNNEL
 
+    log_change "Creado" "/usr/local/bin/detectar-tunneling.sh"
     chmod 700 /usr/local/bin/detectar-tunneling.sh
+    log_change "Permisos" "/usr/local/bin/detectar-tunneling.sh -> 700"
 
     # Auditd para proxies
     if command -v auditctl &>/dev/null; then
@@ -511,17 +533,22 @@ EOFTUNNEL
 -w /etc/proxychains.conf -p rwa -k proxy-config
 -w /etc/proxychains4.conf -p rwa -k proxy-config
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/67-command-control.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     cat > /etc/cron.daily/detectar-tunneling << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-tunneling.sh 2>&1 | logger -t detectar-tunneling
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-tunneling"
     chmod 700 /etc/cron.daily/detectar-tunneling
+    log_change "Permisos" "/etc/cron.daily/detectar-tunneling -> 700"
 
     log_info "Detección de proxy/tunneling configurada"
 else
+    log_skip "Detección de proxy/tunneling no configurada"
     log_warn "Detección de proxy/tunneling no configurada"
 fi
 
@@ -609,16 +636,21 @@ fi
 find /var/log -name "dga-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFDGA
 
+    log_change "Creado" "/usr/local/bin/detectar-dga.sh"
     chmod 700 /usr/local/bin/detectar-dga.sh
+    log_change "Permisos" "/usr/local/bin/detectar-dga.sh -> 700"
 
     cat > /etc/cron.daily/detectar-dga << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-dga.sh 2>&1 | logger -t detectar-dga
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-dga"
     chmod 700 /etc/cron.daily/detectar-dga
+    log_change "Permisos" "/etc/cron.daily/detectar-dga -> 700"
 
     log_info "Detección de DGA configurada"
 else
+    log_skip "Detección de DGA no configurada"
     log_warn "Detección de DGA no configurada"
 fi
 
@@ -656,9 +688,12 @@ echo " DETECCIÓN C2 COMPLETADA"
 echo "========================================="
 EOFC2
 
+    log_change "Creado" "/usr/local/bin/detectar-c2-completo.sh"
     chmod 700 /usr/local/bin/detectar-c2-completo.sh
+    log_change "Permisos" "/usr/local/bin/detectar-c2-completo.sh -> 700"
     log_info "Script consolidado: /usr/local/bin/detectar-c2-completo.sh"
 else
+    log_skip "Script consolidado C2 no creado"
     log_warn "Script consolidado no creado"
 fi
 
@@ -711,6 +746,8 @@ if [[ -x /usr/local/bin/detectar-c2-completo.sh ]]; then
 else
     echo -e "  ${YELLOW}[--]${NC} TA0011 - Script consolidado no creado"
 fi
+
+show_changes_summary
 
 echo ""
 log_info "Script de mitigación de comando y control completado"

@@ -65,6 +65,11 @@ pkg_install() {
 
     if [[ $rc -ne 0 ]]; then
         log_warn "pkg_install: gestor de paquetes terminó con código $rc"
+    else
+        local _p
+        for _p in "${resolved[@]}"; do
+            log_change "Instalado" "$_p (via $PKG_MANAGER_NAME)"
+        done
     fi
     return $rc
 }
@@ -99,6 +104,11 @@ pkg_remove() {
 
     if [[ $rc -ne 0 ]]; then
         log_warn "pkg_remove: gestor de paquetes terminó con código $rc"
+    else
+        local _p
+        for _p in "${resolved[@]}"; do
+            log_change "Eliminado" "$_p"
+        done
     fi
     return $rc
 }

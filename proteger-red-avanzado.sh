@@ -51,12 +51,14 @@ if ask "¿Instalar y configurar Suricata IDS?"; then
 
         # Backup config original
         cp /etc/suricata/suricata.yaml "$BACKUP_DIR/" 2>/dev/null || true
+        log_change "Backup" "/etc/suricata/suricata.yaml"
 
         # Configurar interfaz en suricata
         if [[ -n "$IFACE" ]] && [[ -f /etc/suricata/suricata.yaml ]]; then
             # Actualizar interfaz en af-packet
             sed -i "s/- interface: eth0/- interface: $IFACE/" /etc/suricata/suricata.yaml 2>/dev/null || true
             sed -i "s/interface: eth0/interface: $IFACE/" /etc/suricata/suricata.yaml 2>/dev/null || true
+            log_change "Modificado" "/etc/suricata/suricata.yaml (interface: $IFACE)"
             log_info "Interfaz configurada: $IFACE"
         fi
 
@@ -79,7 +81,9 @@ if ask "¿Instalar y configurar Suricata IDS?"; then
 
         # Habilitar y arrancar
         systemctl enable suricata 2>/dev/null || true
+        log_change "Servicio" "suricata enable"
         systemctl start suricata 2>/dev/null || log_warn "Suricata no pudo arrancar. Revisa la configuración."
+        log_change "Servicio" "suricata start"
         log_info "Suricata configurado en modo IDS"
 
         # Script de alertas
@@ -156,8 +160,12 @@ echo -e "${BOLD}Consulta completada: $(date)${NC}"
 EOFSURI
 
         chmod +x /usr/local/bin/suricata-alertas.sh
+        log_change "Creado" "/usr/local/bin/suricata-alertas.sh"
+        log_change "Permisos" "/usr/local/bin/suricata-alertas.sh -> +x"
         log_info "Script creado: /usr/local/bin/suricata-alertas.sh"
     fi
+else
+    log_skip "Instalar y configurar Suricata IDS"
 fi
 
 # ============================================================
@@ -193,7 +201,11 @@ find /var/log -name "suricata-update-*.log" -mtime +60 -delete 2>/dev/null
 EOFSUPDATE
 
         chmod 700 /etc/cron.weekly/suricata-update
+        log_change "Creado" "/etc/cron.weekly/suricata-update"
+        log_change "Permisos" "/etc/cron.weekly/suricata-update -> 700"
         log_info "Cron semanal creado: /etc/cron.weekly/suricata-update"
+    else
+        log_skip "Cron semanal para actualizar reglas Suricata"
     fi
 else
     log_warn "Suricata no instalado. Instálalo primero en S1."
@@ -213,8 +225,10 @@ echo ""
 if ask "¿Configurar DNS over TLS con systemd-resolved?"; then
     # Backup configuración actual
     cp /etc/systemd/resolved.conf "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/systemd/resolved.conf"
 
     mkdir -p /etc/systemd/resolved.conf.d/
+    log_change "Creado" "/etc/systemd/resolved.conf.d/"
 
     cat > /etc/systemd/resolved.conf.d/dns-over-tls.conf << 'EOF'
 [Resolve]
@@ -226,23 +240,28 @@ DNSSEC=allow-downgrade
 Domains=~.
 EOF
 
+    log_change "Creado" "/etc/systemd/resolved.conf.d/dns-over-tls.conf"
     log_info "Configuración de DNS over TLS creada"
 
     # Configurar NetworkManager para delegar DNS a systemd-resolved
     if systemctl is-active NetworkManager &>/dev/null; then
         mkdir -p /etc/NetworkManager/conf.d/
+        log_change "Creado" "/etc/NetworkManager/conf.d/"
 
         cat > /etc/NetworkManager/conf.d/dns-resolved.conf << 'EOF'
 [main]
 dns=systemd-resolved
 EOF
+        log_change "Creado" "/etc/NetworkManager/conf.d/dns-resolved.conf"
 
         log_info "NetworkManager configurado para delegar DNS a systemd-resolved"
     fi
 
     # Habilitar y reiniciar systemd-resolved
     systemctl enable systemd-resolved 2>/dev/null || true
+    log_change "Servicio" "systemd-resolved enable"
     systemctl restart systemd-resolved 2>/dev/null || true
+    log_change "Servicio" "systemd-resolved restart"
 
     # Verificar que funciona
     if systemctl is-active systemd-resolved &>/dev/null; then
@@ -254,6 +273,8 @@ EOF
     fi
 
     log_warn "Reinicia NetworkManager para aplicar: systemctl restart NetworkManager"
+else
+    log_skip "Configurar DNS over TLS"
 fi
 
 # ============================================================
@@ -279,11 +300,17 @@ if ask "¿Instalar WireGuard y generar plantilla?"; then
         # Generar keypair
         mkdir -p /etc/wireguard
         chmod 700 /etc/wireguard
+        log_change "Creado" "/etc/wireguard/"
+        log_change "Permisos" "/etc/wireguard -> 700"
 
         if [[ ! -f /etc/wireguard/privatekey ]]; then
             wg genkey | tee /etc/wireguard/privatekey | wg pubkey > /etc/wireguard/publickey
             chmod 600 /etc/wireguard/privatekey
             chmod 644 /etc/wireguard/publickey
+            log_change "Creado" "/etc/wireguard/privatekey"
+            log_change "Permisos" "/etc/wireguard/privatekey -> 600"
+            log_change "Creado" "/etc/wireguard/publickey"
+            log_change "Permisos" "/etc/wireguard/publickey -> 644"
             log_info "Keypair generado"
         else
             log_info "Keypair ya existe"
@@ -323,6 +350,8 @@ PersistentKeepalive = 25
 EOFWG
 
         chmod 600 /etc/wireguard/wg0.conf
+        log_change "Creado" "/etc/wireguard/wg0.conf"
+        log_change "Permisos" "/etc/wireguard/wg0.conf -> 600"
         log_info "Plantilla creada: /etc/wireguard/wg0.conf"
         log_info "Tu clave pública: $PUBKEY"
         echo ""
@@ -330,6 +359,8 @@ EOFWG
         log_warn "  wg-quick up wg0"
         log_warn "  systemctl enable wg-quick@wg0  (para arranque automático)"
     fi
+else
+    log_skip "Instalar WireGuard y generar plantilla"
 fi
 
 # ============================================================
@@ -357,11 +388,15 @@ if ask "¿Instalar arpwatch y configurar protección ARP?"; then
             # Configurar arpwatch para la interfaz
             if [[ -f /etc/sysconfig/arpwatch ]]; then
                 cp /etc/sysconfig/arpwatch "$BACKUP_DIR/" 2>/dev/null || true
+                log_change "Backup" "/etc/sysconfig/arpwatch"
                 sed -i "s/^ARPWATCH_INTERFACE=.*/ARPWATCH_INTERFACE=\"$IFACE\"/" /etc/sysconfig/arpwatch 2>/dev/null || true
+                log_change "Modificado" "/etc/sysconfig/arpwatch (ARPWATCH_INTERFACE=$IFACE)"
             fi
 
             systemctl enable arpwatch 2>/dev/null || true
+            log_change "Servicio" "arpwatch enable"
             systemctl start arpwatch 2>/dev/null || true
+            log_change "Servicio" "arpwatch start"
             log_info "arpwatch habilitado en interfaz $IFACE"
         else
             log_warn "No se detectó interfaz de red"
@@ -384,7 +419,9 @@ net.ipv4.conf.all.arp_ignore = 1
 net.ipv4.conf.default.arp_ignore = 1
 EOF
 
+    log_change "Creado" "/etc/sysctl.d/99-arp-protection.conf"
     /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system"
     log_info "Protección ARP aplicada (arp_announce=2, arp_ignore=1)"
 
     # Script de verificación ARP
@@ -462,9 +499,14 @@ echo -e "${BOLD}Verificación completada: $(date)${NC}"
 EOFARP
 
     chmod +x /usr/local/bin/verificar-arp.sh
+    log_change "Creado" "/usr/local/bin/verificar-arp.sh"
+    log_change "Permisos" "/usr/local/bin/verificar-arp.sh -> +x"
     log_info "Script creado: /usr/local/bin/verificar-arp.sh"
+else
+    log_skip "Instalar arpwatch y configurar protección ARP"
 fi
 
 echo ""
+show_changes_summary
 log_info "Protección de red avanzada completada"
 log_info "Backup en: $BACKUP_DIR"

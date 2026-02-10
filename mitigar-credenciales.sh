@@ -58,6 +58,7 @@ if ask "¿Aplicar protección contra credential dumping?"; then
 
     SYSCTL_FILE="/etc/sysctl.d/91-credential-protection.conf"
     cp "$SYSCTL_FILE" "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "$SYSCTL_FILE"
 
     cat > "$SYSCTL_FILE" << 'EOF'
 # Protección contra credential dumping - T1003
@@ -77,7 +78,9 @@ kernel.perf_event_paranoid = 3
 # (requiere hidepid mount en /proc)
 EOF
 
+    log_change "Creado" "$SYSCTL_FILE"
     sysctl -p "$SYSCTL_FILE" 2>/dev/null || true
+    log_change "Aplicado" "sysctl -p $SYSCTL_FILE"
     log_info "ptrace restringido a solo admin (scope=2)"
 
     # 1b. Montar /proc con hidepid
@@ -86,11 +89,13 @@ EOF
 
     if ! grep -q "hidepid" /etc/fstab 2>/dev/null; then
         cp /etc/fstab "$BACKUP_DIR/"
+        log_change "Backup" "/etc/fstab"
         _priv_group=$(get_privileged_group)
         # Añadir mount de /proc con hidepid=2
         echo "" >> /etc/fstab
         echo "# T1003 - Ocultar procesos de otros usuarios" >> /etc/fstab
         echo "proc    /proc    proc    defaults,hidepid=2,gid=${_priv_group}    0    0" >> /etc/fstab
+        log_change "Modificado" "/etc/fstab"
 
         # Aplicar ahora
         mount -o "remount,hidepid=2,gid=${_priv_group}" /proc 2>/dev/null || \
@@ -107,9 +112,13 @@ EOF
     echo -e "${BOLD}Endureciendo permisos de archivos de credenciales...${NC}"
 
     chmod 000 /etc/shadow 2>/dev/null && echo -e "  ${GREEN}OK${NC} /etc/shadow: 000"
+    log_change "Permisos" "/etc/shadow -> 000"
     chmod 000 /etc/gshadow 2>/dev/null && echo -e "  ${GREEN}OK${NC} /etc/gshadow: 000"
+    log_change "Permisos" "/etc/gshadow -> 000"
     chmod 644 /etc/passwd 2>/dev/null && echo -e "  ${GREEN}OK${NC} /etc/passwd: 644"
+    log_change "Permisos" "/etc/passwd -> 644"
     chmod 644 /etc/group 2>/dev/null && echo -e "  ${GREEN}OK${NC} /etc/group: 644"
+    log_change "Permisos" "/etc/group -> 644"
 
     # Reglas auditd para acceso a credenciales
     if command -v auditctl &>/dev/null; then
@@ -132,6 +141,7 @@ EOF
 -w /etc/nsswitch.conf -p wa -k credential-config
 -w /etc/pam.d/ -p wa -k pam-config-change
 EOF
+        log_change "Creado" "/etc/audit/rules.d/62-credential-access.rules"
 
         augenrules --load 2>/dev/null || true
         log_info "Reglas auditd de protección de credenciales creadas"
@@ -139,6 +149,7 @@ EOF
 
     log_info "Protección contra credential dumping aplicada"
 else
+    log_skip "Protección contra credential dumping"
     log_warn "Protección contra credential dumping no aplicada"
 fi
 
@@ -163,6 +174,7 @@ if ask "¿Configurar protección contra fuerza bruta?"; then
     FAILLOCK_CONF="/etc/security/faillock.conf"
     if [[ -f "$FAILLOCK_CONF" ]]; then
         cp "$FAILLOCK_CONF" "$BACKUP_DIR/"
+        log_change "Backup" "$FAILLOCK_CONF"
     fi
 
     cat > "$FAILLOCK_CONF" << 'EOF'
@@ -183,6 +195,7 @@ audit
 silent
 EOF
 
+    log_change "Creado" "$FAILLOCK_CONF"
     log_info "faillock configurado: 5 intentos, bloqueo 15min"
 
     # 2b. Política de contraseñas fuertes con pwquality
@@ -192,6 +205,7 @@ EOF
     PWQUALITY_CONF="/etc/security/pwquality.conf"
     if [[ -f "$PWQUALITY_CONF" ]]; then
         cp "$PWQUALITY_CONF" "$BACKUP_DIR/"
+        log_change "Backup" "$PWQUALITY_CONF"
     fi
 
     cat > "$PWQUALITY_CONF" << 'EOF'
@@ -219,6 +233,7 @@ difok = 5
 palindrome = 1
 EOF
 
+    log_change "Creado" "$PWQUALITY_CONF"
     log_info "Política de contraseñas configurada (min 12 chars, 3 clases)"
 
     # 2c. Script de monitoreo de intentos de fuerza bruta
@@ -271,16 +286,21 @@ echo "Intentos su/sudo fallidos: $SU_FAILS" | tee -a "$LOG"
 find /var/log -name "bruteforce-monitor-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFBRUTE
 
+    log_change "Creado" "/usr/local/bin/monitorear-bruteforce.sh"
     chmod 700 /usr/local/bin/monitorear-bruteforce.sh
+    log_change "Permisos" "/usr/local/bin/monitorear-bruteforce.sh -> 700"
 
     cat > /etc/cron.daily/monitorear-bruteforce << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/monitorear-bruteforce.sh 2>&1 | logger -t monitor-bruteforce
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/monitorear-bruteforce"
     chmod 700 /etc/cron.daily/monitorear-bruteforce
+    log_change "Permisos" "/etc/cron.daily/monitorear-bruteforce -> 700"
 
     log_info "Monitoreo diario de fuerza bruta configurado"
 else
+    log_skip "Protección contra fuerza bruta"
     log_warn "Protección contra fuerza bruta no configurada"
 fi
 
@@ -306,6 +326,7 @@ if ask "¿Configurar protección contra MITM?"; then
 
     if command -v arpwatch &>/dev/null; then
         systemctl enable --now arpwatch 2>/dev/null || true
+        log_change "Servicio" "arpwatch enable --now"
         log_info "arpwatch activado (monitoreo de cambios ARP)"
     fi
 
@@ -324,6 +345,7 @@ if ask "¿Configurar protección contra MITM?"; then
 
                 # Persistir en NetworkManager dispatcher
                 mkdir -p /etc/NetworkManager/dispatcher.d
+                log_change "Creado" "/etc/NetworkManager/dispatcher.d/"
                 cat > /etc/NetworkManager/dispatcher.d/90-static-arp.sh << EOFDISPATCH
 #!/bin/bash
 # ARP estático para gateway - T1557
@@ -331,7 +353,11 @@ if [[ "\$2" == "up" ]]; then
     ip neigh replace $GATEWAY lladdr $GATEWAY_MAC nud permanent dev "\$1" 2>/dev/null || true
 fi
 EOFDISPATCH
+                log_change "Creado" "/etc/NetworkManager/dispatcher.d/90-static-arp.sh"
                 chmod 755 /etc/NetworkManager/dispatcher.d/90-static-arp.sh
+                log_change "Permisos" "/etc/NetworkManager/dispatcher.d/90-static-arp.sh -> 755"
+            else
+                log_skip "Fijar ARP estático para gateway"
             fi
         fi
     fi
@@ -350,11 +376,14 @@ net.ipv4.conf.all.accept_redirects = 0
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv4.conf.all.secure_redirects = 0
 EOF
+    log_change "Modificado" "/etc/sysctl.d/91-credential-protection.conf"
 
     sysctl -p /etc/sysctl.d/91-credential-protection.conf 2>/dev/null || true
+    log_change "Aplicado" "sysctl -p /etc/sysctl.d/91-credential-protection.conf"
     log_info "Mitigaciones ARP/ICMP aplicadas"
 
 else
+    log_skip "Protección contra MITM"
     log_warn "Protección MITM no configurada"
 fi
 
@@ -481,7 +510,9 @@ fi
 find /var/log -name "credential-scan-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFCRED
 
+    log_change "Creado" "/usr/local/bin/buscar-credenciales.sh"
     chmod 700 /usr/local/bin/buscar-credenciales.sh
+    log_change "Permisos" "/usr/local/bin/buscar-credenciales.sh -> 700"
 
     # Ejecutar escaneo inmediato
     echo ""
@@ -492,10 +523,13 @@ EOFCRED
 #!/bin/bash
 /usr/local/bin/buscar-credenciales.sh 2>&1 | logger -t buscar-credenciales
 EOFCRON
+    log_change "Creado" "/etc/cron.weekly/buscar-credenciales"
     chmod 700 /etc/cron.weekly/buscar-credenciales
+    log_change "Permisos" "/etc/cron.weekly/buscar-credenciales -> 700"
 
     log_info "Escaneo semanal de credenciales configurado"
 else
+    log_skip "Escaneo de credenciales expuestas"
     log_warn "Escaneo de credenciales no configurado"
 fi
 
@@ -537,7 +571,9 @@ if [[ -n "$SNIFF_PROCS" ]]; then
 fi
 EOFPROM
 
+    log_change "Creado" "/usr/local/bin/detectar-promiscuo.sh"
     chmod 700 /usr/local/bin/detectar-promiscuo.sh
+    log_change "Permisos" "/usr/local/bin/detectar-promiscuo.sh -> 700"
 
     # Timer de systemd (cada 10 minutos)
     cat > /etc/systemd/system/detectar-promiscuo.service << 'EOFSVC'
@@ -558,9 +594,13 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOFTIMER
+    log_change "Creado" "/etc/systemd/system/detectar-promiscuo.service"
+    log_change "Creado" "/etc/systemd/system/detectar-promiscuo.timer"
 
     systemctl daemon-reload
+    log_change "Servicio" "systemctl daemon-reload"
     systemctl enable --now detectar-promiscuo.timer 2>/dev/null || true
+    log_change "Servicio" "detectar-promiscuo.timer enable --now"
 
     # 5b. Regla auditd para herramientas de captura
     if command -v auditctl &>/dev/null; then
@@ -572,11 +612,13 @@ EOFTIMER
 -w /usr/bin/wireshark -p x -k network-sniff
 -w /usr/sbin/tcpdump -p x -k network-sniff
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/62-credential-access.rules"
         augenrules --load 2>/dev/null || true
     fi
 
     log_info "Detección de sniffing configurada (cada 10 minutos)"
 else
+    log_skip "Protección contra network sniffing"
     log_warn "Protección contra sniffing no configurada"
 fi
 
@@ -672,18 +714,25 @@ fi
 find /var/log -name "keylogger-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFKL
 
+    log_change "Creado" "/usr/local/bin/detectar-keylogger.sh"
     chmod 700 /usr/local/bin/detectar-keylogger.sh
+    log_change "Permisos" "/usr/local/bin/detectar-keylogger.sh -> 700"
 
     cat > /etc/cron.daily/detectar-keylogger << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-keylogger.sh 2>&1 | logger -t detectar-keylogger
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-keylogger"
     chmod 700 /etc/cron.daily/detectar-keylogger
+    log_change "Permisos" "/etc/cron.daily/detectar-keylogger -> 700"
 
     log_info "Detección diaria de keyloggers configurada"
 else
+    log_skip "Detección de keyloggers"
     log_warn "Detección de keyloggers no configurada"
 fi
+
+show_changes_summary
 
 # ============================================================
 log_section "RESUMEN DE MITIGACIONES TA0006"

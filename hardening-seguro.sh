@@ -29,12 +29,17 @@ log_info "1. Protegiendo archivos críticos del sistema..."
 
 # Hacer copias de seguridad
 cp /etc/passwd /etc/shadow /etc/group /etc/sudoers "$BACKUP_DIR/" 2>/dev/null || true
+log_change "Backup" "/etc/passwd, /etc/shadow, /etc/group, /etc/sudoers"
 
 # Permisos correctos (no inmutables para no quedarte fuera)
 chmod 644 /etc/passwd
+log_change "Permisos" "/etc/passwd -> 644"
 chmod 640 /etc/shadow
+log_change "Permisos" "/etc/shadow -> 640"
 chmod 644 /etc/group
+log_change "Permisos" "/etc/group -> 644"
 chmod 440 /etc/sudoers
+log_change "Permisos" "/etc/sudoers -> 440"
 
 log_info "   Permisos de archivos críticos asegurados"
 
@@ -71,8 +76,10 @@ net.ipv4.conf.all.log_martians = 1
 net.ipv4.conf.default.log_martians = 1
 net.ipv4.tcp_rfc1337 = 1
 EOF
+log_change "Creado" "/etc/sysctl.d/99-process-hardening.conf"
 
 /usr/sbin/sysctl --system > /dev/null 2>&1
+log_change "Aplicado" "sysctl --system (protección de memoria y procesos)"
 log_info "   Protección de memoria y procesos activa"
 
 # ============================================================
@@ -93,7 +100,9 @@ $(sha256sum /usr/bin/su 2>/dev/null)
 $(sha256sum /usr/bin/passwd 2>/dev/null)
 $(sha256sum /usr/bin/login 2>/dev/null)
 EOF
+log_change "Creado" "$HASH_FILE (hashes de archivos críticos)"
 chmod 600 "$HASH_FILE"
+log_change "Permisos" "$HASH_FILE -> 600"
 
 # Script para verificar integridad
 cat > /usr/local/bin/verificar-integridad.sh << 'EOFVERIFY'
@@ -128,7 +137,9 @@ else
     echo "⚠️  SE DETECTARON MODIFICACIONES"
 fi
 EOFVERIFY
+log_change "Creado" "/usr/local/bin/verificar-integridad.sh"
 chmod +x /usr/local/bin/verificar-integridad.sh
+log_change "Permisos" "/usr/local/bin/verificar-integridad.sh -> +x"
 
 log_info "   Ejecutar: verificar-integridad.sh"
 
@@ -148,7 +159,9 @@ done
 echo ""
 echo "Verificar que todos son necesarios."
 EOFSUID
+log_change "Creado" "/usr/local/bin/auditar-suid.sh"
 chmod +x /usr/local/bin/auditar-suid.sh
+log_change "Permisos" "/usr/local/bin/auditar-suid.sh -> +x"
 
 # Asegurar que sudo requiere contraseña
 if [[ -f /etc/sudoers ]]; then
@@ -175,6 +188,7 @@ HISTFILESIZE=20000
 HISTTIMEFORMAT="%Y-%m-%d %H:%M:%S "
 shopt -s histappend
 EOF
+        log_change "Modificado" "/home/$USER_ACTUAL/.bashrc (historial seguro)"
     fi
 fi
 
@@ -204,7 +218,9 @@ echo ""
 echo "Procesos con conexiones de red:"
 ss -tnp 2>/dev/null | grep -v "127.0.0.1"
 EOFPROC
+log_change "Creado" "/usr/local/bin/procesos-sospechosos.sh"
 chmod +x /usr/local/bin/procesos-sospechosos.sh
+log_change "Permisos" "/usr/local/bin/procesos-sospechosos.sh -> +x"
 
 # ============================================================
 # 7. PROTEGER CRON Y TAREAS PROGRAMADAS
@@ -234,12 +250,17 @@ echo ""
 echo "Timers de systemd activos:"
 systemctl list-timers --all
 EOFCRON
+log_change "Creado" "/usr/local/bin/auditar-cron.sh"
 chmod +x /usr/local/bin/auditar-cron.sh
+log_change "Permisos" "/usr/local/bin/auditar-cron.sh -> +x"
 
 # Restringir cron a usuarios autorizados
 echo "root" > /etc/cron.allow
+log_change "Creado" "/etc/cron.allow (root)"
 echo "$USER_ACTUAL" >> /etc/cron.allow
+log_change "Modificado" "/etc/cron.allow (añadido $USER_ACTUAL)"
 chmod 600 /etc/cron.allow
+log_change "Permisos" "/etc/cron.allow -> 600"
 
 # ============================================================
 # 8. AUDITORÍA DE PAQUETES
@@ -271,7 +292,9 @@ else
 fi
 echo "Verificar manualmente si es legítimo."
 EOFPKG
+log_change "Creado" "/usr/local/bin/verificar-paquetes.sh"
 chmod +x /usr/local/bin/verificar-paquetes.sh
+log_change "Permisos" "/usr/local/bin/verificar-paquetes.sh -> +x"
 
 # ============================================================
 # 9. PROTEGER BOOT
@@ -280,7 +303,9 @@ log_info "9. Protegiendo arranque..."
 
 # Permisos de GRUB
 chmod 600 $GRUB_CFG 2>/dev/null || true
+log_change "Permisos" "$GRUB_CFG -> 600"
 chmod 700 /boot 2>/dev/null || true
+log_change "Permisos" "/boot -> 700"
 
 # ============================================================
 # 10. MONITOREO DE CAMBIOS EN TIEMPO REAL
@@ -297,7 +322,9 @@ inotifywait -m -r -e modify,create,delete,move \
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $event en $directory$filename" | tee -a /var/log/file-changes.log
 done
 EOFMON
+log_change "Creado" "/usr/local/bin/monitor-cambios.sh"
 chmod +x /usr/local/bin/monitor-cambios.sh
+log_change "Permisos" "/usr/local/bin/monitor-cambios.sh -> +x"
 
 # Instalar inotify-tools si no existe
 if ! command -v inotifywait &>/dev/null; then
@@ -349,7 +376,9 @@ for svc in firewalld fail2ban auditd; do
     printf "%-15s: %s\n" "$svc" "$(systemctl is-active $svc 2>/dev/null || echo 'no instalado')"
 done
 EOFAUDIT
+log_change "Creado" "/usr/local/bin/auditoria-rapida.sh"
 chmod +x /usr/local/bin/auditoria-rapida.sh
+log_change "Permisos" "/usr/local/bin/auditoria-rapida.sh -> +x"
 
 # ============================================================
 # RESUMEN
@@ -372,3 +401,5 @@ echo "Ejecuta ahora:"
 echo "  sudo auditoria-rapida.sh"
 echo ""
 log_info "Tu acceso al sistema NO ha sido afectado"
+
+show_changes_summary

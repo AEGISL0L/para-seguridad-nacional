@@ -24,7 +24,6 @@ log_section "1. ACTIVAR AUDITD"
 if ! systemctl is-active auditd &>/dev/null; then
     log_warn "Auditd está INACTIVO"
     if ask "¿Activar auditd (auditoría del sistema)?"; then
-
         # Primero limpiar reglas problemáticas anteriores
         log_info "Limpiando reglas de auditoría anteriores..."
         rm -f /etc/audit/rules.d/99-*.rules 2>/dev/null || true
@@ -56,14 +55,18 @@ if ! systemctl is-active auditd &>/dev/null; then
 -w /etc/hosts -p wa -k hosts
 -w /etc/resolv.conf -p wa -k dns
 EOF
+        log_change "Creado" "/etc/audit/rules.d/50-security.rules"
 
         # Reiniciar audit-rules primero
         systemctl reset-failed audit-rules.service 2>/dev/null || true
         systemctl restart audit-rules.service 2>/dev/null || true
+        log_change "Servicio" "audit-rules restart"
 
         # Luego iniciar auditd
         systemctl enable auditd 2>/dev/null || true
+        log_change "Servicio" "auditd enable"
         systemctl start auditd 2>/dev/null
+        log_change "Servicio" "auditd start"
 
         # Verificar
         if systemctl is-active auditd &>/dev/null; then
@@ -74,6 +77,7 @@ EOF
             auditctl -D 2>/dev/null || true
             auditctl -R /etc/audit/rules.d/50-security.rules 2>/dev/null || true
             systemctl start auditd 2>/dev/null || true
+            log_change "Servicio" "auditd start (alternativo)"
 
             if systemctl is-active auditd &>/dev/null; then
                 log_info "Auditd activado (método alternativo)"
@@ -81,6 +85,8 @@ EOF
                 log_error "No se pudo activar auditd. Verificar: journalctl -xe -u auditd"
             fi
         fi
+    else
+        log_skip "Activar auditd"
     fi
 else
     log_info "Auditd ya está activo"
@@ -94,18 +100,25 @@ if systemctl is-active bluetooth &>/dev/null; then
     log_warn "Bluetooth está ACTIVO (vector de ataque)"
     if ask "¿Deshabilitar Bluetooth?"; then
         systemctl stop bluetooth
+        log_change "Servicio" "bluetooth stop"
         systemctl disable bluetooth
+        log_change "Servicio" "bluetooth disable"
         systemctl mask bluetooth
+        log_change "Servicio" "bluetooth mask"
 
         # Bloquear módulo
         echo "install bluetooth /bin/false" >> /etc/modprobe.d/disable-bluetooth.conf
+        log_change "Modificado" "/etc/modprobe.d/disable-bluetooth.conf"
         echo "install btusb /bin/false" >> /etc/modprobe.d/disable-bluetooth.conf
+        log_change "Modificado" "/etc/modprobe.d/disable-bluetooth.conf"
 
         # Descargar módulo si está cargado
         rmmod btusb 2>/dev/null || true
         rmmod bluetooth 2>/dev/null || true
 
         log_info "Bluetooth deshabilitado y bloqueado"
+    else
+        log_skip "Deshabilitar Bluetooth"
     fi
 fi
 
@@ -119,8 +132,12 @@ if [[ -f $GRUB_CFG ]]; then
         log_warn "GRUB tiene permisos inseguros: $GRUB_PERMS"
         if ask "¿Securizar permisos de GRUB?"; then
             chmod 600 $GRUB_CFG
+            log_change "Permisos" "$GRUB_CFG -> 600"
             chown root:root $GRUB_CFG
+            log_change "Permisos" "$GRUB_CFG -> root:root"
             log_info "GRUB securizado (600)"
+        else
+            log_skip "Securizar permisos de GRUB"
         fi
     else
         log_info "GRUB ya tiene permisos seguros"
@@ -137,7 +154,10 @@ if [[ -L /etc/systemd/system/ctrl-alt-del.target ]] || \
 else
     if ask "¿Deshabilitar Ctrl+Alt+Del (previene reboot accidental)?"; then
         systemctl mask ctrl-alt-del.target
+        log_change "Servicio" "ctrl-alt-del.target mask"
         log_info "Ctrl+Alt+Del deshabilitado"
+    else
+        log_skip "Deshabilitar Ctrl+Alt+Del"
     fi
 fi
 
@@ -149,8 +169,12 @@ DMESG_RESTRICT=$(/usr/sbin/sysctl -n kernel.dmesg_restrict 2>/dev/null)
 if [[ "$DMESG_RESTRICT" != "1" ]]; then
     if ask "¿Restringir acceso a dmesg?"; then
         echo "kernel.dmesg_restrict = 1" >> /etc/sysctl.d/99-dmesg.conf
+        log_change "Modificado" "/etc/sysctl.d/99-dmesg.conf"
         /usr/sbin/sysctl -w kernel.dmesg_restrict=1
+        log_change "Aplicado" "sysctl kernel.dmesg_restrict=1"
         log_info "dmesg restringido a root"
+    else
+        log_skip "Restringir acceso a dmesg"
     fi
 else
     log_info "dmesg ya está restringido"
@@ -176,7 +200,10 @@ if ask "¿Configurar limpieza automática de /tmp en cada boot?"; then
 D /tmp 1777 root root 0
 D /var/tmp 1777 root root 30d
 EOF
+    log_change "Creado" "/etc/tmpfiles.d/tmp-clean.conf"
     log_info "Limpieza automática de /tmp configurada"
+else
+    log_skip "Configurar limpieza automática de /tmp"
 fi
 
 # ============================================================
@@ -187,6 +214,7 @@ if [[ -f /etc/sudoers ]]; then
     if ! grep -q "Defaults.*timestamp_timeout" /etc/sudoers; then
         if ask "¿Fortalecer configuración de sudo?"; then
             cp /etc/sudoers "$BACKUP_DIR/"
+            log_change "Backup" "/etc/sudoers"
 
             cat > /etc/sudoers.d/99-hardening << 'EOF'
 # Timeout de sudo: 5 minutos
@@ -207,7 +235,9 @@ Defaults requiretty
 # Limitar PATH en sudo
 Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EOF
+            log_change "Creado" "/etc/sudoers.d/99-hardening"
             chmod 440 /etc/sudoers.d/99-hardening
+            log_change "Permisos" "/etc/sudoers.d/99-hardening -> 440"
 
             # Verificar sintaxis
             if visudo -c &>/dev/null; then
@@ -216,6 +246,8 @@ EOF
                 rm /etc/sudoers.d/99-hardening
                 log_error "Error en configuración, revertido"
             fi
+        else
+            log_skip "Fortalecer configuración de sudo"
         fi
     else
         log_info "Sudo ya tiene configuración de hardening"
@@ -233,8 +265,12 @@ for svc in $SERVICES_TO_CHECK; do
         log_warn "$svc está activo"
         if ask "¿Deshabilitar $svc?"; then
             systemctl stop "$svc"
+            log_change "Servicio" "$svc stop"
             systemctl disable "$svc"
+            log_change "Servicio" "$svc disable"
             log_info "$svc deshabilitado"
+        else
+            log_skip "Deshabilitar $svc"
         fi
     fi
 done
@@ -250,12 +286,16 @@ if ! command -v usbguard &>/dev/null; then
 
         # Generar política inicial (permitir dispositivos actuales)
         usbguard generate-policy > /etc/usbguard/rules.conf
+        log_change "Creado" "/etc/usbguard/rules.conf"
 
         systemctl enable --now usbguard
+        log_change "Servicio" "usbguard enable --now"
         log_info "USBGuard instalado (dispositivos actuales permitidos)"
         log_warn "Nuevos USB serán bloqueados por defecto"
         log_info "Ver dispositivos: usbguard list-devices"
         log_info "Permitir nuevo: usbguard allow-device <id>"
+    else
+        log_skip "Instalar USBGuard"
     fi
 else
     log_info "USBGuard ya instalado"
@@ -270,11 +310,15 @@ if ask "¿Ocultar información del sistema (kernel, OS)?"; then
 
     # Ocultar versión del kernel en /proc
     echo "kernel.version = 0" > /etc/sysctl.d/99-hide-kernel.conf 2>/dev/null || true
+    log_change "Creado" "/etc/sysctl.d/99-hide-kernel.conf"
 
     # Deshabilitar motd dinámico si existe
     chmod -x /etc/update-motd.d/* 2>/dev/null || true
+    log_change "Permisos" "/etc/update-motd.d/* -> -x"
 
     log_info "Información del sistema limitada"
+else
+    log_skip "Ocultar información del sistema"
 fi
 
 # ============================================================
@@ -303,9 +347,13 @@ net.core.bpf_jit_harden = 2
 # Proteger memoria del kernel
 vm.mmap_min_addr = 65536
 EOF
+    log_change "Creado" "/etc/sysctl.d/99-memory-hardening.conf"
 
     /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system (memory hardening)"
     log_info "Protecciones de memoria aplicadas"
+else
+    log_skip "Aplicar protecciones de memoria adicionales"
 fi
 
 # ============================================================
@@ -342,7 +390,10 @@ if ask "¿Configurar retención de logs extendida (1 año)?"; then
     endscript
 }
 EOF
+    log_change "Creado" "/etc/logrotate.d/security-logs"
     log_info "Logs de seguridad retenidos por 1 año"
+else
+    log_skip "Configurar retención de logs extendida"
 fi
 
 # ============================================================
@@ -376,6 +427,8 @@ echo "  $TCP_PORTS puertos"
 
 echo ""
 log_info "Backups en: $BACKUP_DIR"
+show_changes_summary
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║              HARDENING COMPLETADO                         ║"

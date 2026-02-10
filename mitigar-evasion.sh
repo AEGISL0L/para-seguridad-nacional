@@ -82,6 +82,7 @@ if ask "¿Proteger logs del sistema contra manipulación?"; then
 
         AUDIT_RULES_FILE="/etc/audit/rules.d/60-log-protection.rules"
         cp "$AUDIT_RULES_FILE" "$BACKUP_DIR/" 2>/dev/null || true
+        log_change "Backup" "$AUDIT_RULES_FILE"
 
         cat > "$AUDIT_RULES_FILE" << 'EOF'
 ## Protección de logs - T1070 Indicator Removal
@@ -107,10 +108,12 @@ if ask "¿Proteger logs del sistema contra manipulación?"; then
 -w /usr/bin/wipe -p x -k log-wipe-tool
 EOF
 
+        log_change "Creado" "$AUDIT_RULES_FILE"
         log_info "Reglas auditd de protección de logs creadas: $AUDIT_RULES_FILE"
 
         # Recargar reglas
         augenrules --load 2>/dev/null || auditctl -R "$AUDIT_RULES_FILE" 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas auditd recargadas"
     else
         log_warn "auditd no disponible - instálalo para protección completa de logs"
@@ -121,7 +124,9 @@ EOF
     echo -e "${BOLD}Configurando journald para persistencia...${NC}"
 
     mkdir -p /etc/systemd/journald.conf.d
+    log_change "Creado" "/etc/systemd/journald.conf.d/"
     cp /etc/systemd/journald.conf "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/systemd/journald.conf"
 
     cat > /etc/systemd/journald.conf.d/01-proteccion.conf << 'EOF'
 # Protección de logs - T1070
@@ -142,11 +147,14 @@ RateLimitIntervalSec=30s
 RateLimitBurst=10000
 EOF
 
+    log_change "Creado" "/etc/systemd/journald.conf.d/01-proteccion.conf"
     systemctl restart systemd-journald 2>/dev/null || true
+    log_change "Servicio" "systemd-journald restart"
     log_info "journald configurado con persistencia y sellado"
 
     log_info "Protección de logs aplicada"
 else
+    log_skip "Protección de logs contra manipulación"
     log_warn "Protección de logs no aplicada"
 fi
 
@@ -184,7 +192,9 @@ readonly HISTFILESIZE
 readonly HISTTIMEFORMAT
 EOFHIST
 
+    log_change "Creado" "/etc/profile.d/history-protection.sh"
     chmod 644 /etc/profile.d/history-protection.sh
+    log_change "Permisos" "/etc/profile.d/history-protection.sh -> 644"
 
     # Reglas auditd para monitorear borrado de historial
     if command -v auditctl &>/dev/null; then
@@ -194,7 +204,9 @@ EOFHIST
 -w /root/.bash_history -p wa -k history-tampering
 -a always,exit -F arch=b64 -S unlink -S unlinkat -F path=/root/.bash_history -k history-delete
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/60-log-protection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     # Auditoría centralizada de comandos con logger
@@ -208,10 +220,13 @@ function log_command() {
 export PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}log_command"
 EOFCMDLOG
 
+    log_change "Creado" "/etc/profile.d/command-logging.sh"
     chmod 644 /etc/profile.d/command-logging.sh
+    log_change "Permisos" "/etc/profile.d/command-logging.sh -> 644"
 
     log_info "Protección de historial de comandos configurada"
 else
+    log_skip "Protección de historial de comandos"
     log_warn "Protección de historial no aplicada"
 fi
 
@@ -316,7 +331,9 @@ fi
 find /var/log -name "masquerading-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFMASQ
 
+    log_change "Creado" "/usr/local/bin/detectar-masquerading.sh"
     chmod 700 /usr/local/bin/detectar-masquerading.sh
+    log_change "Permisos" "/usr/local/bin/detectar-masquerading.sh -> 700"
     log_info "Script de detección de masquerading creado: /usr/local/bin/detectar-masquerading.sh"
 
     # Cron diario
@@ -324,10 +341,13 @@ EOFMASQ
 #!/bin/bash
 /usr/local/bin/detectar-masquerading.sh 2>&1 | logger -t detectar-masquerading
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-masquerading"
     chmod 700 /etc/cron.daily/detectar-masquerading
+    log_change "Permisos" "/etc/cron.daily/detectar-masquerading -> 700"
 
     log_info "Detección diaria de masquerading configurada"
 else
+    log_skip "Detección de binarios masquerading"
     log_warn "Detección de masquerading no configurada"
 fi
 
@@ -373,8 +393,10 @@ if ask "¿Proteger herramientas de seguridad contra desactivación?"; then
 -w /usr/sbin/nft -p x -k firewall-modify
 -w /usr/sbin/firewall-cmd -p x -k firewall-modify
 EOF
+        log_change "Creado" "/etc/audit/rules.d/61-defense-evasion.rules"
 
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas auditd de protección de herramientas creadas"
     fi
 
@@ -430,7 +452,9 @@ if [[ $ALERT -gt 0 ]]; then
 fi
 EOFWATCH
 
+    log_change "Creado" "/usr/local/bin/watchdog-seguridad.sh"
     chmod 700 /usr/local/bin/watchdog-seguridad.sh
+    log_change "Permisos" "/usr/local/bin/watchdog-seguridad.sh -> 700"
 
     # Crear timer de systemd para el watchdog (cada 5 minutos)
     cat > /etc/systemd/system/watchdog-seguridad.service << 'EOFSVC'
@@ -445,6 +469,8 @@ StandardOutput=journal
 StandardError=journal
 EOFSVC
 
+    log_change "Creado" "/etc/systemd/system/watchdog-seguridad.service"
+
     cat > /etc/systemd/system/watchdog-seguridad.timer << 'EOFTIMER'
 [Unit]
 Description=Timer para watchdog de seguridad (cada 5 min)
@@ -457,12 +483,16 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOFTIMER
+    log_change "Creado" "/etc/systemd/system/watchdog-seguridad.timer"
 
     systemctl daemon-reload
+    log_change "Servicio" "systemctl daemon-reload"
     systemctl enable --now watchdog-seguridad.timer 2>/dev/null || true
+    log_change "Servicio" "watchdog-seguridad.timer enable --now"
 
     log_info "Watchdog de servicios de seguridad activo (cada 5 minutos)"
 else
+    log_skip "Protección de herramientas de seguridad"
     log_warn "Protección de herramientas de seguridad no aplicada"
 fi
 
@@ -508,6 +538,7 @@ if ask "¿Instalar/configurar detección de rootkits?"; then
     # Configurar rkhunter
     if [[ "$RKHUNTER_INSTALLED" == "true" ]]; then
         cp /etc/rkhunter.conf "$BACKUP_DIR/" 2>/dev/null || true
+        log_change "Backup" "/etc/rkhunter.conf"
 
         # Actualizar base de datos
         rkhunter --update 2>/dev/null || true
@@ -593,17 +624,22 @@ fi
 find /var/log -name "rootkit-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFRK
 
+    log_change "Creado" "/usr/local/bin/detectar-rootkits.sh"
     chmod 700 /usr/local/bin/detectar-rootkits.sh
+    log_change "Permisos" "/usr/local/bin/detectar-rootkits.sh -> 700"
 
     # Cron semanal
     cat > /etc/cron.weekly/detectar-rootkits << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-rootkits.sh 2>&1 | logger -t detectar-rootkits
 EOFCRON
+    log_change "Creado" "/etc/cron.weekly/detectar-rootkits"
     chmod 700 /etc/cron.weekly/detectar-rootkits
+    log_change "Permisos" "/etc/cron.weekly/detectar-rootkits -> 700"
 
     log_info "Detección semanal de rootkits configurada"
 else
+    log_skip "Detección de rootkits"
     log_warn "Detección de rootkits no configurada"
 fi
 
@@ -670,11 +706,14 @@ if ask "¿Restringir binarios de proxy execution?"; then
 -w /usr/bin/socat -p x -k lolbin-exec
 -w /usr/bin/script -p x -k lolbin-exec
 EOF
+        log_change "Modificado" "/etc/audit/rules.d/61-defense-evasion.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
     fi
 
     log_info "LOLBins restringidos al grupo security-tools"
 else
+    log_skip "Control de proxy execution (LOLBins)"
     log_warn "Control de proxy execution no aplicado"
 fi
 
@@ -776,16 +815,21 @@ fi
 find /var/log -name "hidden-artifacts-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFOCULTOS
 
+    log_change "Creado" "/usr/local/bin/detectar-ocultos.sh"
     chmod 700 /usr/local/bin/detectar-ocultos.sh
+    log_change "Permisos" "/usr/local/bin/detectar-ocultos.sh -> 700"
 
     cat > /etc/cron.daily/detectar-ocultos << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-ocultos.sh 2>&1 | logger -t detectar-ocultos
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-ocultos"
     chmod 700 /etc/cron.daily/detectar-ocultos
+    log_change "Permisos" "/etc/cron.daily/detectar-ocultos -> 700"
 
     log_info "Detección diaria de artefactos ocultos configurada"
 else
+    log_skip "Detección de artefactos ocultos"
     log_warn "Detección de artefactos ocultos no configurada"
 fi
 
@@ -877,16 +921,21 @@ fi
 find /var/log -name "obfuscation-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFOFUSC
 
+    log_change "Creado" "/usr/local/bin/detectar-ofuscados.sh"
     chmod 700 /usr/local/bin/detectar-ofuscados.sh
+    log_change "Permisos" "/usr/local/bin/detectar-ofuscados.sh -> 700"
 
     cat > /etc/cron.daily/detectar-ofuscados << 'EOFCRON'
 #!/bin/bash
 /usr/local/bin/detectar-ofuscados.sh 2>&1 | logger -t detectar-ofuscados
 EOFCRON
+    log_change "Creado" "/etc/cron.daily/detectar-ofuscados"
     chmod 700 /etc/cron.daily/detectar-ofuscados
+    log_change "Permisos" "/etc/cron.daily/detectar-ofuscados -> 700"
 
     log_info "Detección diaria de scripts ofuscados configurada"
 else
+    log_skip "Detección de scripts ofuscados"
     log_warn "Detección de ofuscación no configurada"
 fi
 
@@ -953,6 +1002,8 @@ if [[ -x /usr/local/bin/detectar-ofuscados.sh ]]; then
 else
     echo -e "  ${YELLOW}[--]${NC} T1027/T1140 - Detección de ofuscación no configurada"
 fi
+
+show_changes_summary
 
 echo ""
 log_info "Script de mitigación de evasión de defensas completado"

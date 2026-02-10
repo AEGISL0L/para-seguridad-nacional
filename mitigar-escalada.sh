@@ -79,10 +79,15 @@ if ask "¿Eliminar SUID innecesarios? (se mostrará lista para confirmar)"; then
             echo -e "  ¿Eliminar SUID de $candidate?"
             if ask "    ¿Confirmar?"; then
                 chmod u-s "$candidate"
+                log_change "Permisos" "$candidate -> u-s"
                 log_info "SUID eliminado de $candidate"
+            else
+                log_skip "SUID de $candidate"
             fi
         fi
     done
+else
+    log_skip "Eliminar SUID innecesarios"
 fi
 
 # ============================================================
@@ -125,11 +130,16 @@ if command -v getcap &>/dev/null; then
                     echo -e "  ${RED}●${NC} $BIN tiene $dcap (sin paquete)"
                     if ask "    ¿Eliminar capabilities de $BIN?"; then
                         setcap -r "$BIN" 2>/dev/null || true
+                        log_change "Permisos" "$BIN -> capabilities removed"
                         log_info "Capabilities eliminadas de $BIN"
+                    else
+                        log_skip "Capabilities de $BIN"
                     fi
                 fi
             done
         done
+    else
+        log_skip "Eliminar capabilities innecesarias"
     fi
 else
     log_warn "getcap no disponible - no se pueden auditar capabilities"
@@ -203,14 +213,18 @@ Defaults insults
 Defaults mail_badpass
 EOF
 
+    log_change "Creado" "/etc/sudoers.d/99-hardening"
     # Verificar sintaxis
     if visudo -c -f /etc/sudoers.d/99-hardening 2>/dev/null; then
         chmod 440 /etc/sudoers.d/99-hardening
+        log_change "Permisos" "/etc/sudoers.d/99-hardening -> 440"
         log_info "Hardening de sudo aplicado"
     else
         log_error "Error de sintaxis en sudoers - eliminando"
         rm -f /etc/sudoers.d/99-hardening
     fi
+else
+    log_skip "Configuración de sudo segura"
 fi
 
 # ============================================================
@@ -284,8 +298,12 @@ vm.unprivileged_userfaultfd = 0
 # kernel.unprivileged_userns_clone = 0
 EOF
 
+        log_change "Creado" "/etc/sysctl.d/99-anti-privesc.conf"
         /usr/sbin/sysctl --system > /dev/null 2>&1
+        log_change "Aplicado" "sysctl --system"
         log_info "Protecciones de kernel aplicadas"
+    else
+        log_skip "Protecciones de kernel faltantes"
     fi
 fi
 
@@ -340,9 +358,13 @@ if ask "¿Configurar reglas de auditoría para inyección de procesos?"; then
 -a always,exit -F arch=b64 -S execve -F path=/usr/bin/su -k priv_su
 -a always,exit -F arch=b64 -S execve -F path=/usr/bin/pkexec -k priv_pkexec
 EOF
+        log_change "Creado" "/etc/audit/rules.d/privesc-injection.rules"
         augenrules --load 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Monitoreo de inyección de procesos configurado"
     fi
+else
+    log_skip "Reglas de auditoría para inyección de procesos"
 fi
 
 # ============================================================
@@ -376,12 +398,15 @@ if [[ $CRON_ISSUES -gt 0 ]]; then
         for cron_dir in /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly; do
             [[ -d "$cron_dir" ]] || continue
             chmod 700 "$cron_dir"
+            log_change "Permisos" "$cron_dir -> 700"
             for script in "$cron_dir"/*; do
                 [[ -f "$script" ]] || continue
                 chmod 700 "$script"
             done
         done
         log_info "Permisos de scripts cron corregidos a 700"
+    else
+        log_skip "Corregir permisos de scripts cron"
     fi
 else
     echo -e "  ${GREEN}OK${NC} No hay scripts cron con permisos inseguros"
@@ -425,6 +450,7 @@ if ask "¿Corregir archivos y directorios world-writable?"; then
     # Añadir sticky bit a directorios world-writable
     find / -xdev -type d -perm -0002 ! -perm -1000 2>/dev/null | grep -vE "^/(proc|sys|dev)" | while read -r ww_dir; do
         chmod +t "$ww_dir" 2>/dev/null || true
+        log_change "Permisos" "$ww_dir -> +t"
         log_info "Sticky bit añadido a $ww_dir"
     done
 
@@ -433,6 +459,8 @@ if ask "¿Corregir archivos y directorios world-writable?"; then
         chmod o-w "$ww_file" 2>/dev/null || true
     done
     log_info "Permisos world-writable corregidos"
+else
+    log_skip "Corregir archivos y directorios world-writable"
 fi
 
 # ============================================================
@@ -511,7 +539,9 @@ echo "" | tee -a "$LOGFILE"
 echo "Alertas: $ALERTS" | tee -a "$LOGFILE"
 ESCEOF
 
+    log_change "Creado" "/usr/local/bin/detectar-escalada.sh"
     chmod +x /usr/local/bin/detectar-escalada.sh
+    log_change "Permisos" "/usr/local/bin/detectar-escalada.sh -> +x"
     log_info "Script creado: /usr/local/bin/detectar-escalada.sh"
 
     if ask "¿Programar detección semanal de vectores de escalada?"; then
@@ -519,9 +549,15 @@ ESCEOF
 #!/bin/bash
 /usr/local/bin/detectar-escalada.sh > /dev/null 2>&1
 WEOF
+        log_change "Creado" "/etc/cron.weekly/detectar-escalada"
         chmod +x /etc/cron.weekly/detectar-escalada
+        log_change "Permisos" "/etc/cron.weekly/detectar-escalada -> +x"
         log_info "Detección semanal programada"
+    else
+        log_skip "Programar detección semanal de escalada"
     fi
+else
+    log_skip "Script de detección de vectores de escalada"
 fi
 
 # ============================================================
@@ -541,4 +577,7 @@ echo "  T1055 - Process Injection      → ptrace + auditd"
 echo "  T1053 - Cron Privesc           → Permisos + monitoreo"
 echo "  World-writable                 → Corrección de permisos"
 echo ""
+
+show_changes_summary
+
 log_info "Backups en: $BACKUP_DIR"

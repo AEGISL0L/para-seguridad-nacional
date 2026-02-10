@@ -48,6 +48,7 @@ if ask "¿Configurar sistema de backups offsite automáticos?"; then
 
     # Crear directorio de configuración
     mkdir -p /etc/backup-offsite
+    log_change "Creado" "/etc/backup-offsite/"
 
     # Preguntar tipo de destino
     echo ""
@@ -103,7 +104,9 @@ BACKUP_RETENTION=7
 BACKUP_EXCLUDE="*.tmp *.cache .cache/ .local/share/Trash/ lost+found/"
 EOFCFG
 
+    log_change "Creado" "/etc/backup-offsite/config"
     chmod 600 /etc/backup-offsite/config
+    log_change "Permisos" "/etc/backup-offsite/config -> 600"
     log_info "Configuración guardada en /etc/backup-offsite/config"
 
     # Crear script de backup offsite
@@ -226,7 +229,9 @@ fi
 find /var/log -name "backup-offsite-*.log" -mtime +60 -delete 2>/dev/null || true
 EOFBACKUP
 
+    log_change "Creado" "/usr/local/bin/backup-offsite.sh"
     chmod 700 /usr/local/bin/backup-offsite.sh
+    log_change "Permisos" "/usr/local/bin/backup-offsite.sh -> 700"
     log_info "Script de backup creado: /usr/local/bin/backup-offsite.sh"
 
     # Crear cron job diario
@@ -236,7 +241,9 @@ EOFBACKUP
 /usr/local/bin/backup-offsite.sh 2>&1 | logger -t backup-offsite
 EOFCRON
 
+    log_change "Creado" "/etc/cron.daily/backup-offsite"
     chmod 700 /etc/cron.daily/backup-offsite
+    log_change "Permisos" "/etc/cron.daily/backup-offsite -> 700"
     log_info "Cron diario creado: /etc/cron.daily/backup-offsite"
     log_info "Destino configurado: $BACKUP_DEST ($BACKUP_TYPE)"
 
@@ -245,6 +252,7 @@ EOFCRON
     echo -e "${DIM}Logs en: /var/log/backup-offsite-*.log${NC}"
     echo -e "${DIM}Configuración: /etc/backup-offsite/config${NC}"
 else
+    log_skip "Backups offsite no configurados"
     log_warn "Backups offsite no configurados"
 fi
 
@@ -273,11 +281,15 @@ if ask "¿Configurar ClamAV con protección anti-ransomware?"; then
 
         # Asegurar que freshclam y clamd estén activos
         systemctl enable --now freshclam.service 2>/dev/null || systemctl enable --now clamav-freshclam.service 2>/dev/null || true
+        log_change "Servicio" "freshclam enable --now"
 
         # Crear directorio para firmas personalizadas
         mkdir -p /var/lib/clamav/custom
+        log_change "Creado" "/var/lib/clamav/custom/"
         mkdir -p /var/lib/clamav/quarantine
+        log_change "Creado" "/var/lib/clamav/quarantine/"
         chmod 700 /var/lib/clamav/quarantine
+        log_change "Permisos" "/var/lib/clamav/quarantine -> 700"
 
         # Crear base de datos de firmas anti-ransomware personalizada
         cat > /var/lib/clamav/custom/ransomware-signatures.yar << 'EOFYAR'
@@ -328,6 +340,7 @@ rule Ransomware_Dropper_Script
 }
 EOFYAR
 
+        log_change "Creado" "/var/lib/clamav/custom/ransomware-signatures.yar"
         log_info "Firmas YARA anti-ransomware creadas"
 
         # Script de escaneo anti-ransomware
@@ -437,7 +450,9 @@ echo "Log: $LOG" | tee -a "$LOG"
 find /var/log -name "clamav-ransomware-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFRANSOM
 
+        log_change "Creado" "/usr/local/bin/clamav-antiransomware.sh"
         chmod 700 /usr/local/bin/clamav-antiransomware.sh
+        log_change "Permisos" "/usr/local/bin/clamav-antiransomware.sh -> 700"
         log_info "Script anti-ransomware creado: /usr/local/bin/clamav-antiransomware.sh"
 
         # Cron job semanal anti-ransomware
@@ -447,13 +462,16 @@ EOFRANSOM
 /usr/local/bin/clamav-antiransomware.sh 2>&1 | logger -t clamav-antiransomware
 EOFCRONAV
 
+        log_change "Creado" "/etc/cron.weekly/clamav-antiransomware"
         chmod 700 /etc/cron.weekly/clamav-antiransomware
+        log_change "Permisos" "/etc/cron.weekly/clamav-antiransomware -> 700"
         log_info "Cron semanal anti-ransomware creado: /etc/cron.weekly/clamav-antiransomware"
 
         echo ""
         echo -e "${DIM}Uso manual: /usr/local/bin/clamav-antiransomware.sh${NC}"
     fi
 else
+    log_skip "ClamAV anti-ransomware no configurado"
     log_warn "ClamAV anti-ransomware no configurado"
 fi
 
@@ -487,7 +505,9 @@ if ask "¿Configurar protección de snapshots y backups?"; then
         for dir in $pattern; do
             if [[ -d "$dir" ]]; then
                 chmod 700 "$dir"
+                log_change "Permisos" "$dir -> 700"
                 chown root:root "$dir"
+                log_change "Permisos" "$dir -> root:root"
                 echo -e "  ${GREEN}●${NC} Protegido: $dir (700, root:root)"
             fi
         done
@@ -513,7 +533,9 @@ if ask "¿Configurar protección de snapshots y backups?"; then
 
                 if [[ -d "$SNAPSHOT_DIR" ]]; then
                     chmod 700 "$SNAPSHOT_DIR"
+                    log_change "Permisos" "$SNAPSHOT_DIR -> 700"
                     chown root:root "$SNAPSHOT_DIR"
+                    log_change "Permisos" "$SNAPSHOT_DIR -> root:root"
                     echo -e "  ${GREEN}●${NC} Snapshots protegidos: $SNAPSHOT_DIR (700)"
                 fi
             done
@@ -529,6 +551,8 @@ if ask "¿Configurar protección de snapshots y backups?"; then
                     echo -e "  ${GREEN}●${NC} Retención configurada para: $config"
                 done
                 log_info "Retención mínima de snapshots configurada"
+            else
+                log_skip "Retención mínima de snapshots no configurada"
             fi
         else
             log_warn "Snapper instalado pero sin configuraciones activas"
@@ -664,7 +688,9 @@ fi
 find /var/log -name "backup-verify-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFVERIFY
 
+    log_change "Creado" "/usr/local/bin/verificar-backups.sh"
     chmod 700 /usr/local/bin/verificar-backups.sh
+    log_change "Permisos" "/usr/local/bin/verificar-backups.sh -> 700"
     log_info "Script de verificación creado: /usr/local/bin/verificar-backups.sh"
 
     # Cron semanal de verificación
@@ -674,18 +700,23 @@ EOFVERIFY
 /usr/local/bin/verificar-backups.sh 2>&1 | logger -t verificar-backups
 EOFCRONVERIFY
 
+    log_change "Creado" "/etc/cron.weekly/verificar-backups"
     chmod 700 /etc/cron.weekly/verificar-backups
+    log_change "Permisos" "/etc/cron.weekly/verificar-backups -> 700"
     log_info "Cron semanal de verificación creado: /etc/cron.weekly/verificar-backups"
 
     # Ejecutar primera verificación para crear checksums base
     echo ""
     if ask "¿Ejecutar verificación inicial ahora (crea checksums base)?"; then
         /usr/local/bin/verificar-backups.sh
+    else
+        log_skip "Verificación inicial de backups no ejecutada"
     fi
 
     echo ""
     echo -e "${DIM}Uso manual: /usr/local/bin/verificar-backups.sh${NC}"
 else
+    log_skip "Protección de snapshots/backups no configurada"
     log_warn "Protección de snapshots/backups no configurada"
 fi
 
@@ -737,8 +768,10 @@ if ask "¿Configurar monitoreo de actividad de impacto?"; then
 -a always,exit -F arch=b64 -S open -S openat -F dir=/dev -F perm=w -F key=impact-disk-write
 EOFAUDIT
 
+        log_change "Creado" "/etc/audit/rules.d/impact-detection.rules"
         # Cargar reglas
         augenrules --load 2>/dev/null || auditctl -R /etc/audit/rules.d/impact-detection.rules 2>/dev/null || true
+        log_change "Aplicado" "augenrules --load"
         log_info "Reglas auditd de detección de impacto cargadas"
     else
         log_warn "auditd no disponible, omitiendo reglas de auditoría"
@@ -861,7 +894,9 @@ fi
 find /var/log -name "impact-detection-*.log" -mtime +30 -delete 2>/dev/null || true
 EOFDETECT
 
+    log_change "Creado" "/usr/local/bin/detectar-impacto.sh"
     chmod 700 /usr/local/bin/detectar-impacto.sh
+    log_change "Permisos" "/usr/local/bin/detectar-impacto.sh -> 700"
     log_info "Script de detección de impacto creado: /usr/local/bin/detectar-impacto.sh"
 
     # Cron diario de monitoreo
@@ -871,12 +906,15 @@ EOFDETECT
 /usr/local/bin/detectar-impacto.sh 2>&1 | logger -t detectar-impacto
 EOFCRONDET
 
+    log_change "Creado" "/etc/cron.daily/detectar-impacto"
     chmod 700 /etc/cron.daily/detectar-impacto
+    log_change "Permisos" "/etc/cron.daily/detectar-impacto -> 700"
     log_info "Cron diario de detección creado: /etc/cron.daily/detectar-impacto"
 
     echo ""
     echo -e "${DIM}Uso manual: /usr/local/bin/detectar-impacto.sh${NC}"
 else
+    log_skip "Monitoreo de impacto no configurado"
     log_warn "Monitoreo de impacto no configurado"
 fi
 
@@ -915,6 +953,8 @@ if [[ -x /usr/local/bin/detectar-impacto.sh ]]; then
 else
     echo -e "  ${YELLOW}[--]${NC} T1485/T1486/T1489 M1047 - Monitoreo no configurado"
 fi
+
+show_changes_summary
 
 echo ""
 log_info "Script de mitigación de impacto completado"

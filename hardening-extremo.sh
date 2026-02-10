@@ -17,8 +17,11 @@ SERVICES="sshd cups avahi-daemon bluetooth ModemManager"
 for svc in $SERVICES; do
     if systemctl is-active "$svc" &>/dev/null; then
         systemctl stop "$svc" 2>/dev/null || true
+        log_change "Servicio" "$svc stop"
         systemctl disable "$svc" 2>/dev/null || true
+        log_change "Servicio" "$svc disable"
         systemctl mask "$svc" 2>/dev/null || true
+        log_change "Servicio" "$svc mask"
         log_info "   $svc deshabilitado y enmascarado"
     fi
 done
@@ -75,6 +78,7 @@ install p8022 /bin/false
 install can /bin/false
 install atm /bin/false
 EOF
+log_change "Creado" "/etc/modprobe.d/network-hardening.conf"
 
 # ============================================================
 # 4. KERNEL PARANOID MODE
@@ -154,8 +158,10 @@ net.core.bpf_jit_harden = 2
 vm.mmap_min_addr = 65536
 vm.swappiness = 10
 EOF
+log_change "Creado" "/etc/sysctl.d/99-paranoid-max.conf"
 
 /usr/sbin/sysctl --system > /dev/null 2>&1
+log_change "Aplicado" "sysctl --system"
 log_info "   Kernel en modo paranoico máximo"
 
 # ============================================================
@@ -175,16 +181,21 @@ if ask "¿Bloquear TODOS los dispositivos USB nuevos?"; then
 # Bloquear TODOS los dispositivos USB por defecto
 # Solo los dispositivos listados explícitamente serán permitidos
 EOF
+        log_change "Creado" "/etc/usbguard/rules.conf"
         # Añadir dispositivos actuales como permitidos
         usbguard generate-policy >> /etc/usbguard/rules.conf 2>/dev/null || true
 
         systemctl enable --now usbguard 2>/dev/null || true
+        log_change "Servicio" "usbguard enable --now"
         log_info "   USBGuard activo - USB nuevos bloqueados"
     fi
 
     # Bloquear almacenamiento USB
     echo "install usb-storage /bin/false" >> /etc/modprobe.d/network-hardening.conf
+    log_change "Modificado" "/etc/modprobe.d/network-hardening.conf"
     rmmod usb_storage 2>/dev/null || true
+else
+    log_skip "Bloqueo de dispositivos USB"
 fi
 
 # ============================================================
@@ -195,6 +206,7 @@ log_info "6. Bloqueando shells de usuarios del sistema..."
 # Bloquear shell de usuarios del sistema
 for user in daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc gnats nobody; do
     usermod -s /usr/sbin/nologin "$user" 2>/dev/null || true
+    log_change "Usuario" "$user shell -> /usr/sbin/nologin"
 done
 
 # ============================================================
@@ -204,17 +216,27 @@ log_info "7. Aplicando permisos ultra-restrictivos..."
 
 # Binarios SUID - solo los esenciales
 chmod u-s /usr/bin/wall 2>/dev/null || true
+log_change "Permisos" "/usr/bin/wall -> u-s"
 chmod u-s /usr/bin/write 2>/dev/null || true
+log_change "Permisos" "/usr/bin/write -> u-s"
 chmod u-s /usr/bin/chage 2>/dev/null || true
+log_change "Permisos" "/usr/bin/chage -> u-s"
 chmod u-s /usr/bin/chfn 2>/dev/null || true
+log_change "Permisos" "/usr/bin/chfn -> u-s"
 chmod u-s /usr/bin/chsh 2>/dev/null || true
+log_change "Permisos" "/usr/bin/chsh -> u-s"
 
 # Archivos críticos
 chmod 600 /etc/shadow
+log_change "Permisos" "/etc/shadow -> 600"
 chmod 600 /etc/gshadow
+log_change "Permisos" "/etc/gshadow -> 600"
 chmod 600 /etc/ssh/sshd_config 2>/dev/null || true
+log_change "Permisos" "/etc/ssh/sshd_config -> 600"
 chmod 700 /root
+log_change "Permisos" "/root -> 700"
 chmod 700 /boot
+log_change "Permisos" "/boot -> 700"
 
 # ============================================================
 # 8. MONITOREO EN TIEMPO REAL
@@ -269,7 +291,9 @@ while true; do
     sleep 30
 done
 EOFMONITOR
+log_change "Creado" "/usr/local/bin/security-monitor.sh"
 chmod +x /usr/local/bin/security-monitor.sh
+log_change "Permisos" "/usr/local/bin/security-monitor.sh -> +x"
 
 # Servicio systemd
 cat > /etc/systemd/system/security-monitor.service << 'EOF'
@@ -286,9 +310,12 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+log_change "Creado" "/etc/systemd/system/security-monitor.service"
 
 systemctl daemon-reload
+log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now security-monitor.service 2>/dev/null || true
+log_change "Servicio" "security-monitor enable --now"
 log_info "   Monitor de seguridad activo"
 
 # ============================================================
@@ -321,7 +348,9 @@ wall "
 # Log
 echo "[$(date)] INTRUSIÓN DETECTADA" >> /var/log/intrusion.log
 EOFALARM
+log_change "Creado" "/usr/local/bin/intrusion-alarm.sh"
 chmod +x /usr/local/bin/intrusion-alarm.sh
+log_change "Permisos" "/usr/local/bin/intrusion-alarm.sh -> +x"
 
 # ============================================================
 # 10. INMUTABILIDAD DE ARCHIVOS CRÍTICOS
@@ -330,17 +359,25 @@ if ask "¿Hacer inmutables los archivos críticos? (requiere chattr -i para modi
     log_info "10. Haciendo archivos críticos inmutables..."
 
     chattr +i /etc/passwd 2>/dev/null || true
+    log_change "Permisos" "/etc/passwd -> +i (inmutable)"
     chattr +i /etc/shadow 2>/dev/null || true
+    log_change "Permisos" "/etc/shadow -> +i (inmutable)"
     chattr +i /etc/group 2>/dev/null || true
+    log_change "Permisos" "/etc/group -> +i (inmutable)"
     chattr +i /etc/gshadow 2>/dev/null || true
+    log_change "Permisos" "/etc/gshadow -> +i (inmutable)"
     chattr +i /etc/sudoers 2>/dev/null || true
+    log_change "Permisos" "/etc/sudoers -> +i (inmutable)"
 
     log_warn "   Archivos inmutables. Para modificar: chattr -i <archivo>"
+else
+    log_skip "Archivos criticos inmutables"
 fi
 
 # ============================================================
 # RESUMEN
 # ============================================================
+show_changes_summary
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║         HARDENING EXTREMO COMPLETADO                      ║"

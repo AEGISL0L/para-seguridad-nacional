@@ -79,6 +79,8 @@ if [[ -n "$DEPS_NEEDED" ]]; then
             log_error "Error instalando dependencias. Verifica repositorios."
         }
         log_info "Dependencias instaladas"
+    else
+        log_skip "Dependencias faltantes:${DEPS_NEEDED}"
     fi
 else
     log_info "Todas las dependencias presentes"
@@ -101,12 +103,17 @@ if ask "¿Crear estructura de directorios para IoC?"; then
     mkdir -p "$IOC_LISTS_DIR"
     mkdir -p "$IOC_DIR/config"
     mkdir -p "$IOC_LOG"
+    log_change "Creado" "$IOC_DIR/ (estructura completa)"
 
     # Permisos restrictivos
     chmod 750 "$IOC_DIR"
+    log_change "Permisos" "$IOC_DIR -> 750"
     chmod 750 "$IOC_FEEDS_DIR"
+    log_change "Permisos" "$IOC_FEEDS_DIR -> 750"
     chmod 750 "$IOC_LISTS_DIR"
+    log_change "Permisos" "$IOC_LISTS_DIR -> 750"
     chmod 750 "$IOC_DIR/config"
+    log_change "Permisos" "$IOC_DIR/config -> 750"
 
     # Crear archivo de configuración de feeds
     if [[ ! -f "$IOC_DIR/config/feeds.conf" ]]; then
@@ -137,9 +144,13 @@ sslbl_botnet_c2|https://sslbl.abuse.ch/blacklist/sslipblacklist.txt|ip|1
 feodo_hashes|https://feodotracker.abuse.ch/downloads/malware_hashes.csv|hash|0
 EOF
         chmod 640 "$IOC_DIR/config/feeds.conf"
+        log_change "Creado" "$IOC_DIR/config/feeds.conf"
+        log_change "Permisos" "$IOC_DIR/config/feeds.conf -> 640"
     fi
 
     log_info "Estructura creada en $IOC_DIR"
+else
+    log_skip "Estructura de directorios para IoC"
 fi
 
 # ============================================================
@@ -269,6 +280,8 @@ if ask "¿Descargar feeds de IPs maliciosas?"; then
 
     # Registrar timestamp
     date '+%Y-%m-%d %H:%M:%S' > "$IOC_DIR/last-update-ips.txt"
+else
+    log_skip "Feeds de IPs maliciosas"
 fi
 
 # ============================================================
@@ -306,6 +319,8 @@ if ask "¿Descargar feeds de dominios/URLs maliciosos?"; then
 
     # Registrar timestamp
     date '+%Y-%m-%d %H:%M:%S' > "$IOC_DIR/last-update-domains.txt"
+else
+    log_skip "Feeds de dominios/URLs maliciosos"
 fi
 
 # ============================================================
@@ -361,6 +376,7 @@ if ask "¿Configurar bloqueo automático con firewalld/ipset?"; then
 
         # Guardar ipsets para persistencia
         mkdir -p /etc/ipset.d
+        log_change "Creado" "/etc/ipset.d/"
         ipset save threat-intel-ips > /etc/ipset.d/threat-intel-ips.set 2>/dev/null || true
         ipset save threat-intel-nets > /etc/ipset.d/threat-intel-nets.set 2>/dev/null || true
 
@@ -412,10 +428,16 @@ ExecStop=/bin/bash -c 'ipset save threat-intel-ips > /etc/ipset.d/threat-intel-i
 WantedBy=multi-user.target
 EOF
 
+        log_change "Creado" "/etc/systemd/system/threat-intel-ipset.service"
+
         systemctl daemon-reload
+        log_change "Aplicado" "systemctl daemon-reload"
         systemctl enable threat-intel-ipset.service 2>/dev/null || true
+        log_change "Servicio" "threat-intel-ipset.service enable"
         log_info "Servicio de persistencia creado: threat-intel-ipset.service"
     fi
+else
+    log_skip "Bloqueo automático con firewalld/ipset"
 fi
 
 # ============================================================
@@ -434,6 +456,7 @@ if command -v suricata &>/dev/null; then
     if ask "¿Crear reglas de Suricata basadas en feeds de IoC?"; then
         SURICATA_RULES_DIR="/var/lib/suricata/rules"
         mkdir -p "$SURICATA_RULES_DIR"
+        log_change "Creado" "$SURICATA_RULES_DIR/"
 
         # Generar reglas para IPs C2 (Feodo Tracker)
         RULES_FILE="$SURICATA_RULES_DIR/threat-intel-ioc.rules"
@@ -476,6 +499,8 @@ if command -v suricata &>/dev/null; then
         fi
 
         chmod 644 "$RULES_FILE"
+        log_change "Creado" "$RULES_FILE"
+        log_change "Permisos" "$RULES_FILE -> 644"
         log_info "Generadas $RULES_COUNT reglas de Suricata en $RULES_FILE"
 
         # Verificar si el archivo de reglas está incluido en suricata.yaml
@@ -493,9 +518,14 @@ if command -v suricata &>/dev/null; then
         if systemctl is-active suricata &>/dev/null; then
             if ask "¿Recargar Suricata para aplicar las nuevas reglas?"; then
                 systemctl reload suricata 2>/dev/null || systemctl restart suricata 2>/dev/null || true
+                log_change "Servicio" "suricata reload"
                 log_info "Suricata recargado con reglas de IoC"
+            else
+                log_skip "Recarga de Suricata"
             fi
         fi
+    else
+        log_skip "Reglas de Suricata basadas en IoC"
     fi
 else
     log_warn "Suricata no instalado. Instálalo desde el módulo 14 (Red avanzada)."
@@ -721,6 +751,8 @@ echo ""
 EOFLOOKUP
 
     chmod +x /usr/local/bin/ioc-lookup.sh
+    log_change "Creado" "/usr/local/bin/ioc-lookup.sh"
+    log_change "Permisos" "/usr/local/bin/ioc-lookup.sh -> +x"
     log_info "Herramienta creada: /usr/local/bin/ioc-lookup.sh"
     echo ""
     echo "Uso:"
@@ -728,6 +760,8 @@ EOFLOOKUP
     echo "  ioc-lookup.sh evil-domain.com      (buscar dominio)"
     echo "  ioc-lookup.sh --stats              (estadísticas de feeds)"
     echo "  ioc-lookup.sh --update             (actualizar feeds)"
+else
+    log_skip "Herramienta de consulta de IoC"
 fi
 
 # ============================================================
@@ -963,6 +997,8 @@ find /var/log/threat-intelligence -name "update-*.log" -mtime +30 -delete 2>/dev
 EOFUPDATE
 
     chmod 700 /usr/local/bin/threat-intel-update.sh
+    log_change "Creado" "/usr/local/bin/threat-intel-update.sh"
+    log_change "Permisos" "/usr/local/bin/threat-intel-update.sh -> 700"
     log_info "Script de actualización creado: /usr/local/bin/threat-intel-update.sh"
 
     # Cron diario
@@ -973,7 +1009,11 @@ EOFUPDATE
 EOFCRON
 
     chmod 700 /etc/cron.daily/threat-intel-update
+    log_change "Creado" "/etc/cron.daily/threat-intel-update"
+    log_change "Permisos" "/etc/cron.daily/threat-intel-update -> 700"
     log_info "Cron diario creado: /etc/cron.daily/threat-intel-update"
+else
+    log_skip "Actualización automática de feeds de IoC"
 fi
 
 # ============================================================
@@ -1049,3 +1089,5 @@ echo "  ioc-lookup.sh --update      - Forzar actualización"
 echo ""
 echo "Feeds se actualizan diariamente via /etc/cron.daily/threat-intel-update"
 echo ""
+
+show_changes_summary

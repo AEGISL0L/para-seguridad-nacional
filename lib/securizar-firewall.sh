@@ -70,6 +70,7 @@ fw_add_service() {
             echo "AVISO: Agrega manualmente regla iptables para servicio $service" >&2
             ;;
     esac
+    log_change "Firewall" "servicio $service permitido"
 }
 
 # ── fw_remove_service service [zone] ───────────────────────
@@ -104,6 +105,7 @@ fw_remove_service() {
             echo "AVISO: Elimina manualmente regla para servicio $service" >&2
             ;;
     esac
+    log_change "Firewall" "servicio $service eliminado"
 }
 
 # ── fw_add_port port [zone] ────────────────────────────────
@@ -137,6 +139,7 @@ fw_add_port() {
             echo "AVISO: Agrega manualmente regla iptables para puerto $port" >&2
             ;;
     esac
+    log_change "Firewall" "puerto $port permitido"
 }
 
 # ── fw_remove_port port [zone] ─────────────────────────────
@@ -171,6 +174,7 @@ fw_remove_port() {
             echo "AVISO: Elimina manualmente regla para puerto $port" >&2
             ;;
     esac
+    log_change "Firewall" "puerto $port eliminado"
 }
 
 # ── fw_add_rich_rule rule [zone] ────────────────────────────
@@ -382,6 +386,7 @@ fw_reload() {
         nftables)  systemctl reload nftables 2>/dev/null || nft -f /etc/nftables.conf 2>/dev/null || true ;;
         iptables)  true ;;  # iptables no tiene reload
     esac
+    log_change "Firewall" "reglas recargadas"
 }
 
 # ── fw_list_all ─────────────────────────────────────────────

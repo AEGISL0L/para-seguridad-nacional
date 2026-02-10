@@ -185,8 +185,10 @@ _exec_module() {
     [[ -n "${MOD_TAGS[$n]:-}" ]] && echo -e "  ${BG_YELLOW} ${MOD_TAGS[$n]} ${NC} ${DIM}Versión segura · sin riesgos de lockout${NC}"
     echo ""
 
+    reset_changes
     local rc=0
     ${MOD_FUNCS[$n]} || rc=$?
+    show_changes_summary
     MOD_RUN[$n]=1
     echo ""
     if [[ $rc -eq 0 ]]; then
@@ -429,6 +431,7 @@ install p8022 /bin/false
 install can /bin/false
 install atm /bin/false
 EOF
+    log_change "Creado" "/etc/modprobe.d/network-hardening.conf"
 
     # ── Sección 4: Kernel paranoid mode ──
     log_info "4. Activando modo paranoico del kernel..."
@@ -506,8 +509,10 @@ net.core.bpf_jit_harden = 2
 vm.mmap_min_addr = 65536
 vm.swappiness = 10
 EOF
+    log_change "Creado" "/etc/sysctl.d/99-paranoid-max.conf"
 
     /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system"
     log_info "   Kernel en modo paranoico máximo"
 
     # ── Sección 5: Bloquear USB ──
@@ -530,6 +535,9 @@ EOF
 
         echo "install usb-storage /bin/false" >> /etc/modprobe.d/network-hardening.conf
         rmmod usb_storage 2>/dev/null || true
+        log_change "Modificado" "/etc/modprobe.d/network-hardening.conf (usb-storage)"
+    else
+        log_skip "bloqueo de dispositivos USB"
     fi
 
     # ── Sección 6: Deshabilitar usuarios innecesarios ──
@@ -538,6 +546,7 @@ EOF
     for user in daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc gnats nobody; do
         usermod -s /usr/sbin/nologin "$user" 2>/dev/null || true
     done
+    log_change "Usuario" "shells de usuarios del sistema bloqueadas (/usr/sbin/nologin)"
 
     # ── Sección 7: Permisos ultra-restrictivos ──
     log_info "7. Aplicando permisos ultra-restrictivos..."
@@ -547,12 +556,14 @@ EOF
     chmod u-s /usr/bin/chage 2>/dev/null || true
     chmod u-s /usr/bin/chfn 2>/dev/null || true
     chmod u-s /usr/bin/chsh 2>/dev/null || true
+    log_change "Permisos" "SUID removido de wall, write, chage, chfn, chsh"
 
     chmod 600 /etc/shadow
     chmod 600 /etc/gshadow
     chmod 600 /etc/ssh/sshd_config 2>/dev/null || true
     chmod 700 /root
     chmod 700 /boot
+    log_change "Permisos" "restrictivos en shadow, gshadow, sshd_config, /root, /boot"
 
     # ── Sección 8: Monitoreo en tiempo real ──
     log_info "8. Configurando monitoreo en tiempo real..."
@@ -605,6 +616,7 @@ while true; do
 done
 EOFMONITOR
     chmod +x /usr/local/bin/security-monitor.sh
+    log_change "Creado" "/usr/local/bin/security-monitor.sh"
 
     cat > /etc/systemd/system/security-monitor.service << 'EOF'
 [Unit]
@@ -620,9 +632,11 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+    log_change "Creado" "/etc/systemd/system/security-monitor.service"
 
     systemctl daemon-reload
     systemctl enable --now security-monitor.service 2>/dev/null || true
+    log_change "Servicio" "security-monitor.service habilitado e iniciado"
     log_info "   Monitor de seguridad activo"
 
     # ── Sección 9: Alarma de intrusión ──
@@ -649,6 +663,7 @@ wall "
 echo "[$(date)] INTRUSION DETECTADA" >> /var/log/intrusion.log
 EOFALARM
     chmod +x /usr/local/bin/intrusion-alarm.sh
+    log_change "Creado" "/usr/local/bin/intrusion-alarm.sh"
 
     log_info "Módulo 5 (extremo seguro) completado"
 }
@@ -734,10 +749,14 @@ net.ipv6.conf.default.accept_ra = 0
 # --- User namespaces (comentado - puede romper algunas apps) ---
 # kernel.unprivileged_userns_clone = 0
 EOF
+        log_change "Creado" "/etc/sysctl.d/99-paranoid.conf"
 
         /usr/sbin/sysctl --system > /dev/null 2>&1
+        log_change "Aplicado" "sysctl --system"
         log_info "Kernel hardening extremo aplicado"
         log_warn "ptrace_scope=2 puede afectar debuggers (gdb, strace)"
+    else
+        log_skip "hardening extremo del kernel"
     fi
 
     # ── Sección 2: Blacklist de módulos peligrosos ──
@@ -773,8 +792,11 @@ install hfsplus /bin/false
 install udf /bin/false
 install squashfs /bin/false
 EOF
+        log_change "Creado" "/etc/modprobe.d/paranoid-blacklist.conf"
 
         log_info "Módulos peligrosos bloqueados"
+    else
+        log_skip "bloqueo de módulos peligrosos"
     fi
 
     if ask "¿Bloquear Bluetooth también?"; then
@@ -784,9 +806,13 @@ EOF
 install bluetooth /bin/false
 install btusb /bin/false
 EOF
+        log_change "Modificado" "/etc/modprobe.d/paranoid-blacklist.conf (bluetooth)"
         systemctl stop bluetooth 2>/dev/null || true
         systemctl disable bluetooth 2>/dev/null || true
+        log_change "Servicio" "bluetooth deshabilitado"
         log_info "Bluetooth bloqueado"
+    else
+        log_skip "bloqueo de Bluetooth"
     fi
 
     # ── Sección 3: Deshabilitar core dumps ──
@@ -798,6 +824,7 @@ EOF
             echo "* hard core 0" >> /etc/security/limits.conf
             echo "* soft core 0" >> /etc/security/limits.conf
         fi
+        log_change "Modificado" "/etc/security/limits.conf (core dumps)"
 
         mkdir -p /etc/systemd/coredump.conf.d/
         cat > /etc/systemd/coredump.conf.d/disable.conf << 'EOF'
@@ -805,10 +832,14 @@ EOF
 Storage=none
 ProcessSizeMax=0
 EOF
+        log_change "Creado" "/etc/systemd/coredump.conf.d/disable.conf"
 
         echo "ulimit -c 0" > /etc/profile.d/disable-coredump.sh
+        log_change "Creado" "/etc/profile.d/disable-coredump.sh"
 
         log_info "Core dumps deshabilitados"
+    else
+        log_skip "deshabilitar core dumps"
     fi
 
     # ── SECCIÓN 4 ELIMINADA: TMOUT=900 readonly (LIMITA RECURSOS) ──
@@ -825,13 +856,17 @@ EOF
         echo "${SUDO_USER:-root}" >> /etc/cron.allow
         chmod 600 /etc/cron.allow
         rm -f /etc/cron.deny 2>/dev/null || true
+        log_change "Creado" "/etc/cron.allow"
 
         echo "root" > /etc/at.allow
         echo "${SUDO_USER:-root}" >> /etc/at.allow
         chmod 600 /etc/at.allow
         rm -f /etc/at.deny 2>/dev/null || true
+        log_change "Creado" "/etc/at.allow"
 
         log_info "cron/at restringido a root y ${SUDO_USER:-root}"
+    else
+        log_skip "restricción de cron/at"
     fi
 
     # ── Sección 7: Banner de advertencia legal ──
@@ -849,9 +884,12 @@ EOF
 =====================================================================
 "
         echo "$BANNER" > /etc/issue
+        log_change "Creado" "/etc/issue"
         echo "$BANNER" > /etc/issue.net
+        log_change "Creado" "/etc/issue.net"
 
         echo "$BANNER" > /etc/ssh/banner
+        log_change "Creado" "/etc/ssh/banner"
         if [[ -f /etc/ssh/sshd_config ]]; then
             if ! grep -q "^Banner" /etc/ssh/sshd_config; then
                 echo "Banner /etc/ssh/banner" >> /etc/ssh/sshd_config
@@ -859,6 +897,8 @@ EOF
         fi
 
         log_info "Banner legal configurado"
+    else
+        log_skip "banner de advertencia legal"
     fi
 
     # ── Sección 8: Permisos restrictivos ──
@@ -869,6 +909,7 @@ EOF
         chmod 600 /etc/gshadow 2>/dev/null || true
         chmod 644 /etc/passwd 2>/dev/null || true
         chmod 644 /etc/group 2>/dev/null || true
+        log_change "Permisos" "shadow, gshadow, passwd, group"
 
         chmod 700 /etc/crontab 2>/dev/null || true
         chmod 700 /etc/cron.d 2>/dev/null || true
@@ -876,14 +917,19 @@ EOF
         chmod 700 /etc/cron.hourly 2>/dev/null || true
         chmod 700 /etc/cron.weekly 2>/dev/null || true
         chmod 700 /etc/cron.monthly 2>/dev/null || true
+        log_change "Permisos" "crontab, cron.d, cron.daily, cron.hourly, cron.weekly, cron.monthly"
 
         chmod 700 /etc/ssh 2>/dev/null || true
         chmod 600 /etc/ssh/sshd_config 2>/dev/null || true
         chmod 600 /etc/ssh/ssh_host_*_key 2>/dev/null || true
+        log_change "Permisos" "/etc/ssh, sshd_config, ssh_host_*_key"
 
         chmod 600 "$GRUB_CFG" 2>/dev/null || true
+        log_change "Permisos" "$GRUB_CFG"
 
         log_info "Permisos restrictivos aplicados"
+    else
+        log_skip "permisos restrictivos"
     fi
 
     # ── Sección 9: Proteger GRUB con contraseña ──
@@ -894,9 +940,12 @@ EOF
         echo ""
         echo "Introduce una contraseña para GRUB:"
         grub_set_password
+        log_change "Aplicado" "proteccion GRUB con contraseña"
 
         log_info "GRUB protegido con contraseña"
         log_warn "Necesitarás esta contraseña para editar entradas de GRUB"
+    else
+        log_skip "protección GRUB con contraseña"
     fi
 
     # ── Sección 10: Instalar herramientas de seguridad ──
@@ -915,6 +964,8 @@ EOF
             mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db 2>/dev/null || true
             log_info "AIDE instalado. Ejecutar: aide --check"
         fi
+    else
+        log_skip "instalación de AIDE"
     fi
 
     if ask "¿Instalar rkhunter (detector de rootkits)?"; then
@@ -923,12 +974,16 @@ EOF
             rkhunter --propupd 2>/dev/null || true
             log_info "rkhunter instalado. Ejecutar: rkhunter --check"
         fi
+    else
+        log_skip "instalación de rkhunter"
     fi
 
     if ask "¿Instalar lynis (auditor de seguridad)?"; then
         if pkg_install lynis; then
             log_info "lynis instalado. Ejecutar: lynis audit system"
         fi
+    else
+        log_skip "instalación de lynis"
     fi
 
     # ── Sección 11: Firewall paranoico ──
@@ -936,22 +991,30 @@ EOF
 
     if ask "¿Configurar firewall en modo paranoico (DROP por defecto)?"; then
         systemctl enable --now firewalld 2>/dev/null || true
+        log_change "Servicio" "firewalld habilitado e iniciado"
 
         fw_set_default_zone drop
+        log_change "Aplicado" "zona por defecto: drop"
 
         fw_add_service dhcpv6-client work
         fw_add_service dns work
 
         fw_add_icmp_block echo-request
+        log_change "Aplicado" "ICMP block: echo-request"
         fw_add_icmp_block timestamp-request
+        log_change "Aplicado" "ICMP block: timestamp-request"
         fw_add_icmp_block timestamp-reply
+        log_change "Aplicado" "ICMP block: timestamp-reply"
 
         fw_set_log_denied all
+        log_change "Aplicado" "log-denied: all"
 
         fw_reload
 
         log_info "Firewall configurado en modo paranoico"
         log_warn "Zona por defecto: DROP (bloquea todo lo no explícito)"
+    else
+        log_skip "firewall paranoico"
     fi
 
     # ── Sección 12: CUPS restringir ──
@@ -965,15 +1028,22 @@ EOF
             sed -i 's/^Listen.*/Listen localhost:631/' /etc/cups/cupsd.conf 2>/dev/null || true
             sed -i 's/^Port.*/# Port 631/' /etc/cups/cupsd.conf 2>/dev/null || true
             sed -i 's/^Browsing.*/Browsing Off/' /etc/cups/cupsd.conf 2>/dev/null || true
+            log_change "Modificado" "/etc/cups/cupsd.conf (localhost only)"
 
             systemctl restart cups
+            log_change "Servicio" "cups reiniciado"
             log_info "CUPS restringido a localhost"
+        else
+            log_skip "restricción de CUPS a localhost"
         fi
 
         if ask "¿Deshabilitar CUPS completamente (no podrás imprimir)?"; then
             systemctl stop cups
             systemctl disable cups
+            log_change "Servicio" "cups deshabilitado"
             log_info "CUPS deshabilitado"
+        else
+            log_skip "deshabilitar CUPS"
         fi
     fi
 
@@ -990,8 +1060,11 @@ EOF
         fi
 
         sed -i 's/^UMASK.*/UMASK 027/' /etc/login.defs 2>/dev/null || true
+        log_change "Modificado" "umask 027 en /etc/profile, /etc/bashrc, /etc/login.defs"
 
         log_info "umask configurado a 027 (archivos: 640, directorios: 750)"
+    else
+        log_skip "umask restrictivo"
     fi
 
     # ── Sección 14: Deshabilitar USB storage ──
@@ -1001,7 +1074,10 @@ EOF
     if ask "¿Bloquear almacenamiento USB (memorias, discos externos)?"; then
         echo "install usb-storage /bin/false" >> /etc/modprobe.d/paranoid-blacklist.conf
         rmmod usb_storage 2>/dev/null || true
+        log_change "Modificado" "/etc/modprobe.d/paranoid-blacklist.conf (usb-storage)"
         log_info "USB storage bloqueado"
+    else
+        log_skip "bloqueo de USB storage"
     fi
 
     # ── Sección 15: Auditoría avanzada ──
@@ -1080,10 +1156,13 @@ EOF
 # Hacer reglas inmutables (requiere reboot para cambiar)
 -e 2
 EOF
+            log_change "Creado" "/etc/audit/rules.d/99-paranoid.rules"
 
             augenrules --load 2>/dev/null || service auditd restart
             log_info "Auditoría paranoica configurada"
             log_warn "Reglas inmutables: requiere reboot para modificar"
+        else
+            log_skip "reglas de auditoría paranoicas"
         fi
     fi
 
@@ -1117,10 +1196,14 @@ logpath = /var/log/secure
 maxretry = 2
 bantime = 72h
 EOF
+            log_change "Creado" "/etc/fail2ban/jail.local"
 
             systemctl restart fail2ban
+            log_change "Servicio" "fail2ban reiniciado"
             log_info "fail2ban configurado en modo agresivo"
             log_info "  - Ban general: 24h, SSH: 48h, DDoS: 72h"
+        else
+            log_skip "fail2ban agresivo"
         fi
     else
         log_warn "fail2ban no instalado. Instálalo primero."

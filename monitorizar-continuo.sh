@@ -261,9 +261,12 @@ echo ""
 EOFDASH
 
     chmod 700 /usr/local/bin/security-dashboard.sh
+    log_change "Creado" "/usr/local/bin/security-dashboard.sh"
+    log_change "Permisos" "/usr/local/bin/security-dashboard.sh -> 700"
     log_info "Dashboard instalado: /usr/local/bin/security-dashboard.sh"
 
 else
+    log_skip "Dashboard de estado de seguridad"
     log_warn "Dashboard no instalado"
 fi
 
@@ -474,10 +477,13 @@ rm -f "$ALERT_FILE"
 EOFCORR
 
     chmod 700 /usr/local/bin/correlacionar-alertas.sh
+    log_change "Creado" "/usr/local/bin/correlacionar-alertas.sh"
+    log_change "Permisos" "/usr/local/bin/correlacionar-alertas.sh -> 700"
     log_info "Motor de correlación instalado: /usr/local/bin/correlacionar-alertas.sh"
     echo -e "${DIM}Uso: correlacionar-alertas.sh [horas-atrás]${NC}"
 
 else
+    log_skip "Motor de correlación de alertas"
     log_warn "Motor de correlación no instalado"
 fi
 
@@ -500,6 +506,7 @@ echo ""
 if ask "¿Instalar baseline de comportamiento?"; then
 
     mkdir -p /var/lib/security-monitoring/baselines
+    log_change "Creado" "/var/lib/security-monitoring/baselines/"
 
     cat > /usr/local/bin/security-baseline.sh << 'EOFBASE'
 #!/bin/bash
@@ -683,11 +690,14 @@ esac
 EOFBASE
 
     chmod 700 /usr/local/bin/security-baseline.sh
+    log_change "Creado" "/usr/local/bin/security-baseline.sh"
+    log_change "Permisos" "/usr/local/bin/security-baseline.sh -> 700"
     log_info "Baseline instalado: /usr/local/bin/security-baseline.sh"
     echo -e "${DIM}Crear: security-baseline.sh crear${NC}"
     echo -e "${DIM}Verificar: security-baseline.sh verificar${NC}"
 
 else
+    log_skip "Baseline de comportamiento del sistema"
     log_warn "Baseline no instalado"
 fi
 
@@ -892,6 +902,8 @@ echo "Reporte: $REPORT"
 EOFHC
 
     chmod 700 /usr/local/bin/security-healthcheck.sh
+    log_change "Creado" "/usr/local/bin/security-healthcheck.sh"
+    log_change "Permisos" "/usr/local/bin/security-healthcheck.sh -> 700"
     log_info "Health check instalado: /usr/local/bin/security-healthcheck.sh"
 
     # Cron job diario para health check
@@ -905,9 +917,12 @@ fi
 EOFHCCRON
 
     chmod 700 /etc/cron.daily/security-healthcheck
+    log_change "Creado" "/etc/cron.daily/security-healthcheck"
+    log_change "Permisos" "/etc/cron.daily/security-healthcheck -> 700"
     log_info "Health check diario programado en cron.daily"
 
 else
+    log_skip "Health check de controles de seguridad"
     log_warn "Health check no instalado"
 fi
 
@@ -1071,6 +1086,8 @@ echo "Para más detalle: security-dashboard.sh" | tee -a "$DIGEST"
 EOFDIGEST
 
     chmod 700 /usr/local/bin/security-digest.sh
+    log_change "Creado" "/usr/local/bin/security-digest.sh"
+    log_change "Permisos" "/usr/local/bin/security-digest.sh -> 700"
     log_info "Digest instalado: /usr/local/bin/security-digest.sh"
 
     # Timer systemd para digest diario
@@ -1099,12 +1116,19 @@ RandomizedDelaySec=300
 WantedBy=timers.target
 EOFTMRDIG
 
+    log_change "Creado" "/etc/systemd/system/security-digest.service"
+    log_change "Creado" "/etc/systemd/system/security-digest.timer"
+
     systemctl daemon-reload 2>/dev/null
+    log_change "Aplicado" "systemctl daemon-reload"
     systemctl enable security-digest.timer 2>/dev/null
+    log_change "Servicio" "security-digest.timer enable"
     systemctl start security-digest.timer 2>/dev/null
+    log_change "Servicio" "security-digest.timer start"
     log_info "Timer de digest diario activado (06:00)"
 
 else
+    log_skip "Digest de seguridad periódico"
     log_warn "Digest no instalado"
 fi
 
@@ -1155,4 +1179,5 @@ echo -e "  ${DIM}Verificar:${NC}       security-baseline.sh verificar"
 echo -e "  ${DIM}Health check:${NC}    security-healthcheck.sh"
 echo -e "  ${DIM}Digest diario:${NC}   security-digest.sh"
 echo ""
+show_changes_summary
 log_info "Módulo de monitorización continua completado"

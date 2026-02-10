@@ -34,6 +34,7 @@ echo ""
 
 if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     cp /etc/login.defs "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/login.defs"
 
     # PASS_MAX_DAYS
     if grep -q "^PASS_MAX_DAYS" /etc/login.defs; then
@@ -41,6 +42,7 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     else
         echo -e "PASS_MAX_DAYS\t90" >> /etc/login.defs
     fi
+    log_change "Modificado" "/etc/login.defs -> PASS_MAX_DAYS=90"
 
     # PASS_MIN_DAYS
     if grep -q "^PASS_MIN_DAYS" /etc/login.defs; then
@@ -48,6 +50,7 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     else
         echo -e "PASS_MIN_DAYS\t7" >> /etc/login.defs
     fi
+    log_change "Modificado" "/etc/login.defs -> PASS_MIN_DAYS=7"
 
     # PASS_WARN_AGE
     if grep -q "^PASS_WARN_AGE" /etc/login.defs; then
@@ -55,6 +58,7 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     else
         echo -e "PASS_WARN_AGE\t14" >> /etc/login.defs
     fi
+    log_change "Modificado" "/etc/login.defs -> PASS_WARN_AGE=14"
 
     # LOGIN_RETRIES
     if grep -q "^LOGIN_RETRIES" /etc/login.defs; then
@@ -62,6 +66,7 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     else
         echo -e "LOGIN_RETRIES\t3" >> /etc/login.defs
     fi
+    log_change "Modificado" "/etc/login.defs -> LOGIN_RETRIES=3"
 
     # LOGIN_TIMEOUT
     if grep -q "^LOGIN_TIMEOUT" /etc/login.defs; then
@@ -69,6 +74,7 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     else
         echo -e "LOGIN_TIMEOUT\t60" >> /etc/login.defs
     fi
+    log_change "Modificado" "/etc/login.defs -> LOGIN_TIMEOUT=60"
 
     # ENCRYPT_METHOD - preferir yescrypt (memory-hard) sobre SHA512 (CPU-bound)
     _encrypt_method="SHA512"
@@ -86,6 +92,7 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     else
         echo -e "ENCRYPT_METHOD\t${_encrypt_method}" >> /etc/login.defs
     fi
+    log_change "Modificado" "/etc/login.defs -> ENCRYPT_METHOD=${_encrypt_method}"
     unset _encrypt_method
 
     log_info "login.defs actualizado"
@@ -95,10 +102,15 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
         while IFS=: read -r username _ uid _ _ _ _; do
             if [[ "$uid" -ge 1000 ]] && [[ "$username" != "nobody" ]] && [[ "$username" != "nfsnobody" ]]; then
                 chage --maxdays 90 --mindays 7 --warndays 14 "$username" 2>/dev/null || true
+                log_change "Usuario" "$username chage maxdays=90 mindays=7 warndays=14"
                 log_info "  chage aplicado a: $username"
             fi
         done < /etc/passwd
+    else
+        log_skip "Aplicar políticas a usuarios existentes (chage)"
     fi
+else
+    log_skip "Aplicar políticas de contraseñas en /etc/login.defs"
 fi
 
 # ============================================================
@@ -115,6 +127,7 @@ echo ""
 
 if ask "¿Configurar /etc/security/faillock.conf?"; then
     cp /etc/security/faillock.conf "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/security/faillock.conf"
 
     cat > /etc/security/faillock.conf << 'EOF'
 # ============================================================
@@ -144,8 +157,11 @@ even_deny_root = false
 silent
 EOF
 
+    log_change "Creado" "/etc/security/faillock.conf"
     log_info "faillock.conf configurado"
     log_warn "NOTA: faillock.conf es independiente de PAM - no modifica /etc/pam.d/"
+else
+    log_skip "Configurar /etc/security/faillock.conf"
 fi
 
 # ============================================================
@@ -182,12 +198,15 @@ if [[ ${#sin_pass[@]} -gt 0 ]]; then
         for user in "${sin_pass[@]}"; do
             if [[ "$user" != "root" ]]; then
                 passwd -l "$user" 2>/dev/null || true
+                log_change "Usuario" "$user bloqueada (passwd -l, sin contraseña)"
                 log_info "  Bloqueada: $user"
             else
                 log_warn "  root sin contraseña detectado - NO se bloquea automáticamente"
                 log_warn "  Establece contraseña manualmente: passwd root"
             fi
         done
+    else
+        log_skip "Bloquear cuentas sin contraseña"
     fi
 else
     log_info "No hay cuentas sin contraseña"
@@ -217,8 +236,11 @@ if [[ ${#uid0_extra[@]} -gt 0 ]]; then
     if ask "¿Bloquear cuentas UID=0 extra?"; then
         for user in "${uid0_extra[@]}"; do
             passwd -l "$user" 2>/dev/null || true
+            log_change "Usuario" "$user bloqueada (passwd -l, UID=0)"
             log_info "  Bloqueada: $user"
         done
+    else
+        log_skip "Bloquear cuentas UID=0 extra"
     fi
 else
     log_info "Solo root tiene UID=0 (correcto)"
@@ -250,8 +272,11 @@ if [[ ${#shells_sospechosas[@]} -gt 0 ]]; then
         for entry in "${shells_sospechosas[@]}"; do
             IFS=: read -r user uid shell <<< "$entry"
             usermod -s /usr/sbin/nologin "$user" 2>/dev/null || true
+            log_change "Usuario" "$user shell -> /usr/sbin/nologin"
             log_info "  $user -> /usr/sbin/nologin"
         done
+    else
+        log_skip "Cambiar shells de cuentas del sistema a /usr/sbin/nologin"
     fi
 else
     log_info "Ninguna cuenta de sistema tiene shell interactiva"
@@ -285,9 +310,12 @@ if [[ ${#cuentas_inactivas[@]} -gt 0 ]]; then
     if ask "¿Deshabilitar cuentas inactivas (se pueden reactivar después)?"; then
         for user in "${cuentas_inactivas[@]}"; do
             usermod -L -e 1 "$user" 2>/dev/null || true
+            log_change "Usuario" "$user deshabilitada (usermod -L -e 1)"
             log_info "  Deshabilitada: $user"
         done
         log_info "Para reactivar: usermod -U -e '' <usuario>"
+    else
+        log_skip "Deshabilitar cuentas inactivas"
     fi
 else
     log_info "No se encontraron cuentas inactivas"
@@ -411,9 +439,14 @@ echo -e "${BOLD}Auditoría completada: $(date)${NC}"
 EOFAUDIT
 
     chmod +x /usr/local/bin/auditar-cuentas.sh
+    log_change "Creado" "/usr/local/bin/auditar-cuentas.sh"
+    log_change "Permisos" "/usr/local/bin/auditar-cuentas.sh -> +x"
     log_info "Script creado: /usr/local/bin/auditar-cuentas.sh"
+else
+    log_skip "Crear /usr/local/bin/auditar-cuentas.sh"
 fi
 
 echo ""
 log_info "Hardening de cuentas completado"
 log_info "Backup en: $BACKUP_DIR"
+show_changes_summary

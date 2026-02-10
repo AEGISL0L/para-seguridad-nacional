@@ -79,21 +79,29 @@ echo ""
 
 if ask "¿Aplicar este banner disuasivo?"; then
     echo "$BANNER" > /etc/issue
+    log_change "Creado" "/etc/issue"
     echo "$BANNER" > /etc/issue.net
+    log_change "Creado" "/etc/issue.net"
     echo "$BANNER" > /etc/motd
+    log_change "Creado" "/etc/motd"
 
     # SSH banner
     mkdir -p /etc/ssh
     echo "$BANNER" > /etc/ssh/banner
+    log_change "Creado" "/etc/ssh/banner"
 
     if [[ -f /etc/ssh/sshd_config ]]; then
         if ! grep -q "^Banner /etc/ssh/banner" /etc/ssh/sshd_config; then
             echo "Banner /etc/ssh/banner" >> /etc/ssh/sshd_config
+            log_change "Modificado" "/etc/ssh/sshd_config"
         fi
         systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
+        log_change "Servicio" "$SSH_SERVICE_NAME reload"
     fi
 
     log_info "Banner disuasivo aplicado en /etc/issue, /etc/issue.net, /etc/motd, SSH"
+else
+    log_skip "Aplicar banner disuasivo"
 fi
 
 # ============================================================
@@ -114,12 +122,17 @@ if ask "¿Configurar DNS seguros (Cloudflare + Quad9)?"; then
     CONN_NAME=$(nmcli -t -f NAME con show --active | head -1)
     if [[ -n "$CONN_NAME" ]]; then
         nmcli con mod "$CONN_NAME" ipv4.dns "1.1.1.1 9.9.9.9"
+        log_change "Modificado" "conexión $CONN_NAME -> DNS 1.1.1.1 9.9.9.9"
         nmcli con mod "$CONN_NAME" ipv4.ignore-auto-dns yes
+        log_change "Modificado" "conexión $CONN_NAME -> ignore-auto-dns"
         nmcli con down "$CONN_NAME" && nmcli con up "$CONN_NAME"
+        log_change "Aplicado" "reconexión $CONN_NAME"
         log_info "DNS configurado: 1.1.1.1 (Cloudflare) + 9.9.9.9 (Quad9)"
     else
         log_warn "No se pudo detectar conexión activa, configura DNS manualmente"
     fi
+else
+    log_skip "Configurar DNS seguros"
 fi
 
 # ============================================================
@@ -142,6 +155,8 @@ if fw_is_active &>/dev/null; then
 
         fw_reload 2>/dev/null || true
         log_info "Firewall: zona por defecto DROP, logging habilitado"
+    else
+        log_skip "Configurar firewall en modo estricto"
     fi
 
     if ask "¿Bloquear rangos de IP sospechosos y escaneos?"; then
@@ -155,6 +170,8 @@ if fw_is_active &>/dev/null; then
 
         fw_reload
         log_info "Reglas anti-escaneo y anti-flood aplicadas"
+    else
+        log_skip "Bloquear rangos de IP sospechosos y escaneos"
     fi
 else
     log_warn "Firewalld no está activo"
@@ -229,9 +246,13 @@ net.ipv4.tcp_max_orphans = 65536
 # --- Rango de puertos efímeros más amplio ---
 net.ipv4.ip_local_port_range = 32768 65535
 EOF
+    log_change "Creado" "/etc/sysctl.d/99-network-hardening.conf"
 
     /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system"
     log_info "Protecciones de red aplicadas"
+else
+    log_skip "Aplicar protecciones avanzadas contra ataques de red"
 fi
 
 # ============================================================
@@ -248,10 +269,13 @@ if ask "¿Deshabilitar conexión automática a redes abiertas?"; then
         SEC=$(nmcli -t -f 802-11-wireless-security.key-mgmt con show "$conn" 2>/dev/null)
         if [[ -z "$SEC" || "$SEC" == *"none"* ]]; then
             nmcli con mod "$conn" connection.autoconnect no 2>/dev/null || true
+            log_change "Modificado" "conexión $conn -> autoconnect no"
             log_warn "Auto-connect deshabilitado para red abierta: $conn"
         fi
     done
     log_info "Redes WiFi abiertas no se conectarán automáticamente"
+else
+    log_skip "Deshabilitar conexión automática a redes abiertas"
 fi
 
 # ============================================================
@@ -265,8 +289,12 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
+    log_change "Creado" "/etc/sysctl.d/99-disable-ipv6.conf"
     /usr/sbin/sysctl --system > /dev/null 2>&1
+    log_change "Aplicado" "sysctl --system (disable IPv6)"
     log_info "IPv6 deshabilitado"
+else
+    log_skip "Deshabilitar IPv6 completamente"
 fi
 
 # ============================================================
@@ -275,6 +303,7 @@ log_section "7. HOSTS - BLOQUEAR DOMINIOS MALICIOSOS"
 
 if ask "¿Agregar bloqueo de dominios maliciosos conocidos en /etc/hosts?"; then
     cp /etc/hosts "$BACKUP_DIR/"
+    log_change "Backup" "/etc/hosts"
 
     cat >> /etc/hosts << 'EOF'
 
@@ -297,8 +326,11 @@ if ask "¿Agregar bloqueo de dominios maliciosos conocidos en /etc/hosts?"; then
 0.0.0.0 sequoiacap.com
 0.0.0.0 www.sequoiacap.com
 EOF
+    log_change "Modificado" "/etc/hosts"
 
     log_info "Dominios maliciosos bloqueados en /etc/hosts"
+else
+    log_skip "Agregar bloqueo de dominios maliciosos en /etc/hosts"
 fi
 
 # ============================================================
@@ -310,7 +342,9 @@ if ask "¿Habilitar MAC address aleatorio para WiFi?"; then
     CONN_NAME=$(nmcli -t -f NAME,TYPE con show --active | grep wireless | cut -d: -f1)
     if [[ -n "$CONN_NAME" ]]; then
         nmcli con mod "$CONN_NAME" wifi.cloned-mac-address random
+        log_change "Modificado" "conexión $CONN_NAME -> wifi.cloned-mac-address random"
         nmcli con mod "$CONN_NAME" ethernet.cloned-mac-address random 2>/dev/null || true
+        log_change "Modificado" "conexión $CONN_NAME -> ethernet.cloned-mac-address random"
         log_info "MAC aleatorio habilitado para: $CONN_NAME"
         log_warn "Reconecta a la red para aplicar"
     fi
@@ -325,9 +359,13 @@ wifi.scan-rand-mac-address=yes
 wifi.cloned-mac-address=random
 ethernet.cloned-mac-address=random
 EOF
+    log_change "Creado" "/etc/NetworkManager/conf.d/99-random-mac.conf"
 
     systemctl reload NetworkManager 2>/dev/null || true
+    log_change "Servicio" "NetworkManager reload"
     log_info "MAC aleatorio configurado para futuras conexiones"
+else
+    log_skip "Habilitar MAC address aleatorio para WiFi"
 fi
 
 # ============================================================
@@ -351,6 +389,8 @@ if ask "¿Agregar reglas anti-DDoS básicas?"; then
 
     fw_reload 2>/dev/null || true
     log_info "Reglas anti-DDoS aplicadas (rate limiting)"
+else
+    log_skip "Agregar reglas anti-DDoS básicas"
 fi
 
 # ============================================================
@@ -381,9 +421,13 @@ echo ""
 echo "=== PAQUETES DROPPED (últimos 100) ==="
 journalctl -k --since "1 hour ago" 2>/dev/null | grep -i "dropped" | tail -10
 EOF
+    log_change "Creado" "/usr/local/bin/monitor-conexiones.sh"
 
     chmod +x /usr/local/bin/monitor-conexiones.sh
+    log_change "Permisos" "/usr/local/bin/monitor-conexiones.sh -> +x"
     log_info "Script creado: /usr/local/bin/monitor-conexiones.sh"
+else
+    log_skip "Crear script de monitoreo de conexiones sospechosas"
 fi
 
 # ============================================================
@@ -425,15 +469,20 @@ bantime = 1y
 findtime = 1d
 maxretry = 3
 EOF
+        log_change "Creado" "/etc/fail2ban/jail.local"
 
         systemctl restart fail2ban
+        log_change "Servicio" "fail2ban restart"
         log_info "fail2ban configurado: SSH 1 semana, DDoS 4 semanas, Reincidentes 1 año"
+    else
+        log_skip "Configurar fail2ban con jails adicionales"
     fi
 fi
 
 # ============================================================
 # RESUMEN
 # ============================================================
+show_changes_summary
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║    HARDENING EXTERNO COMPLETADO                           ║"
