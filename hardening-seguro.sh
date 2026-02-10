@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
+init_backup "hardening-seguro"
 securizar_setup_traps
 
 USER_ACTUAL="${SUDO_USER:-$USER}"
@@ -27,8 +28,7 @@ log_info "Usuario protegido: $USER_ACTUAL"
 log_info "1. Protegiendo archivos críticos del sistema..."
 
 # Hacer copias de seguridad
-mkdir -p /root/backup-criticos-$(date +%Y%m%d)
-cp /etc/passwd /etc/shadow /etc/group /etc/sudoers /root/backup-criticos-$(date +%Y%m%d)/ 2>/dev/null || true
+cp /etc/passwd /etc/shadow /etc/group /etc/sudoers "$BACKUP_DIR/" 2>/dev/null || true
 
 # Permisos correctos (no inmutables para no quedarte fuera)
 chmod 644 /etc/passwd
@@ -62,6 +62,14 @@ fs.protected_regular = 2
 
 # Memoria
 vm.mmap_min_addr = 65536
+
+# Protecciones adicionales del kernel
+kernel.unprivileged_bpf_disabled = 1
+net.core.bpf_jit_harden = 2
+kernel.kexec_load_disabled = 1
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+net.ipv4.tcp_rfc1337 = 1
 EOF
 
 /usr/sbin/sysctl --system > /dev/null 2>&1

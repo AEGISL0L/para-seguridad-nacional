@@ -123,32 +123,43 @@ case "$DISTRO_FAMILY" in
         ;;
     debian)
         _scap_ds_candidates=(
+            "/usr/share/xml/scap/ssg/content/ssg-debian13-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-debian12-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-debian11-ds.xml"
+            "/usr/share/xml/scap/ssg/content/ssg-ubuntu2404-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-ubuntu2204-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-ubuntu2004-ds.xml"
+            "/usr/share/scap-security-guide/ssg-debian13-ds.xml"
             "/usr/share/scap-security-guide/ssg-debian12-ds.xml"
             "/usr/share/scap-security-guide/ssg-debian11-ds.xml"
+            "/usr/share/scap-security-guide/ssg-ubuntu2404-ds.xml"
             "/usr/share/scap-security-guide/ssg-ubuntu2204-ds.xml"
         )
         _scap_oval_candidates=(
+            "/usr/share/xml/scap/ssg/content/ssg-debian13-oval.xml"
             "/usr/share/xml/scap/ssg/content/ssg-debian12-oval.xml"
             "/usr/share/xml/scap/ssg/content/ssg-debian11-oval.xml"
+            "/usr/share/xml/scap/ssg/content/ssg-ubuntu2404-oval.xml"
             "/usr/share/xml/scap/ssg/content/ssg-ubuntu2204-oval.xml"
+            "/usr/share/scap-security-guide/ssg-debian13-oval.xml"
             "/usr/share/scap-security-guide/ssg-debian12-oval.xml"
         )
         ;;
     rhel)
         _scap_ds_candidates=(
+            "/usr/share/xml/scap/ssg/content/ssg-rhel10-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-rhel8-ds.xml"
+            "/usr/share/xml/scap/ssg/content/ssg-rocky9-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-centos9-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-centos8-ds.xml"
             "/usr/share/xml/scap/ssg/content/ssg-fedora-ds.xml"
         )
         _scap_oval_candidates=(
+            "/usr/share/xml/scap/ssg/content/ssg-rhel10-oval.xml"
             "/usr/share/xml/scap/ssg/content/ssg-rhel9-oval.xml"
             "/usr/share/xml/scap/ssg/content/ssg-rhel8-oval.xml"
+            "/usr/share/xml/scap/ssg/content/ssg-rocky9-oval.xml"
             "/usr/share/xml/scap/ssg/content/ssg-fedora-oval.xml"
         )
         ;;

@@ -114,7 +114,7 @@ if [[ -f /etc/ssh/sshd_config ]]; then
 
     # Verificar y recargar SSH
     if sshd -t 2>/dev/null; then
-        systemctl reload sshd 2>/dev/null || true
+        systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
         log_info "   SSH configurado correctamente"
     else
         log_warn "   Error en config SSH, verificar manualmente"

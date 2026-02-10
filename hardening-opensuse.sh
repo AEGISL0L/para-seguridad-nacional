@@ -30,7 +30,7 @@ if ask "¿Aplicar hardening del kernel?"; then
     # Backup
     cp /etc/sysctl.conf "$BACKUP_DIR/" 2>/dev/null || true
 
-    cat > /etc/sysctl.d/90-hardening.conf << 'EOF'
+    cat > /etc/sysctl.d/50-hardening-base.conf << 'EOF'
 # Hardening de red
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
@@ -62,6 +62,14 @@ fs.protected_symlinks = 1
 fs.protected_hardlinks = 1
 fs.protected_fifos = 2
 fs.protected_regular = 2
+
+# Protecciones adicionales del kernel
+kernel.unprivileged_bpf_disabled = 1
+net.core.bpf_jit_harden = 2
+kernel.kexec_load_disabled = 1
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+net.ipv4.tcp_rfc1337 = 1
 EOF
 
     sysctl --system > /dev/null 2>&1
@@ -189,7 +197,7 @@ if [[ -f /etc/ssh/sshd_config ]]; then
         cp /etc/ssh/sshd_config "$BACKUP_DIR/"
 
         # Crear configuración de hardening compatible con GitHub/VPS
-        cat > /etc/ssh/sshd_config.d/90-hardening.conf << 'EOF'
+        cat > /etc/ssh/sshd_config.d/50-hardening-base.conf << 'EOF'
 # SSH Hardening - Compatible con GitHub y conexiones a VPS
 # Esta configuración afecta SOLO conexiones ENTRANTES a esta máquina
 
@@ -232,8 +240,8 @@ EOF
 
         # Verificar sintaxis antes de reiniciar
         if sshd -t 2>/dev/null; then
-            if systemctl is-active sshd &>/dev/null; then
-                systemctl reload sshd
+            if systemctl is-active "$SSH_SERVICE_NAME" &>/dev/null; then
+                systemctl reload "$SSH_SERVICE_NAME"
             fi
             log_info "SSH hardening aplicado"
             log_info "  - Agent forwarding habilitado (GitHub compatible)"
@@ -241,7 +249,7 @@ EOF
             log_info "  - Algoritmos de cifrado modernos"
         else
             log_error "Error en configuración SSH, revirtiendo..."
-            rm -f /etc/ssh/sshd_config.d/90-hardening.conf
+            rm -f /etc/ssh/sshd_config.d/50-hardening-base.conf
         fi
     fi
 else
@@ -348,7 +356,15 @@ if ! command -v fail2ban-client &>/dev/null; then
     if ask "¿Instalar fail2ban?"; then
         pkg_install fail2ban
 
-        cat > /etc/fail2ban/jail.local << 'EOF'
+        # Determinar logpath segun distro
+        case "$DISTRO_FAMILY" in
+            suse)   _f2b_logpath="/var/log/messages" ;;
+            debian) _f2b_logpath="/var/log/auth.log" ;;
+            rhel)   _f2b_logpath="/var/log/secure" ;;
+            *)      _f2b_logpath="/var/log/messages" ;;
+        esac
+
+        cat > /etc/fail2ban/jail.local << EOF
 [DEFAULT]
 bantime = 1h
 findtime = 10m
@@ -359,7 +375,7 @@ ignoreip = 127.0.0.1/8 ::1
 enabled = true
 port = ssh
 filter = sshd
-logpath = /var/log/messages
+logpath = ${_f2b_logpath}
 maxretry = 3
 bantime = 2h
 EOF
@@ -437,7 +453,7 @@ echo ""
 
 if [[ -f /etc/ssh/sshd_config ]]; then
     if ask "¿Activar MFA para SSH (llave + contraseña)?"; then
-        cp /etc/ssh/sshd_config.d/90-hardening.conf "$BACKUP_DIR/" 2>/dev/null || true
+        cp /etc/ssh/sshd_config.d/50-hardening-base.conf "$BACKUP_DIR/" 2>/dev/null || true
 
         # Crear configuración MFA como drop-in adicional
         cat > /etc/ssh/sshd_config.d/91-mfa.conf << 'EOF'
@@ -468,8 +484,8 @@ EOF
 
         # Verificar sintaxis antes de aplicar
         if sshd -t 2>/dev/null; then
-            if systemctl is-active sshd &>/dev/null; then
-                systemctl reload sshd
+            if systemctl is-active "$SSH_SERVICE_NAME" &>/dev/null; then
+                systemctl reload "$SSH_SERVICE_NAME"
             fi
             log_info "MFA para SSH activado"
             log_info "  - Se requiere: llave SSH + contraseña"
@@ -478,8 +494,8 @@ EOF
             log_error "Error en configuración SSH MFA, revirtiendo..."
             rm -f /etc/ssh/sshd_config.d/91-mfa.conf
             # Restaurar backup si existe
-            if [[ -f "$BACKUP_DIR/90-hardening.conf" ]]; then
-                cp "$BACKUP_DIR/90-hardening.conf" /etc/ssh/sshd_config.d/ 2>/dev/null || true
+            if [[ -f "$BACKUP_DIR/50-hardening-base.conf" ]]; then
+                cp "$BACKUP_DIR/50-hardening-base.conf" /etc/ssh/sshd_config.d/ 2>/dev/null || true
             fi
         fi
 
@@ -551,9 +567,8 @@ EOFFIDO
 
         # Verificar si el usuario actual tiene llaves SSH
         if [[ -n "${SUDO_USER:-}" ]]; then
-            local USER_HOME
-            USER_HOME=$(eval echo "~${SUDO_USER:-}")
-            if [[ -f "$USER_HOME/.ssh/authorized_keys" ]] && [[ -s "$USER_HOME/.ssh/authorized_keys" ]]; then
+            USER_HOME=$(getent passwd "${SUDO_USER:-}" | cut -d: -f6)
+            if [[ -n "$USER_HOME" && -f "$USER_HOME/.ssh/authorized_keys" ]] && [[ -s "$USER_HOME/.ssh/authorized_keys" ]]; then
                 log_info "El usuario ${SUDO_USER:-} tiene llaves SSH configuradas"
             else
                 log_warn "El usuario ${SUDO_USER:-} NO tiene llaves SSH en authorized_keys"
@@ -564,7 +579,7 @@ EOFFIDO
                 if ask "¿Desactivar MFA temporalmente hasta configurar llaves?"; then
                     rm -f /etc/ssh/sshd_config.d/91-mfa.conf
                     if sshd -t 2>/dev/null; then
-                        systemctl reload sshd 2>/dev/null || true
+                        systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
                     fi
                     log_warn "MFA desactivado. Actívalo después con:"
                     log_warn "  sudo cp $BACKUP_DIR/91-mfa.conf /etc/ssh/sshd_config.d/"
@@ -668,13 +683,13 @@ if [[ ! -f /var/lib/clamav/main.cvd ]] && [[ ! -f /var/lib/clamav/main.cld ]]; t
 fi
 
 # Determinar rutas a escanear
-if [[ "$1" == "--completo" ]]; then
+if [[ "${1:-}" == "--completo" ]]; then
     SCAN_PATHS="/"
     SCAN_DESC="Sistema completo"
     EXTRA_ARGS="--exclude-dir='^/proc' --exclude-dir='^/sys' --exclude-dir='^/dev' --exclude-dir='^/run'"
-elif [[ -n "$1" ]]; then
-    SCAN_PATHS="$1"
-    SCAN_DESC="$1"
+elif [[ -n "${1:-}" ]]; then
+    SCAN_PATHS="${1:-}"
+    SCAN_DESC="${1:-}"
     EXTRA_ARGS=""
 else
     SCAN_PATHS="/home /tmp /var/tmp /root"
@@ -688,7 +703,7 @@ echo -e "Cuarentena: $QUARANTINE"
 echo ""
 
 # Ejecutar escaneo
-if [[ "$1" == "--completo" ]]; then
+if [[ "${1:-}" == "--completo" ]]; then
     clamscan -r -i \
         --move="$QUARANTINE" \
         --log="$LOGFILE" \
@@ -858,7 +873,7 @@ for ds_path in \
 done
 
 # Listar perfiles disponibles
-if [[ "$1" == "--listar" ]]; then
+if [[ "${1:-}" == "--listar" ]]; then
     if [[ -n "$SSG_DS" ]]; then
         echo -e "${BOLD}Perfiles disponibles en:${NC} $SSG_DS"
         echo ""
@@ -879,7 +894,7 @@ if [[ "$1" == "--listar" ]]; then
 fi
 
 # Escaneo de vulnerabilidades del sistema (CVE)
-if [[ "$1" == "--vuln" ]]; then
+if [[ "${1:-}" == "--vuln" ]]; then
     echo -e "${BOLD}Escaneo de vulnerabilidades (CVE)...${NC}"
     VULN_REPORT="$REPORT_DIR/vuln-${TIMESTAMP}.html"
     VULN_RESULTS="$REPORT_DIR/vuln-${TIMESTAMP}-results.xml"
@@ -914,8 +929,8 @@ fi
 if [[ -n "$SSG_DS" ]]; then
     # Determinar perfil
     PROFILE=""
-    if [[ "$1" == "--perfil" ]] && [[ -n "$2" ]]; then
-        PROFILE="$2"
+    if [[ "${1:-}" == "--perfil" ]] && [[ -n "${2:-}" ]]; then
+        PROFILE="${2:-}"
     else
         # Intentar perfil estándar de hardening
         for p in "xccdf_org.ssgproject.content_profile_standard" \

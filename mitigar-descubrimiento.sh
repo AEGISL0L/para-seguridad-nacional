@@ -183,11 +183,13 @@ if ask "¿Restringir enumeración de procesos?"; then
     # hidepid en /proc (ya puede estar de credenciales)
     if ! grep -q "hidepid" /etc/fstab 2>/dev/null; then
         cp /etc/fstab "$BACKUP_DIR/"
+        _priv_group=$(get_privileged_group)
         echo "" >> /etc/fstab
         echo "# T1057 - Restringir visibilidad de procesos" >> /etc/fstab
-        echo "proc    /proc    proc    defaults,hidepid=2,gid=wheel    0    0" >> /etc/fstab
-        mount -o remount,hidepid=2,gid=wheel /proc 2>/dev/null || true
-        log_info "hidepid=2 aplicado: usuarios solo ven sus propios procesos"
+        echo "proc    /proc    proc    defaults,hidepid=2,gid=${_priv_group}    0    0" >> /etc/fstab
+        mount -o "remount,hidepid=2,gid=${_priv_group}" /proc 2>/dev/null || true
+        log_info "hidepid=2 aplicado: usuarios solo ven sus propios procesos (grupo ${_priv_group})"
+        unset _priv_group
     else
         echo -e "  ${GREEN}OK${NC} hidepid ya configurado"
     fi

@@ -29,7 +29,7 @@ echo "  PASS_MIN_DAYS = 7   (mínimo 7 días entre cambios)"
 echo "  PASS_WARN_AGE = 14  (avisar 14 días antes)"
 echo "  LOGIN_RETRIES = 3   (máx 3 intentos)"
 echo "  LOGIN_TIMEOUT = 60  (timeout de login 60s)"
-echo "  ENCRYPT_METHOD = SHA512"
+echo "  ENCRYPT_METHOD = YESCRYPT (o SHA512 si no hay soporte)"
 echo ""
 
 if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
@@ -70,12 +70,23 @@ if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
         echo -e "LOGIN_TIMEOUT\t60" >> /etc/login.defs
     fi
 
-    # ENCRYPT_METHOD
-    if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then
-        sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD\tSHA512/' /etc/login.defs
-    else
-        echo -e "ENCRYPT_METHOD\tSHA512" >> /etc/login.defs
+    # ENCRYPT_METHOD - preferir yescrypt (memory-hard) sobre SHA512 (CPU-bound)
+    _encrypt_method="SHA512"
+    if [[ -f /etc/login.defs ]]; then
+        # Detectar soporte de yescrypt en libcrypt/pam
+        if python3 -c "import crypt; crypt.mksalt(crypt.METHOD_BLOWFISH)" &>/dev/null 2>&1 || \
+           grep -rq "yescrypt" /etc/pam.d/ 2>/dev/null || \
+           [[ -f /usr/lib64/libcrypt.so.2 ]] || [[ -f /usr/lib/x86_64-linux-gnu/libcrypt.so.2 ]]; then
+            _encrypt_method="YESCRYPT"
+            log_info "yescrypt detectado (memory-hard, más resistente que SHA512)"
+        fi
     fi
+    if grep -q "^ENCRYPT_METHOD" /etc/login.defs; then
+        sed -i "s/^ENCRYPT_METHOD.*/ENCRYPT_METHOD\t${_encrypt_method}/" /etc/login.defs
+    else
+        echo -e "ENCRYPT_METHOD\t${_encrypt_method}" >> /etc/login.defs
+    fi
+    unset _encrypt_method
 
     log_info "login.defs actualizado"
 

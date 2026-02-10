@@ -44,6 +44,17 @@ PKG_MAP[vsftpd]="vsftpd|vsftpd|vsftpd|vsftpd"
 PKG_MAP[proftpd]="proftpd|proftpd|proftpd|proftpd"
 PKG_MAP[pure-ftpd]="pure-ftpd|pure-ftpd|pure-ftpd|pure-ftpd"
 
+# Paquetes de auditoria y monitoreo
+PKG_MAP[audit]="audit|auditd|audit|audit"
+PKG_MAP[libpwquality]="libpwquality1|libpam-pwquality|libpwquality|libpwquality"
+PKG_MAP[nmap]="nmap|nmap|nmap|nmap"
+PKG_MAP[tcpdump]="tcpdump|tcpdump|tcpdump|tcpdump"
+PKG_MAP[net-tools]="net-tools|net-tools|net-tools|net-tools"
+PKG_MAP[debsums]="-|debsums|-|-"
+PKG_MAP[acl]="acl|acl|acl|acl"
+PKG_MAP[logwatch]="logwatch|logwatch|logwatch|logwatch"
+PKG_MAP[rsyslog]="rsyslog|rsyslog|rsyslog|rsyslog"
+
 # pam google authenticator
 PKG_MAP[google-authenticator-libpam]="google-authenticator-libpam|libpam-google-authenticator|google-authenticator|libpam-google-authenticator"
 

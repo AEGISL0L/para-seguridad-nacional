@@ -85,7 +85,7 @@ EOF
 
     # Reiniciar SSH con cuidado
     if sshd -t 2>/dev/null; then
-        systemctl reload sshd 2>/dev/null || true
+        systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
         log_info "SSH endurecido contra movimiento lateral"
     else
         log_warn "Error en configuración SSH - revirtiendo"

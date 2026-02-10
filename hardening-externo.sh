@@ -90,7 +90,7 @@ if ask "¿Aplicar este banner disuasivo?"; then
         if ! grep -q "^Banner /etc/ssh/banner" /etc/ssh/sshd_config; then
             echo "Banner /etc/ssh/banner" >> /etc/ssh/sshd_config
         fi
-        systemctl reload sshd 2>/dev/null || true
+        systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
     fi
 
     log_info "Banner disuasivo aplicado en /etc/issue, /etc/issue.net, /etc/motd, SSH"

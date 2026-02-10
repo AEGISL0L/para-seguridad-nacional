@@ -13,14 +13,44 @@
 [[ -n "${_SECURIZAR_COMMON_LOADED:-}" ]] && return 0
 _SECURIZAR_COMMON_LOADED=1
 
+# ── Umask restrictiva ────────────────────────────────────────
+# Evita que backups de /etc/shadow, configs SSH, etc. se creen world-readable
+umask 0077
+
 # ── Determinar ruta de lib/ ────────────────────────────────
 _SECURIZAR_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Cargar configuracion opcional ───────────────────────────
 _SECURIZAR_CONF="${_SECURIZAR_LIB_DIR}/../securizar.conf"
 if [[ -f "$_SECURIZAR_CONF" ]]; then
-    # shellcheck source=/dev/null
-    source "$_SECURIZAR_CONF"
+    # Validar que securizar.conf es seguro antes de sourcear
+    _conf_owner=$(stat -c '%u' "$_SECURIZAR_CONF" 2>/dev/null || echo "")
+    _conf_perms=$(stat -c '%a' "$_SECURIZAR_CONF" 2>/dev/null || echo "")
+    _conf_safe=1
+    if [[ "$_conf_owner" != "0" ]]; then
+        echo "AVISO: securizar.conf no es propiedad de root (uid=$_conf_owner), ignorando" >&2
+        _conf_safe=0
+    elif [[ "${_conf_perms:2:1}" =~ [2367] ]]; then
+        echo "AVISO: securizar.conf es writable por otros (permisos=$_conf_perms), ignorando" >&2
+        _conf_safe=0
+    else
+        # Verificar que solo contiene asignaciones de variables (KEY=value), comentarios o lineas vacias
+        while IFS= read -r _line; do
+            # Quitar espacios iniciales
+            _line="${_line#"${_line%%[![:space:]]*}"}"
+            [[ -z "$_line" || "$_line" == \#* ]] && continue
+            if ! [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+                echo "AVISO: securizar.conf contiene sintaxis no permitida: $_line" >&2
+                _conf_safe=0
+                break
+            fi
+        done < "$_SECURIZAR_CONF"
+    fi
+    if [[ "$_conf_safe" == "1" ]]; then
+        # shellcheck source=/dev/null
+        source "$_SECURIZAR_CONF"
+    fi
+    unset _conf_owner _conf_perms _conf_safe _line
 fi
 
 # ── Colores ─────────────────────────────────────────────────
@@ -130,6 +160,18 @@ securizar_setup_traps() {
     trap '_securizar_exit_handler' EXIT
 }
 
+# ── get_privileged_group ──────────────────────────────────────
+# Devuelve el grupo privilegiado del sistema (wheel o sudo)
+get_privileged_group() {
+    if getent group wheel &>/dev/null; then
+        echo "wheel"
+    elif getent group sudo &>/dev/null; then
+        echo "sudo"
+    else
+        echo "root"
+    fi
+}
+
 # ── Carga validada de modulos ────────────────────────────────
 _securizar_source_lib() {
     local lib_file="$1"
@@ -146,3 +188,12 @@ _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-pkg-map.sh"
 _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-pkg.sh"
 _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-firewall.sh"
 _securizar_source_lib "${_SECURIZAR_LIB_DIR}/securizar-paths.sh"
+
+# ── SSH_SERVICE_NAME ─────────────────────────────────────────
+# Debian usa ssh.service, el resto usa sshd.service
+if [[ "$DISTRO_FAMILY" == "debian" ]]; then
+    SSH_SERVICE_NAME="ssh"
+else
+    SSH_SERVICE_NAME="sshd"
+fi
+export SSH_SERVICE_NAME

@@ -57,7 +57,14 @@ fw_add_service() {
             ufw allow "$service" 2>/dev/null || true
             ;;
         nftables)
-            echo "AVISO: Agrega manualmente regla nftables para servicio $service" >&2
+            local _svc_port
+            _svc_port=$(_fw_nft_service_port "$service")
+            if [[ -n "$_svc_port" ]]; then
+                _fw_nft_ensure_table
+                nft add rule inet securizar input tcp dport "$_svc_port" accept 2>/dev/null || true
+            else
+                echo "AVISO: No se pudo resolver puerto para servicio $service en nftables" >&2
+            fi
             ;;
         iptables)
             echo "AVISO: Agrega manualmente regla iptables para servicio $service" >&2
@@ -81,7 +88,19 @@ fw_remove_service() {
         ufw)
             ufw delete allow "$service" 2>/dev/null || true
             ;;
-        nftables|iptables)
+        nftables)
+            local _svc_port
+            _svc_port=$(_fw_nft_service_port "$service")
+            if [[ -n "$_svc_port" ]]; then
+                # Remove matching rules from securizar table
+                local _handle
+                _handle=$(nft -a list chain inet securizar input 2>/dev/null | grep "dport $_svc_port accept" | grep -oP 'handle \K\d+' | head -1)
+                if [[ -n "$_handle" ]]; then
+                    nft delete rule inet securizar input handle "$_handle" 2>/dev/null || true
+                fi
+            fi
+            ;;
+        iptables)
             echo "AVISO: Elimina manualmente regla para servicio $service" >&2
             ;;
     esac
@@ -107,8 +126,15 @@ fw_add_port() {
             proto="${port##*/}"
             ufw allow "$p/$proto" 2>/dev/null || true
             ;;
-        nftables|iptables)
-            echo "AVISO: Agrega manualmente regla para puerto $port" >&2
+        nftables)
+            local _p _proto
+            _p="${port%%/*}"
+            _proto="${port##*/}"
+            _fw_nft_ensure_table
+            nft add rule inet securizar input "$_proto" dport "$_p" accept 2>/dev/null || true
+            ;;
+        iptables)
+            echo "AVISO: Agrega manualmente regla iptables para puerto $port" >&2
             ;;
     esac
 }
@@ -132,7 +158,16 @@ fw_remove_port() {
             proto="${port##*/}"
             ufw delete allow "$p/$proto" 2>/dev/null || true
             ;;
-        nftables|iptables)
+        nftables)
+            local _p _proto _handle
+            _p="${port%%/*}"
+            _proto="${port##*/}"
+            _handle=$(nft -a list chain inet securizar input 2>/dev/null | grep "$_proto dport $_p accept" | grep -oP 'handle \K\d+' | head -1)
+            if [[ -n "$_handle" ]]; then
+                nft delete rule inet securizar input handle "$_handle" 2>/dev/null || true
+            fi
+            ;;
+        iptables)
             echo "AVISO: Elimina manualmente regla para puerto $port" >&2
             ;;
     esac
@@ -225,7 +260,26 @@ fw_set_default_zone() {
                 *)      ufw default deny incoming 2>/dev/null ;;
             esac
             ;;
-        nftables|iptables)
+        nftables)
+            _fw_nft_ensure_table
+            case "$zone" in
+                drop)
+                    nft chain inet securizar input '{ policy drop ; }' 2>/dev/null || true
+                    nft chain inet securizar forward '{ policy drop ; }' 2>/dev/null || true
+                    ;;
+                public)
+                    nft chain inet securizar input '{ policy drop ; }' 2>/dev/null || true
+                    nft chain inet securizar output '{ policy accept ; }' 2>/dev/null || true
+                    # Allow established/related
+                    nft add rule inet securizar input ct state established,related accept 2>/dev/null || true
+                    ;;
+                *)
+                    nft chain inet securizar input '{ policy drop ; }' 2>/dev/null || true
+                    nft add rule inet securizar input ct state established,related accept 2>/dev/null || true
+                    ;;
+            esac
+            ;;
+        iptables)
             echo "AVISO: Configura manualmente la politica por defecto" >&2
             ;;
     esac
@@ -252,7 +306,11 @@ fw_new_zone() {
             # UFW no tiene zonas; las reglas se aplican globalmente
             echo "INFO: UFW no soporta zonas. Reglas se aplican globalmente." >&2
             ;;
-        nftables|iptables)
+        nftables)
+            _fw_nft_ensure_table
+            nft add chain inet securizar "$zone" 2>/dev/null || true
+            ;;
+        iptables)
             echo "AVISO: Crea manualmente cadena/tabla para zona $zone" >&2
             ;;
     esac
@@ -291,7 +349,17 @@ fw_set_log_denied() {
                 *)           ufw logging medium 2>/dev/null || true ;;
             esac
             ;;
-        nftables|iptables)
+        nftables)
+            _fw_nft_ensure_table
+            case "$value" in
+                off) true ;;  # nft: just don't add log rules
+                *)
+                    # Add log rule before drop (if input policy is drop)
+                    nft add rule inet securizar input log prefix '"securizar-denied: "' level warn 2>/dev/null || true
+                    ;;
+            esac
+            ;;
+        iptables)
             echo "AVISO: Configura manualmente logging de paquetes denegados" >&2
             ;;
     esac
@@ -401,7 +469,11 @@ fw_add_icmp_block() {
             # UFW no tiene bloqueo ICMP nativo, usar iptables
             ufw deny proto icmp 2>/dev/null || true
             ;;
-        nftables|iptables)
+        nftables)
+            _fw_nft_ensure_table
+            nft add rule inet securizar input icmp type "$icmp_type" drop 2>/dev/null || true
+            ;;
+        iptables)
             echo "AVISO: Bloquea manualmente ICMP type $icmp_type" >&2
             ;;
     esac
@@ -607,9 +679,102 @@ _fw_rich_rule_to_ufw_delete() {
     echo "AVISO: No se pudo eliminar rich rule en UFW: $rule" >&2
 }
 
+# ── nftables backend helpers ─────────────────────────────────
+
+# Ensure the securizar table and base chains exist
+_fw_nft_ensure_table() {
+    if ! nft list table inet securizar &>/dev/null; then
+        nft add table inet securizar
+        nft add chain inet securizar input '{ type filter hook input priority 0 ; policy accept ; }'
+        nft add chain inet securizar forward '{ type filter hook forward priority 0 ; policy accept ; }'
+        nft add chain inet securizar output '{ type filter hook output priority 0 ; policy accept ; }'
+    fi
+}
+
+# Map service name to port (basic mapping for common services)
+_fw_nft_service_port() {
+    local service="$1"
+    case "$service" in
+        ssh)    echo "22" ;;
+        http)   echo "80" ;;
+        https)  echo "443" ;;
+        dns)    echo "53" ;;
+        smtp)   echo "25" ;;
+        ftp)    echo "21" ;;
+        ntp)    echo "123" ;;
+        *)      getent services "$service" 2>/dev/null | awk '{print $2}' | cut -d/ -f1 ;;
+    esac
+}
+
 _fw_rich_rule_to_nft() {
     local rule="$1"
-    echo "AVISO: Traduce manualmente rich rule a nftables: $rule" >&2
+
+    _fw_nft_ensure_table
+
+    # Pattern: source address drop
+    if echo "$rule" | grep -qP 'source address="([^"]+)".*drop'; then
+        local addr
+        addr=$(echo "$rule" | grep -oP 'address="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        nft add rule inet securizar input ip saddr "$addr" drop 2>/dev/null || true
+        return
+    fi
+
+    # Pattern: source address + port accept/drop
+    if echo "$rule" | grep -qP 'source address="([^"]+)".*port.*port="([^"]+)"'; then
+        local addr port proto action_nft
+        addr=$(echo "$rule" | grep -oP 'source address="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        port=$(echo "$rule" | grep -oP 'port="[^"]*"' | head -1 | grep -oP '"[^"]*"' | tr -d '"')
+        proto=$(echo "$rule" | grep -oP 'protocol="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        [[ -z "$proto" ]] && proto="tcp"
+        action_nft="accept"
+        echo "$rule" | grep -q "drop" && action_nft="drop"
+        nft add rule inet securizar input ip saddr "$addr" "$proto" dport "$port" "$action_nft" 2>/dev/null || true
+        return
+    fi
+
+    # Pattern: service with limit
+    if echo "$rule" | grep -qP 'service name="([^"]+)".*limit'; then
+        local svc svc_port limit_val
+        svc=$(echo "$rule" | grep -oP 'service name="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        svc_port=$(_fw_nft_service_port "$svc")
+        limit_val=$(echo "$rule" | grep -oP 'value="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        if [[ -n "$svc_port" && -n "$limit_val" ]]; then
+            # Convert "5/m" format to nft rate format "5/minute"
+            local rate_num rate_unit
+            rate_num="${limit_val%%/*}"
+            case "${limit_val##*/}" in
+                s) rate_unit="second" ;;
+                m) rate_unit="minute" ;;
+                h) rate_unit="hour" ;;
+                d) rate_unit="day" ;;
+                *) rate_unit="minute" ;;
+            esac
+            nft add rule inet securizar input tcp dport "$svc_port" limit rate "$rate_num/$rate_unit" accept 2>/dev/null || true
+        fi
+        return
+    fi
+
+    # Pattern: service accept
+    if echo "$rule" | grep -qP 'service name="([^"]+)".*accept'; then
+        local svc svc_port
+        svc=$(echo "$rule" | grep -oP 'service name="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        svc_port=$(_fw_nft_service_port "$svc")
+        if [[ -n "$svc_port" ]]; then
+            nft add rule inet securizar input tcp dport "$svc_port" accept 2>/dev/null || true
+        fi
+        return
+    fi
+
+    # Pattern: source address accept/drop (simple)
+    if echo "$rule" | grep -qP 'source address="([^"]+)"'; then
+        local addr action_nft="accept"
+        addr=$(echo "$rule" | grep -oP 'address="[^"]*"' | grep -oP '"[^"]*"' | tr -d '"')
+        echo "$rule" | grep -q "drop" && action_nft="drop"
+        nft add rule inet securizar input ip saddr "$addr" "$action_nft" 2>/dev/null || true
+        return
+    fi
+
+    echo "AVISO: Rich rule no traducida a nftables: $rule" >&2
 }
 
 # ── fw_try func [args...] ──────────────────────────────────

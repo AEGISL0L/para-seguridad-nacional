@@ -86,16 +86,18 @@ EOF
 
     if ! grep -q "hidepid" /etc/fstab 2>/dev/null; then
         cp /etc/fstab "$BACKUP_DIR/"
+        _priv_group=$(get_privileged_group)
         # Añadir mount de /proc con hidepid=2
         echo "" >> /etc/fstab
         echo "# T1003 - Ocultar procesos de otros usuarios" >> /etc/fstab
-        echo "proc    /proc    proc    defaults,hidepid=2,gid=wheel    0    0" >> /etc/fstab
+        echo "proc    /proc    proc    defaults,hidepid=2,gid=${_priv_group}    0    0" >> /etc/fstab
 
         # Aplicar ahora
-        mount -o remount,hidepid=2,gid=wheel /proc 2>/dev/null || \
+        mount -o "remount,hidepid=2,gid=${_priv_group}" /proc 2>/dev/null || \
             log_warn "No se pudo remontar /proc con hidepid (se aplicará en reinicio)"
 
-        log_info "hidepid=2 configurado en /proc (usuarios solo ven sus procesos)"
+        log_info "hidepid=2 configurado en /proc (grupo ${_priv_group}, usuarios solo ven sus procesos)"
+        unset _priv_group
     else
         echo -e "  ${GREEN}OK${NC} hidepid ya configurado en /proc"
     fi

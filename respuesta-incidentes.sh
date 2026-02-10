@@ -147,7 +147,7 @@ nft list ruleset > "$IR_DIR/09-nftables.txt" 2>/dev/null || true
 # 10. Logs recientes
 echo "[10/15] Logs recientes..." | tee -a "$LOG"
 journalctl --since "24 hours ago" --no-pager > "$IR_DIR/10-journal-24h.txt" 2>/dev/null
-journalctl -u sshd --since "7 days ago" --no-pager > "$IR_DIR/10-ssh-7d.txt" 2>/dev/null
+journalctl -u "$SSH_SERVICE_NAME" --since "7 days ago" --no-pager > "$IR_DIR/10-ssh-7d.txt" 2>/dev/null
 cp /var/log/audit/audit.log "$IR_DIR/10-audit.log" 2>/dev/null || true
 cp /var/log/messages "$IR_DIR/10-messages.txt" 2>/dev/null || true
 tail -1000 /var/log/secure "$IR_DIR/10-secure.txt" 2>/dev/null || true
@@ -515,7 +515,7 @@ ss -tupna | grep "$IP_ORIGEN" > "$IR_DIR/conexiones-lateral.txt" 2>/dev/null
 
 # Paso 2: Capturar actividad de la sesión
 echo "[2/5] Capturando actividad..." | tee -a "$LOG"
-journalctl -u sshd --since "24 hours ago" 2>/dev/null | \
+journalctl -u "$SSH_SERVICE_NAME" --since "24 hours ago" 2>/dev/null | \
     grep "$IP_ORIGEN" > "$IR_DIR/ssh-actividad.txt" 2>/dev/null || true
 
 # Paso 3: Bloquear IP origen en firewall
@@ -641,7 +641,7 @@ TEMP_TL=$(mktemp)
 
 # 1. SSH auth events
 echo "Recopilando eventos SSH..." >&2
-journalctl -u sshd --since "$HORAS hours ago" --no-pager 2>/dev/null | \
+journalctl -u "$SSH_SERVICE_NAME" --since "$HORAS hours ago" --no-pager 2>/dev/null | \
     grep -iE "accepted|failed|invalid|disconnect|session opened|session closed" | \
     while IFS= read -r line; do
         TS=$(echo "$line" | grep -oP '^\w+ \d+ \d+:\d+:\d+' || echo "?")
@@ -914,7 +914,7 @@ echo "=== 2. SERVICIOS DE SEGURIDAD ===" | tee -a "$LOG"
 check "firewalld activo" "systemctl is-active firewalld"
 check "auditd activo" "systemctl is-active auditd"
 check "fail2ban activo" "systemctl is-active fail2ban"
-check "sshd activo" "systemctl is-active sshd"
+check "$SSH_SERVICE_NAME activo" "systemctl is-active $SSH_SERVICE_NAME"
 for svc in apparmor suricata clamd; do
     if systemctl is-enabled "$svc" &>/dev/null 2>&1; then
         check "$svc activo" "systemctl is-active $svc"

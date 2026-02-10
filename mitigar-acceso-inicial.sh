@@ -46,7 +46,18 @@ if [[ -f /etc/ssh/sshd_config ]]; then
         # Crear directorio de configuración modular
         mkdir -p /etc/ssh/sshd_config.d
 
-        cat > /etc/ssh/sshd_config.d/01-acceso-inicial.conf << 'EOF'
+        # Detectar conflictos con otros drop-ins de securizar
+        for _sshd_dropin in /etc/ssh/sshd_config.d/*-hardening*.conf; do
+            [[ -f "$_sshd_dropin" ]] || continue
+            if grep -q "PasswordAuthentication yes" "$_sshd_dropin" 2>/dev/null; then
+                log_warn "Conflicto: $_sshd_dropin tiene PasswordAuthentication yes"
+                log_warn "  Este script configura PasswordAuthentication no (solo llaves)"
+                log_warn "  El archivo con numero mayor prevalece en sshd"
+            fi
+        done
+        unset _sshd_dropin
+
+        cat > /etc/ssh/sshd_config.d/80-acceso-inicial.conf << 'EOF'
 # ============================================================
 # HARDENING SSH - Mitigación TA0001 (Initial Access)
 # ============================================================
@@ -101,11 +112,11 @@ EOF
 
         # Verificar sintaxis antes de recargar
         if sshd -t 2>/dev/null; then
-            systemctl reload sshd 2>/dev/null || true
+            systemctl reload "$SSH_SERVICE_NAME" 2>/dev/null || true
             log_info "SSH hardening aplicado (config modular en sshd_config.d/)"
         else
             log_error "Error de sintaxis en configuración SSH - revirtiendo"
-            rm -f /etc/ssh/sshd_config.d/01-acceso-inicial.conf
+            rm -f /etc/ssh/sshd_config.d/80-acceso-inicial.conf
         fi
     fi
 else
@@ -374,37 +385,105 @@ if ask "¿Verificar y securizar la cadena de suministro de software?"; then
     pkg_list_repos 2>/dev/null | sed 's/^/  /' || echo "  (gestor de paquetes no disponible)"
     echo ""
 
-    # Verificar que gpgcheck está habilitado
+    # Verificar que la verificacion de firmas esta habilitada (multi-distro)
     REPOS_WITHOUT_GPG=0
-    for repo_file in /etc/zypp/repos.d/*.repo; do
-        [[ -f "$repo_file" ]] || continue
-        repo_name=$(grep "^\[" "$repo_file" | tr -d '[]')
-        gpg_check=$(grep "^gpgcheck=" "$repo_file" | cut -d= -f2)
-        if [[ "$gpg_check" == "0" ]]; then
-            log_warn "Repo sin verificación GPG: $repo_name ($repo_file)"
-            REPOS_WITHOUT_GPG=$((REPOS_WITHOUT_GPG + 1))
-        fi
-    done
+    case "$DISTRO_FAMILY" in
+        suse)
+            for repo_file in /etc/zypp/repos.d/*.repo; do
+                [[ -f "$repo_file" ]] || continue
+                repo_name=$(grep "^\[" "$repo_file" | tr -d '[]')
+                gpg_check=$(grep "^gpgcheck=" "$repo_file" | cut -d= -f2)
+                if [[ "$gpg_check" == "0" ]]; then
+                    log_warn "Repo sin verificación GPG: $repo_name ($repo_file)"
+                    REPOS_WITHOUT_GPG=$((REPOS_WITHOUT_GPG + 1))
+                fi
+            done
+            ;;
+        rhel)
+            for repo_file in /etc/yum.repos.d/*.repo; do
+                [[ -f "$repo_file" ]] || continue
+                repo_name=$(grep "^\[" "$repo_file" | tr -d '[]')
+                gpg_check=$(grep "^gpgcheck=" "$repo_file" | cut -d= -f2)
+                if [[ "$gpg_check" == "0" ]]; then
+                    log_warn "Repo sin verificación GPG: $repo_name ($repo_file)"
+                    REPOS_WITHOUT_GPG=$((REPOS_WITHOUT_GPG + 1))
+                fi
+            done
+            ;;
+        debian)
+            # Detectar repos con trusted=yes (omite verificacion de firma)
+            for src_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+                [[ -f "$src_file" ]] || continue
+                if grep -qi "trusted=yes" "$src_file" 2>/dev/null; then
+                    log_warn "Repo con trusted=yes (sin GPG): $src_file"
+                    REPOS_WITHOUT_GPG=$((REPOS_WITHOUT_GPG + 1))
+                fi
+            done
+            ;;
+        arch)
+            # Verificar SigLevel en pacman.conf
+            if grep -q "^SigLevel.*Never" /etc/pacman.conf 2>/dev/null; then
+                log_warn "pacman.conf tiene SigLevel = Never (sin verificación GPG)"
+                REPOS_WITHOUT_GPG=$((REPOS_WITHOUT_GPG + 1))
+            fi
+            ;;
+    esac
 
     if [[ $REPOS_WITHOUT_GPG -eq 0 ]]; then
         echo -e "  ${GREEN}OK${NC} Todos los repositorios tienen GPG habilitado"
     else
-        if ask "¿Habilitar gpgcheck en todos los repositorios?"; then
-            for repo_file in /etc/zypp/repos.d/*.repo; do
-                [[ -f "$repo_file" ]] || continue
-                if grep -q "^gpgcheck=0" "$repo_file"; then
-                    cp "$repo_file" "$BACKUP_DIR/"
-                    sed -i 's/^gpgcheck=0/gpgcheck=1/' "$repo_file"
-                fi
-            done
-            log_info "gpgcheck habilitado en todos los repositorios"
+        if ask "¿Habilitar verificación GPG en todos los repositorios?"; then
+            case "$DISTRO_FAMILY" in
+                suse)
+                    for repo_file in /etc/zypp/repos.d/*.repo; do
+                        [[ -f "$repo_file" ]] || continue
+                        if grep -q "^gpgcheck=0" "$repo_file"; then
+                            cp "$repo_file" "$BACKUP_DIR/"
+                            sed -i 's/^gpgcheck=0/gpgcheck=1/' "$repo_file"
+                        fi
+                    done
+                    ;;
+                rhel)
+                    for repo_file in /etc/yum.repos.d/*.repo; do
+                        [[ -f "$repo_file" ]] || continue
+                        if grep -q "^gpgcheck=0" "$repo_file"; then
+                            cp "$repo_file" "$BACKUP_DIR/"
+                            sed -i 's/^gpgcheck=0/gpgcheck=1/' "$repo_file"
+                        fi
+                    done
+                    ;;
+                debian)
+                    for src_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+                        [[ -f "$src_file" ]] || continue
+                        if grep -qi "trusted=yes" "$src_file" 2>/dev/null; then
+                            cp "$src_file" "$BACKUP_DIR/"
+                            sed -i 's/\[trusted=yes\]//gi' "$src_file"
+                        fi
+                    done
+                    ;;
+                arch)
+                    if grep -q "^SigLevel.*Never" /etc/pacman.conf 2>/dev/null; then
+                        cp /etc/pacman.conf "$BACKUP_DIR/"
+                        sed -i 's/^SigLevel.*Never/SigLevel = Required DatabaseOptional/' /etc/pacman.conf
+                    fi
+                    ;;
+            esac
+            log_info "Verificación GPG habilitada en todos los repositorios"
         fi
     fi
 
     # Verificar paquetes no firmados instalados
     echo ""
     echo -e "${BOLD}Verificando paquetes instalados sin firma:${NC}"
-    pkg_query_signatures
+    UNSIGNED=""
+    case "$DISTRO_FAMILY" in
+        suse|rhel)
+            UNSIGNED=$(rpm -qa --qf '%{NAME}-%{VERSION} %{SIGPGP:pgpsig}\n' 2>/dev/null | grep -i "not signed\|none" || true) ;;
+        debian)
+            UNSIGNED=$(apt list --installed 2>/dev/null | grep -i "local\]" || true) ;;
+        arch)
+            UNSIGNED=$(pacman -Qk 2>/dev/null | grep -i "warning" || true) ;;
+    esac
     if [[ -n "$UNSIGNED" ]]; then
         UNSIGNED_COUNT=$(echo "$UNSIGNED" | wc -l)
         log_warn "$UNSIGNED_COUNT paquete(s) sin firma GPG detectados"

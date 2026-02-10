@@ -110,7 +110,7 @@ pkg_refresh() {
         suse)   zypper --non-interactive refresh ;;
         debian) apt-get update ;;
         rhel)   dnf makecache ;;
-        arch)   pacman -Sy ;;
+        arch)   pacman -Syy ;;
         *)      return 1 ;;
     esac
 }

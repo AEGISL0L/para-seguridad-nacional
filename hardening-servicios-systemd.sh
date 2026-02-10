@@ -64,11 +64,11 @@ echo "  RestrictRealtime=yes"
 echo "  RestrictSUIDSGID=yes"
 echo ""
 
-if systemctl list-unit-files sshd.service &>/dev/null 2>&1; then
+if systemctl list-unit-files "${SSH_SERVICE_NAME}.service" &>/dev/null 2>&1; then
     if ask "¿Aplicar sandboxing a sshd?"; then
-        mkdir -p /etc/systemd/system/sshd.service.d/
+        mkdir -p "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/"
 
-        cat > /etc/systemd/system/sshd.service.d/hardening.conf << 'EOF'
+        cat > "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/hardening.conf" << 'EOF'
 [Service]
 # Sandboxing de sshd - generado por hardening-servicios-systemd.sh
 PrivateTmp=yes
@@ -86,10 +86,10 @@ EOF
 
         systemctl daemon-reload
         log_info "Drop-in de sshd creado"
-        log_warn "Reinicia sshd para aplicar: systemctl restart sshd"
+        log_warn "Reinicia sshd para aplicar: systemctl restart $SSH_SERVICE_NAME"
     fi
 else
-    log_warn "sshd.service no encontrado"
+    log_warn "${SSH_SERVICE_NAME}.service no encontrado"
 fi
 
 # ============================================================
@@ -269,7 +269,7 @@ fi
 # 2. Drop-ins instalados
 echo ""
 echo -e "${CYAN}── Drop-ins de hardening instalados ──${NC}"
-for svc in sshd fail2ban firewalld NetworkManager security-monitor; do
+for svc in "$SSH_SERVICE_NAME" fail2ban firewalld NetworkManager security-monitor; do
     dropin="/etc/systemd/system/${svc}.service.d/hardening.conf"
     if [[ -f "$dropin" ]]; then
         echo -e "  ${GREEN}OK${NC}  $svc - drop-in presente"
@@ -281,7 +281,7 @@ done
 # 3. Detalle de servicios críticos
 echo ""
 echo -e "${CYAN}── Detalle de servicios críticos ──${NC}"
-for svc in sshd fail2ban firewalld auditd; do
+for svc in "$SSH_SERVICE_NAME" fail2ban firewalld auditd; do
     if systemctl is-active "$svc" &>/dev/null; then
         score=$(systemd-analyze security "$svc" 2>/dev/null | tail -1 | awk '{print $2}' || echo "N/A")
         echo -e "  ${GREEN}ACTIVO${NC}  $svc (score: $score)"
