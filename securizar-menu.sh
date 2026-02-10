@@ -249,7 +249,7 @@ _show_help() {
     echo -e "    ${WHITE}o${NC}  ${DIM}Operaciones de Seguridad (6 módulos)${NC}"
     echo -e "    ${WHITE}i${NC}  ${DIM}Inteligencia (1 módulo)${NC}"
     echo -e "    ${WHITE}a${NC}  ${DIM}Aplicar todos los módulos${NC}"
-    echo -e "    ${WHITE}v${NC}  ${DIM}Verificación proactiva (44 checks)${NC}"
+    echo -e "    ${WHITE}v${NC}  ${DIM}Verificación proactiva (45 checks)${NC}"
     echo ""
     echo -e "  ${BOLD}Acceso directo${NC}"
     echo ""
@@ -1968,6 +1968,7 @@ verificacion_proactiva() {
         [31]="24"   [32]="25"    [33]="26"   [34]="27"   [35]="28"
         [36]="29"   [37]="30"    [38]="31"   [39]="32"   [40]="33"
         [41]="34"   [42]="35"    [43]="36"   [44]="37"
+        [45]="36"
     )
     declare -A _CHECK_TITLE=(
         [1]="Kernel"           [2]="Servicios seguridad"  [3]="Serv. innecesarios"
@@ -1985,6 +1986,7 @@ verificacion_proactiva() {
         [37]="TA0011 C2"       [38]="Resp. incidentes"    [39]="Monitorización"
         [40]="Reportes"        [41]="Threat hunting"      [42]="SOAR"
         [43]="Purple team"     [44]="Ciberinteligencia"
+        [45]="Validación MSF"
     )
     declare -A FAILED_CHECKS=()
     declare -A _SECTION_FAILS=()
@@ -2007,7 +2009,7 @@ verificacion_proactiva() {
         [11]=2 [12]=1 [13]=2 [14]=1 [15]=2 [16]=1 [17]=3 [18]=2 [19]=1 [20]=1
         [21]=2 [22]=2 [23]=2 [24]=1 [25]=2 [26]=3 [27]=2 [28]=2 [29]=3 [30]=2
         [31]=2 [32]=3 [33]=1 [34]=1 [35]=1 [36]=1 [37]=2 [38]=2 [39]=2 [40]=1
-        [41]=1 [42]=2 [43]=1 [44]=1
+        [41]=1 [42]=2 [43]=1 [44]=1 [45]=1
     )
 
     _vp_ok() {
@@ -2162,7 +2164,7 @@ verificacion_proactiva() {
 
     # ── 1. Kernel ──
     _mark_section 1
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[1/44] PARÁMETROS DE KERNEL${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[1/45] PARÁMETROS DE KERNEL${NC}"
     local kernel_params=(
         "kernel.randomize_va_space:2:ASLR"
         "kernel.kptr_restrict:2:Ocultar punteros kernel"
@@ -2188,7 +2190,7 @@ verificacion_proactiva() {
     # ── 2. Servicios activos ──
     echo ""
     _mark_section 2
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[2/44] SERVICIOS DE SEGURIDAD${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[2/45] SERVICIOS DE SEGURIDAD${NC}"
     local sec_services=("firewalld" "fail2ban" "auditd")
     for svc in "${sec_services[@]}"; do
         _vp_svc_check "$svc" "$svc activo" "$svc NO activo"
@@ -2205,7 +2207,7 @@ verificacion_proactiva() {
     # ── 3. Servicios deshabilitados ──
     echo ""
     _mark_section 3
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[3/44] SERVICIOS INNECESARIOS${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[3/45] SERVICIOS INNECESARIOS${NC}"
     local bad_services=("cups" "avahi-daemon" "bluetooth" "ModemManager")
     for svc in "${bad_services[@]}"; do
         # Bluetooth N/A en servidores
@@ -2227,7 +2229,7 @@ verificacion_proactiva() {
     # ── 4. Firewall ──
     echo ""
     _mark_section 4
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[4/44] FIREWALL${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[4/45] FIREWALL${NC}"
     if fw_is_active; then
         local default_zone
         default_zone=$(fw_get_default_zone 2>/dev/null || echo "desconocida")
@@ -2254,7 +2256,7 @@ verificacion_proactiva() {
     # ── 5. Red ──
     echo ""
     _mark_section 5
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[5/44] PUERTOS Y CONEXIONES DE RED${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[5/45] PUERTOS Y CONEXIONES DE RED${NC}"
     # Evaluar puertos externos contra set esperado
     local _expected_ports=" 22 80 443 9090 "
     local _unexpected=0 _port_list=""
@@ -2280,7 +2282,7 @@ verificacion_proactiva() {
     # ── 6. Permisos de archivos ──
     echo ""
     _mark_section 6
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[6/44] PERMISOS DE ARCHIVOS CRÍTICOS${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[6/45] PERMISOS DE ARCHIVOS CRÍTICOS${NC}"
     local file_checks=(
         "/etc/passwd:644"
         "/etc/shadow:600"
@@ -2300,7 +2302,7 @@ verificacion_proactiva() {
     # ── 7. PAM intacto ──
     echo ""
     _mark_section 7
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[7/44] PAM INTACTO${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[7/45] PAM INTACTO${NC}"
     if [[ -f /etc/pam.d/su ]]; then
         local current_hash
         current_hash=$(sha256sum /etc/pam.d/su 2>/dev/null | awk '{print $1}')
@@ -2322,7 +2324,7 @@ verificacion_proactiva() {
     # ── 8. Sesión TMOUT (usabilidad) ──
     echo ""
     _mark_section 8
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[8/44] SESIÓN TMOUT (USABILIDAD)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[8/45] SESIÓN TMOUT (USABILIDAD)${NC}"
     echo -e "  ${DIM}Verifica que TMOUT no esté forzado como readonly (bloquea sesiones)${NC}"
     if [[ -f /etc/profile.d/timeout.sh ]]; then
         if grep -q "readonly TMOUT" /etc/profile.d/timeout.sh 2>/dev/null; then
@@ -2340,7 +2342,7 @@ verificacion_proactiva() {
     # ── 9. Acceso SSH ──
     echo ""
     _mark_section 9
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[9/44] ACCESO SSH${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[9/45] ACCESO SSH${NC}"
     if systemctl is-masked "$SSH_SERVICE_NAME" &>/dev/null; then
         echo -e "  ${RED}XX${NC}  $SSH_SERVICE_NAME está ENMASCARADO (no se puede iniciar)"
         _vp_fail
@@ -2358,7 +2360,7 @@ verificacion_proactiva() {
     # ── 10. Acceso sudo ──
     echo ""
     _mark_section 10
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[10/44] ACCESO SUDO${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[10/45] ACCESO SUDO${NC}"
     local current_user="${SUDO_USER:-$USER}"
     if id -nG "$current_user" 2>/dev/null | grep -qw "wheel"; then
         echo -e "  ${GREEN}OK${NC}  $current_user pertenece al grupo wheel"
@@ -2381,7 +2383,7 @@ verificacion_proactiva() {
     # ── 11. Sin inmutabilidad ──
     echo ""
     _mark_section 11
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[11/44] SIN INMUTABILIDAD EN ARCHIVOS CRÍTICOS${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[11/45] SIN INMUTABILIDAD EN ARCHIVOS CRÍTICOS${NC}"
     local immutable_files=("/etc/passwd" "/etc/shadow" "/etc/sudoers")
     for f in "${immutable_files[@]}"; do
         if [[ -f "$f" ]]; then
@@ -2400,7 +2402,7 @@ verificacion_proactiva() {
     # ── 12. Módulos bloqueados ──
     echo ""
     _mark_section 12
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[12/44] MÓDULOS BLOQUEADOS${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[12/45] MÓDULOS BLOQUEADOS${NC}"
     if [[ $_IS_CONTAINER -eq 1 ]]; then
         echo -e "  ${DIM}--${NC}  Módulos kernel N/A (contenedor, kernel del host)"
         _vp_na
@@ -2425,7 +2427,7 @@ verificacion_proactiva() {
     # ── 13. Herramientas instaladas ──
     echo ""
     _mark_section 13
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[13/44] HERRAMIENTAS DE SEGURIDAD${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[13/45] HERRAMIENTAS DE SEGURIDAD${NC}"
     local _sec_tools=("aide:AIDE" "rkhunter:rkhunter" "lynis:lynis" "fail2ban-client:fail2ban")
     for _st in "${_sec_tools[@]}"; do
         local _cmd="${_st%%:*}" _name="${_st#*:}"
@@ -2441,7 +2443,7 @@ verificacion_proactiva() {
     # ── 14. Scripts de monitoreo ──
     echo ""
     _mark_section 14
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[14/44] SCRIPTS DE MONITOREO${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[14/45] SCRIPTS DE MONITOREO${NC}"
     local _mon_count
     _mon_count=$(ls /usr/local/bin/*.sh 2>/dev/null | wc -l || echo 0)
     if [[ "$_mon_count" -gt 0 ]]; then
@@ -2455,7 +2457,7 @@ verificacion_proactiva() {
     # ── 15. Parámetros de arranque ──
     echo ""
     _mark_section 15
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[15/44] PARÁMETROS DE ARRANQUE${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[15/45] PARÁMETROS DE ARRANQUE${NC}"
     if [[ -f /proc/cmdline ]]; then
         local cmdline
         cmdline=$(cat /proc/cmdline 2>/dev/null)
@@ -2491,7 +2493,7 @@ verificacion_proactiva() {
     # ── 16. Sandboxing systemd ──
     echo ""
     _mark_section 16
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[16/44] SANDBOXING SYSTEMD${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[16/45] SANDBOXING SYSTEMD${NC}"
     local dropin_services=("$SSH_SERVICE_NAME" "fail2ban" "firewalld")
     for svc in "${dropin_services[@]}"; do
         _vp_fcheck "/etc/systemd/system/${svc}.service.d/hardening.conf" \
@@ -2501,7 +2503,7 @@ verificacion_proactiva() {
     # ── 17. Cuentas ──
     echo ""
     _mark_section 17
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[17/44] SEGURIDAD DE CUENTAS${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[17/45] SEGURIDAD DE CUENTAS${NC}"
     # PASS_MAX_DAYS
     if [[ -f /etc/login.defs ]]; then
         local max_days
@@ -2544,7 +2546,7 @@ verificacion_proactiva() {
     # ── 18. Red avanzada ──
     echo ""
     _mark_section 18
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[18/44] RED AVANZADA${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[18/45] RED AVANZADA${NC}"
     # Suricata
     _vp_svc_check suricata "Suricata IDS activo" "Suricata IDS NO activo"
 
@@ -2570,7 +2572,7 @@ verificacion_proactiva() {
     # ── 19. Automatización ──
     echo ""
     _mark_section 19
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[19/44] AUTOMATIZACIÓN DE SEGURIDAD${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[19/45] AUTOMATIZACIÓN DE SEGURIDAD${NC}"
     local cron_jobs=(
         "/etc/cron.daily/aide-check:AIDE diario"
         "/etc/cron.daily/zypper-security-update:Parches automáticos"
@@ -2586,7 +2588,7 @@ verificacion_proactiva() {
     # ── 20. Sandboxing de apps ──
     echo ""
     _mark_section 20
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[20/44] SANDBOXING DE APLICACIONES${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[20/45] SANDBOXING DE APLICACIONES${NC}"
     # Firejail
     if command -v firejail &>/dev/null; then
         echo -e "  ${GREEN}OK${NC}  Firejail instalado"
@@ -2619,7 +2621,7 @@ verificacion_proactiva() {
     # ── 21. Auditoría de reconocimiento ──
     echo ""
     _mark_section 21
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[21/44] EXPOSICIÓN EXTERNA (RECONOCIMIENTO TA0043)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[21/45] EXPOSICIÓN EXTERNA (RECONOCIMIENTO TA0043)${NC}"
 
     # Puertos expuestos externamente
     local ext_ports
@@ -2661,7 +2663,7 @@ verificacion_proactiva() {
     # ── 22. MFA SSH (MITRE T1133 - M1032) ──
     echo ""
     _mark_section 22
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[22/44] MFA PARA SSH (T1133)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[22/45] MFA PARA SSH (T1133)${NC}"
     _vp_fcheck_contains /etc/ssh/sshd_config.d/91-mfa.conf \
         "AuthenticationMethods publickey,password" \
         "MFA SSH activo (publickey + password)" \
@@ -2672,7 +2674,7 @@ verificacion_proactiva() {
     # ── 23. ClamAV (MITRE T1566 - M1049) ──
     echo ""
     _mark_section 23
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[23/44] CLAMAV ANTIMALWARE (T1566)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[23/45] CLAMAV ANTIMALWARE (T1566)${NC}"
     if command -v clamscan &>/dev/null; then
         echo -e "  ${GREEN}OK${NC}  ClamAV instalado"
         _vp_ok
@@ -2702,7 +2704,7 @@ verificacion_proactiva() {
     # ── 24. OpenSCAP (MITRE T1195 - M1016) ──
     echo ""
     _mark_section 24
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[24/44] OPENSCAP AUDITORÍA (T1195)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[24/45] OPENSCAP AUDITORÍA (T1195)${NC}"
     if command -v oscap &>/dev/null; then
         echo -e "  ${GREEN}OK${NC}  OpenSCAP instalado"
         _vp_ok
@@ -2741,7 +2743,7 @@ verificacion_proactiva() {
     # ── 25. Inteligencia de amenazas (MITRE TA0042 - M1019) ──
     echo ""
     _mark_section 25
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[25/44] INTELIGENCIA DE AMENAZAS (M1019 IoC Feeds)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[25/45] INTELIGENCIA DE AMENAZAS (M1019 IoC Feeds)${NC}"
 
     # Directorio de IoC
     if [[ -d /etc/threat-intelligence ]]; then
@@ -2784,7 +2786,7 @@ verificacion_proactiva() {
     # ── 26. Acceso Inicial (TA0001) ──
     echo ""
     _mark_section 26
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[26/44] ACCESO INICIAL (TA0001)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[26/45] ACCESO INICIAL (TA0001)${NC}"
 
     # SSH hardening modular
     _vp_fcheck /etc/ssh/sshd_config.d/01-acceso-inicial.conf \
@@ -2812,7 +2814,7 @@ verificacion_proactiva() {
     # ── 27. Ejecución (TA0002) ──
     echo ""
     _mark_section 27
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[27/44] EJECUCIÓN (TA0002)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[27/45] EJECUCIÓN (TA0002)${NC}"
 
     # AppArmor activo (T1059 - M1038)
     if command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
@@ -2879,7 +2881,7 @@ verificacion_proactiva() {
     # ── 28. Persistencia (TA0003) ──
     echo ""
     _mark_section 28
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[28/44] PERSISTENCIA (TA0003)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[28/45] PERSISTENCIA (TA0003)${NC}"
 
     # Reglas auditd de persistencia
     local persist_rules=0
@@ -2903,7 +2905,7 @@ verificacion_proactiva() {
     # ── 29. Escalada de Privilegios (TA0004) ──
     echo ""
     _mark_section 29
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[29/44] ESCALADA DE PRIVILEGIOS (TA0004)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[29/45] ESCALADA DE PRIVILEGIOS (TA0004)${NC}"
 
     _vp_fcheck /etc/sysctl.d/99-anti-privesc.conf \
         "Protecciones kernel anti-escalada aplicadas" "Protecciones kernel anti-escalada NO aplicadas"
@@ -2917,7 +2919,7 @@ verificacion_proactiva() {
     # ── 30. Impacto (TA0040) ──
     echo ""
     _mark_section 30
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[30/44] IMPACTO (TA0040)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[30/45] IMPACTO (TA0040)${NC}"
 
     # Backups offsite (T1486/T1561 - M1053)
     if [[ -f /etc/backup-offsite/config ]] && [[ -x /usr/local/bin/backup-offsite.sh ]]; then
@@ -2948,7 +2950,7 @@ verificacion_proactiva() {
     # ── 31. Evasión de Defensas (TA0005) ──
     echo ""
     _mark_section 31
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[31/44] EVASIÓN DE DEFENSAS (TA0005)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[31/45] EVASIÓN DE DEFENSAS (TA0005)${NC}"
 
     _vp_fcheck /etc/audit/rules.d/60-log-protection.rules \
         "Protección de logs contra manipulación" "Protección de logs NO configurada"
@@ -2960,7 +2962,7 @@ verificacion_proactiva() {
     # ── 32. Acceso a Credenciales (TA0006) ──
     echo ""
     _mark_section 32
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[32/44] ACCESO A CREDENCIALES (TA0006)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[32/45] ACCESO A CREDENCIALES (TA0006)${NC}"
 
     _vp_fcheck /etc/sysctl.d/91-credential-protection.conf \
         "Protección contra credential dumping" "Protección contra credential dumping NO configurada"
@@ -2972,7 +2974,7 @@ verificacion_proactiva() {
     # ── 33. Descubrimiento (TA0007) ──
     echo ""
     _mark_section 33
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[33/44] DESCUBRIMIENTO (TA0007)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[33/45] DESCUBRIMIENTO (TA0007)${NC}"
     _vp_xcheck /usr/local/bin/detectar-portscan.sh \
         "Detección de port scanning configurada" "Detección de port scanning NO configurada"
     _vp_fcheck /etc/audit/rules.d/63-discovery.rules \
@@ -2981,7 +2983,7 @@ verificacion_proactiva() {
     # ── 34. Movimiento Lateral (TA0008) ──
     echo ""
     _mark_section 34
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[34/44] MOVIMIENTO LATERAL (TA0008)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[34/45] MOVIMIENTO LATERAL (TA0008)${NC}"
     _vp_fcheck /etc/ssh/sshd_config.d/06-lateral-movement.conf \
         "Hardening SSH anti movimiento lateral" "Hardening SSH anti lateral NO configurado"
     _vp_xcheck /usr/local/bin/detectar-lateral.sh \
@@ -2990,7 +2992,7 @@ verificacion_proactiva() {
     # ── 35. Recolección (TA0009) ──
     echo ""
     _mark_section 35
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[35/44] RECOLECCIÓN (TA0009)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[35/45] RECOLECCIÓN (TA0009)${NC}"
     _vp_fcheck /etc/audit/rules.d/65-collection.rules \
         "Auditoría de recolección de datos configurada" "Auditoría de recolección NO configurada"
     _vp_xcheck /usr/local/bin/detectar-staging.sh \
@@ -2999,7 +3001,7 @@ verificacion_proactiva() {
     # ── 36. Exfiltración (TA0010) ──
     echo ""
     _mark_section 36
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[36/44] EXFILTRACIÓN (TA0010)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[36/45] EXFILTRACIÓN (TA0010)${NC}"
     _vp_xcheck /usr/local/bin/detectar-exfiltracion.sh \
         "Detección de exfiltración configurada" "Detección de exfiltración NO configurada"
     _vp_xcheck /usr/local/bin/detectar-dns-tunnel.sh \
@@ -3008,7 +3010,7 @@ verificacion_proactiva() {
     # ── 37. Comando y Control (TA0011) ──
     echo ""
     _mark_section 37
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[37/44] COMANDO Y CONTROL (TA0011)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[37/45] COMANDO Y CONTROL (TA0011)${NC}"
     _vp_xcheck /usr/local/bin/detectar-beaconing.sh \
         "Detección de C2 beaconing configurada" \
         "Detección de C2 beaconing NO configurada"
@@ -3022,7 +3024,7 @@ verificacion_proactiva() {
     # ── 38. Respuesta a Incidentes ──
     echo ""
     _mark_section 38
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[38/44] RESPUESTA A INCIDENTES${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[38/45] RESPUESTA A INCIDENTES${NC}"
     _vp_xcheck /usr/local/bin/ir-recolectar-forense.sh \
         "Toolkit forense instalado" "Toolkit forense NO instalado"
     _vp_xcheck /usr/local/bin/ir-responder.sh \
@@ -3033,7 +3035,7 @@ verificacion_proactiva() {
     # ── 39. Monitorización Continua ──
     echo ""
     _mark_section 39
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[39/44] MONITORIZACIÓN CONTINUA${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[39/45] MONITORIZACIÓN CONTINUA${NC}"
     _vp_xcheck /usr/local/bin/security-dashboard.sh \
         "Dashboard de seguridad instalado" "Dashboard de seguridad NO instalado"
     _vp_xcheck /usr/local/bin/correlacionar-alertas.sh \
@@ -3044,7 +3046,7 @@ verificacion_proactiva() {
     # ── 40. Reportes de Seguridad ──
     echo ""
     _mark_section 40
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[40/44] REPORTES DE SEGURIDAD${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[40/45] REPORTES DE SEGURIDAD${NC}"
     _vp_xcheck /usr/local/bin/reporte-mitre.sh \
         "Reporte MITRE ATT&CK instalado" "Reporte MITRE ATT&CK NO instalado"
     _vp_xcheck /usr/local/bin/exportar-navigator.sh \
@@ -3055,7 +3057,7 @@ verificacion_proactiva() {
     # ── 41. Caza de amenazas ──
     echo ""
     _mark_section 41
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[41/44] CAZA DE AMENAZAS (UEBA / THREAT HUNTING)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[41/45] CAZA DE AMENAZAS (UEBA / THREAT HUNTING)${NC}"
     _vp_xcheck /usr/local/bin/ueba-crear-baseline.sh \
         "Sistema UEBA de baseline instalado" "Sistema UEBA NO instalado"
     _vp_xcheck /usr/local/bin/cazar-amenazas.sh \
@@ -3066,7 +3068,7 @@ verificacion_proactiva() {
     # ── 42. Automatización de respuesta ──
     echo ""
     _mark_section 42
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[42/44] AUTOMATIZACIÓN DE RESPUESTA (SOAR)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[42/45] AUTOMATIZACIÓN DE RESPUESTA (SOAR)${NC}"
     _vp_xcheck /usr/local/bin/soar-responder.sh \
         "Motor SOAR de respuesta automática instalado" "Motor SOAR NO instalado"
     _vp_xcheck /usr/local/bin/soar-gestionar-bloqueos.sh \
@@ -3077,7 +3079,7 @@ verificacion_proactiva() {
     # ── 43. Validación de controles ──
     echo ""
     _mark_section 43
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[43/44] VALIDACIÓN DE CONTROLES (PURPLE TEAM)${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[43/45] VALIDACIÓN DE CONTROLES (PURPLE TEAM)${NC}"
     _vp_xcheck /usr/local/bin/simular-ataques.sh \
         "Simulador ATT&CK seguro instalado" "Simulador ATT&CK NO instalado"
     _vp_xcheck /usr/local/bin/reporte-validacion.sh \
@@ -3088,7 +3090,7 @@ verificacion_proactiva() {
     # ── 44. Ciberinteligencia proactiva ──
     echo ""
     _mark_section 44
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[44/44] CIBERINTELIGENCIA PROACTIVA${NC}"
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[44/45] CIBERINTELIGENCIA PROACTIVA${NC}"
     _vp_xcheck /usr/local/bin/ciberint-enriquecer-ioc.sh \
         "Motor de enriquecimiento IoC instalado" "Motor de enriquecimiento IoC NO instalado"
     _vp_xcheck /usr/local/bin/ciberint-red-inteligente.sh \
@@ -3111,6 +3113,20 @@ verificacion_proactiva() {
         echo -e "  ${YELLOW}!!${NC}  Timers de ciberinteligencia: solo $CIBERINT_TIMERS/6 activos"
         _vp_fail
     fi
+
+    # ── 45. Validación ofensiva (Metasploit) ──
+    echo ""
+    _mark_section 45
+    echo -e "  ${CYAN}┌─${NC} ${BOLD}[45/45] VALIDACIÓN OFENSIVA (METASPLOIT)${NC}"
+    if command -v msfconsole &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  msfconsole disponible"
+        _vp_ok
+    else
+        echo -e "  ${YELLOW}!!${NC}  msfconsole NO disponible (opcional)"
+        _vp_fail
+    fi
+    _vp_xcheck /usr/local/bin/validar-metasploit.sh \
+        "Validador ofensivo Metasploit instalado" "Validador ofensivo Metasploit NO instalado"
 
     # ── Finalizar último check ──
     _mark_section 0
@@ -3570,7 +3586,7 @@ menu_principal() {
         echo -e "  ${BOLD}Acciones${NC}"
         echo ""
         echo -e "    ${GREEN}a${NC}   ${GREEN}${BOLD}Aplicar TODO seguro${NC}          ${DIM}37 módulos secuenciales${NC}"
-        echo -e "    ${CYAN}v${NC}   ${CYAN}${BOLD}Verificación proactiva${NC}       ${DIM}44 checks de seguridad${NC}"
+        echo -e "    ${CYAN}v${NC}   ${CYAN}${BOLD}Verificación proactiva${NC}       ${DIM}45 checks de seguridad${NC}"
 
         _draw_footer
 

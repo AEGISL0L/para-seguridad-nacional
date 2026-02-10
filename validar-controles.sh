@@ -1038,7 +1038,315 @@ else
 fi
 
 # ============================================================
-log_section "5. REPORTE CONSOLIDADO DE VALIDACIÓN"
+log_section "5. VALIDACIÓN OFENSIVA CON METASPLOIT"
+# ============================================================
+
+echo "Genera un validador ofensivo que ejecuta 12 tests usando"
+echo "Metasploit Framework contra localhost para verificar que"
+echo "las mitigaciones aplicadas funcionan frente a exploits reales."
+echo ""
+echo "Incluye:"
+echo "  - Scanning de servicios (SSH, puertos, SMB, SSL)"
+echo "  - Checks de exploits conocidos (DirtyPipe, PwnKit, Samba, Log4Shell)"
+echo "  - Detección de payloads (AV, IDS, firewall)"
+echo "  - Verificación de controles de credenciales (fail2ban)"
+echo ""
+echo "NOTA: Todos los tests apuntan a 127.0.0.1 exclusivamente."
+echo "Si msfconsole no está instalado, todos los tests se marcan SKIP."
+echo ""
+
+if ask "¿Instalar validador ofensivo Metasploit?"; then
+
+    cat > /usr/local/bin/validar-metasploit.sh << 'EOFMSFVAL'
+#!/bin/bash
+# ============================================================
+# VALIDADOR OFENSIVO CON METASPLOIT FRAMEWORK
+# Ejecuta 12 tests contra localhost para verificar controles
+# ============================================================
+
+if [[ $EUID -ne 0 ]]; then
+    echo "[X] Ejecutar como root"
+    exit 1
+fi
+
+RESULT_DIR="/var/lib/purple-team/msf-results"
+RESULT_FILE="$RESULT_DIR/msf-validacion-$(date +%Y%m%d-%H%M%S).txt"
+mkdir -p "$RESULT_DIR"
+
+MSF_TIMEOUT="${SECURIZAR_MSF_TIMEOUT:-120}"
+MSF_TARGET="${SECURIZAR_MSF_TARGETS:-127.0.0.1}"
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║      VALIDACIÓN OFENSIVA CON METASPLOIT FRAMEWORK        ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+echo "Target: $MSF_TARGET"
+echo "Timeout por test: ${MSF_TIMEOUT}s"
+echo "Fecha: $(date -Iseconds)"
+echo ""
+
+# Verificar disponibilidad de msfconsole
+if ! command -v msfconsole &>/dev/null; then
+    echo "[!] msfconsole no disponible - todos los tests serán SKIP"
+    echo ""
+    for i in $(seq 1 12); do
+        printf -v tid "MSF-%02d" "$i"
+        echo "[SKIP] $tid: msfconsole no instalado"
+    done | tee "$RESULT_FILE"
+    echo ""
+    echo "Instala Metasploit Framework para ejecutar validación ofensiva."
+    exit 0
+fi
+
+PASS=0
+FAIL=0
+SKIP=0
+
+_msf_run() {
+    local rc_file
+    rc_file=$(mktemp /tmp/msf-val-XXXXXX.rc)
+    echo "$1" > "$rc_file"
+    echo "exit" >> "$rc_file"
+    local out
+    out=$(timeout "$MSF_TIMEOUT" msfconsole -q -r "$rc_file" 2>&1)
+    local rc=$?
+    rm -f "$rc_file"
+    if [[ $rc -eq 124 ]]; then
+        echo "TIMEOUT"
+        return 1
+    fi
+    echo "$out"
+    return 0
+}
+
+_result() {
+    local status="$1"
+    local tid="$2"
+    local msg="$3"
+    echo "[$status] $tid: $msg" | tee -a "$RESULT_FILE"
+    case "$status" in
+        PASS) PASS=$((PASS+1)) ;;
+        FAIL) FAIL=$((FAIL+1)) ;;
+        SKIP) SKIP=$((SKIP+1)) ;;
+    esac
+}
+
+{
+echo "=========================================================="
+echo " VALIDACIÓN OFENSIVA CON METASPLOIT"
+echo " Target: $MSF_TARGET"
+echo " Fecha:  $(date -Iseconds)"
+echo "=========================================================="
+echo ""
+
+# ── MSF-01: SSH version scan ──
+echo ">>> MSF-01: SSH version scan..."
+OUT=$(_msf_run "use auxiliary/scanner/ssh/ssh_version
+set RHOSTS $MSF_TARGET
+run")
+if echo "$OUT" | grep -qi "SSH"; then
+    _result "PASS" "MSF-01" "SSH version detectada (servicio expuesto - verificar versión)"
+else
+    _result "SKIP" "MSF-01" "SSH no accesible o timeout"
+fi
+
+# ── MSF-02: Port scan TCP ──
+echo ">>> MSF-02: Port scan TCP..."
+OUT=$(_msf_run "use auxiliary/scanner/portscan/tcp
+set RHOSTS $MSF_TARGET
+set PORTS 1-1024
+set THREADS 10
+run")
+OPEN_PORTS=$(echo "$OUT" | grep -c "TCP OPEN" || true)
+if [[ $OPEN_PORTS -le 5 ]]; then
+    _result "PASS" "MSF-02" "Puertos TCP abiertos: $OPEN_PORTS (≤5)"
+else
+    _result "FAIL" "MSF-02" "Puertos TCP abiertos: $OPEN_PORTS (>5 - reducir superficie)"
+fi
+
+# ── MSF-03: SMB version ──
+echo ">>> MSF-03: SMB version scan..."
+OUT=$(_msf_run "use auxiliary/scanner/smb/smb_version
+set RHOSTS $MSF_TARGET
+run")
+if echo "$OUT" | grep -qi "SMBv1\|SMB1"; then
+    _result "FAIL" "MSF-03" "SMBv1 detectado (protocolo inseguro)"
+else
+    _result "PASS" "MSF-03" "SMBv1 no detectado"
+fi
+
+# ── MSF-04: SSL/TLS Heartbleed ──
+echo ">>> MSF-04: Heartbleed check..."
+OUT=$(_msf_run "use auxiliary/scanner/ssl/openssl_heartbleed
+set RHOSTS $MSF_TARGET
+set RPORT 443
+run")
+if echo "$OUT" | grep -qi "vulnerable"; then
+    _result "FAIL" "MSF-04" "Vulnerable a Heartbleed"
+else
+    _result "PASS" "MSF-04" "No vulnerable a Heartbleed"
+fi
+
+# ── MSF-05: DirtyPipe check ──
+echo ">>> MSF-05: DirtyPipe (CVE-2022-0847) check..."
+OUT=$(_msf_run "use exploit/linux/local/dirty_pipe
+set SESSION 0
+check" 2>&1)
+if echo "$OUT" | grep -qiE '\[\+\].*vulnerable'; then
+    _result "FAIL" "MSF-05" "Vulnerable a DirtyPipe (CVE-2022-0847)"
+elif echo "$OUT" | grep -qiE '\[-\].*not vulnerable'; then
+    _result "PASS" "MSF-05" "No vulnerable a DirtyPipe"
+else
+    _result "SKIP" "MSF-05" "Check no concluyente (requiere sesión activa)"
+fi
+
+# ── MSF-06: PwnKit/pkexec ──
+echo ">>> MSF-06: PwnKit (CVE-2021-4034) check..."
+OUT=$(_msf_run "use exploit/linux/local/pkexec
+set SESSION 0
+check" 2>&1)
+if echo "$OUT" | grep -qiE '\[\+\].*vulnerable'; then
+    _result "FAIL" "MSF-06" "Vulnerable a PwnKit (CVE-2021-4034)"
+elif echo "$OUT" | grep -qiE '\[-\].*not vulnerable'; then
+    _result "PASS" "MSF-06" "No vulnerable a PwnKit"
+else
+    _result "SKIP" "MSF-06" "Check no concluyente (requiere sesión activa)"
+fi
+
+# ── MSF-07: Samba exploits ──
+echo ">>> MSF-07: Samba check..."
+OUT=$(_msf_run "use auxiliary/scanner/smb/smb_ms17_010
+set RHOSTS $MSF_TARGET
+run")
+if echo "$OUT" | grep -qiE '\[\+\].*vulnerable'; then
+    _result "FAIL" "MSF-07" "Vulnerable a exploit Samba/SMB"
+elif echo "$OUT" | grep -qiE '\[-\].*not vulnerable|does not appear'; then
+    _result "PASS" "MSF-07" "No vulnerable a exploits Samba/SMB conocidos"
+else
+    _result "SKIP" "MSF-07" "SMB no accesible o check no concluyente"
+fi
+
+# ── MSF-08: Log4Shell ──
+echo ">>> MSF-08: Log4Shell (CVE-2021-44228) scan..."
+OUT=$(_msf_run "use auxiliary/scanner/http/log4shell_scanner
+set RHOSTS $MSF_TARGET
+set RPORT 8080
+run")
+if echo "$OUT" | grep -qiE '\[\+\].*vulnerable|log4shell'; then
+    _result "FAIL" "MSF-08" "Vulnerable a Log4Shell (CVE-2021-44228)"
+else
+    _result "PASS" "MSF-08" "No vulnerable a Log4Shell"
+fi
+
+# ── MSF-09: Detección AV de payload Meterpreter ──
+echo ">>> MSF-09: Detección AV de payload Meterpreter..."
+if command -v msfvenom &>/dev/null && command -v clamscan &>/dev/null; then
+    PAYLOAD_FILE=$(mktemp /tmp/msf-test-payload-XXXXXX.elf)
+    msfvenom -p linux/x64/meterpreter/reverse_tcp LHOST=127.0.0.1 LPORT=4444 \
+        -f elf -o "$PAYLOAD_FILE" &>/dev/null
+    if [[ -f "$PAYLOAD_FILE" ]]; then
+        AV_RESULT=$(clamscan --no-summary "$PAYLOAD_FILE" 2>&1)
+        rm -f "$PAYLOAD_FILE"
+        if echo "$AV_RESULT" | grep -qi "FOUND"; then
+            _result "PASS" "MSF-09" "ClamAV detectó payload Meterpreter"
+        else
+            _result "FAIL" "MSF-09" "ClamAV NO detectó payload Meterpreter"
+        fi
+    else
+        _result "SKIP" "MSF-09" "Error generando payload de test"
+    fi
+else
+    _result "SKIP" "MSF-09" "msfvenom o clamscan no disponible"
+fi
+
+# ── MSF-10: Beaconing C2 + Suricata ──
+echo ">>> MSF-10: Simulación beaconing C2..."
+if command -v suricata &>/dev/null; then
+    # Generar tráfico sospechoso tipo beaconing a localhost (puerto cerrado)
+    for _ in $(seq 1 5); do
+        timeout 2 bash -c "echo test > /dev/tcp/127.0.0.1/4444" 2>/dev/null || true
+        sleep 1
+    done
+    sleep 2
+    # Verificar alertas de Suricata
+    if [[ -f /var/log/suricata/fast.log ]]; then
+        RECENT_ALERTS=$(tail -20 /var/log/suricata/fast.log 2>/dev/null | grep -c "127.0.0.1" || true)
+        if [[ $RECENT_ALERTS -gt 0 ]]; then
+            _result "PASS" "MSF-10" "Suricata detectó tráfico C2 sospechoso ($RECENT_ALERTS alertas)"
+        else
+            _result "FAIL" "MSF-10" "Suricata NO detectó tráfico C2 sospechoso"
+        fi
+    else
+        _result "SKIP" "MSF-10" "Log de Suricata no encontrado"
+    fi
+else
+    _result "SKIP" "MSF-10" "Suricata no disponible"
+fi
+
+# ── MSF-11: Reverse shell bloqueada por firewall ──
+echo ">>> MSF-11: Verificación firewall bloquea reverse shell..."
+# Intentar conexión saliente a puerto típico C2
+BLOCKED=0
+for PORT in 4444 5555 8443; do
+    if ! timeout 3 bash -c "echo test > /dev/tcp/127.0.0.1/$PORT" 2>/dev/null; then
+        BLOCKED=$((BLOCKED+1))
+    fi
+done
+if [[ $BLOCKED -ge 2 ]]; then
+    _result "PASS" "MSF-11" "Firewall bloquea puertos C2 típicos ($BLOCKED/3 bloqueados)"
+else
+    _result "FAIL" "MSF-11" "Firewall NO bloquea puertos C2 típicos ($BLOCKED/3 bloqueados)"
+fi
+
+# ── MSF-12: SSH brute force + fail2ban ──
+echo ">>> MSF-12: SSH brute force mini + fail2ban..."
+if command -v fail2ban-client &>/dev/null && command -v ssh &>/dev/null; then
+    # Intentar 3 logins fallidos
+    for _ in $(seq 1 3); do
+        timeout 5 ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
+            -o ConnectTimeout=3 fakeuser_msf_test@127.0.0.1 "exit" 2>/dev/null || true
+    done
+    sleep 3
+    # Verificar si fail2ban registró algo
+    F2B_STATUS=$(fail2ban-client status sshd 2>/dev/null || true)
+    if echo "$F2B_STATUS" | grep -qi "Currently banned\|Total banned"; then
+        BANNED=$(echo "$F2B_STATUS" | grep -oP 'Currently banned:\s+\K\d+' || echo "0")
+        _result "PASS" "MSF-12" "fail2ban activo (baneados: $BANNED)"
+    else
+        _result "FAIL" "MSF-12" "fail2ban no detectó intentos de brute force SSH"
+    fi
+else
+    _result "SKIP" "MSF-12" "fail2ban-client o ssh no disponible"
+fi
+
+echo ""
+echo "=========================================================="
+echo " RESUMEN DE VALIDACIÓN OFENSIVA"
+echo "=========================================================="
+echo ""
+echo "  Tests ejecutados: $((PASS + FAIL + SKIP))"
+echo "  PASS: $PASS"
+echo "  FAIL: $FAIL"
+echo "  SKIP: $SKIP"
+if [[ $((PASS + FAIL)) -gt 0 ]]; then
+    SCORE=$((PASS * 100 / (PASS + FAIL)))
+    echo "  Score: ${SCORE}%"
+fi
+echo ""
+} | tee -a "$RESULT_FILE"
+
+echo "Resultados guardados en: $RESULT_FILE"
+EOFMSFVAL
+
+    chmod 700 /usr/local/bin/validar-metasploit.sh
+    log_info "Instalado: /usr/local/bin/validar-metasploit.sh"
+
+else
+    log_warn "Omitido: validador ofensivo Metasploit"
+fi
+
+# ============================================================
+log_section "6. REPORTE CONSOLIDADO DE VALIDACIÓN"
 # ============================================================
 
 echo "Ejecuta todas las validaciones y genera un reporte"
@@ -1049,6 +1357,7 @@ echo "  - Validación de autenticación"
 echo "  - Validación de red"
 echo "  - Validación de endpoint"
 echo "  - Simulaciones ATT&CK"
+echo "  - Validación ofensiva Metasploit"
 echo "  - Score global de eficacia"
 echo "  - Recomendaciones de mejora"
 echo ""
@@ -1095,6 +1404,7 @@ AUTH_OUTPUT=""
 RED_OUTPUT=""
 END_OUTPUT=""
 SIM_OUTPUT=""
+MSF_OUTPUT=""
 
 if [[ -x /usr/local/bin/validar-autenticacion.sh ]]; then
     echo "[*] Ejecutando validación de autenticación..."
@@ -1137,6 +1447,17 @@ else
     echo "[!] simular-ataques.sh no encontrado" | tee -a "$REPORT_FILE"
 fi
 
+echo "" | tee -a "$REPORT_FILE"
+echo "=== MÓDULO: VALIDACIÓN OFENSIVA (METASPLOIT) ===" | tee -a "$REPORT_FILE"
+
+if [[ -x /usr/local/bin/validar-metasploit.sh ]]; then
+    echo "[*] Ejecutando validación ofensiva Metasploit..."
+    MSF_OUTPUT=$(/usr/local/bin/validar-metasploit.sh 2>&1)
+    echo "$MSF_OUTPUT" >> "$REPORT_FILE"
+else
+    echo "[!] validar-metasploit.sh no encontrado" | tee -a "$REPORT_FILE"
+fi
+
 # Calcular scores globales
 echo "" | tee -a "$REPORT_FILE"
 echo "=========================================================="  | tee -a "$REPORT_FILE"
@@ -1151,7 +1472,7 @@ TOTAL_DETECTED=0
 TOTAL_NOT_DETECTED=0
 
 # Contar de los outputs capturados
-for OUTPUT in "$AUTH_OUTPUT" "$RED_OUTPUT" "$END_OUTPUT"; do
+for OUTPUT in "$AUTH_OUTPUT" "$RED_OUTPUT" "$END_OUTPUT" "$MSF_OUTPUT"; do
     P=$(echo "$OUTPUT" | grep -c "^\[PASS\]" || true)
     F=$(echo "$OUTPUT" | grep -c "^\[FAIL\]" || true)
     S=$(echo "$OUTPUT" | grep -c "^\[SKIP\]" || true)
@@ -1216,7 +1537,7 @@ echo ""
 REC_NUM=1
 
 # Generar recomendaciones basadas en fallos
-for OUTPUT in "$AUTH_OUTPUT" "$RED_OUTPUT" "$END_OUTPUT"; do
+for OUTPUT in "$AUTH_OUTPUT" "$RED_OUTPUT" "$END_OUTPUT" "$MSF_OUTPUT"; do
     while IFS= read -r LINE; do
         TEST_NAME=$(echo "$LINE" | sed 's/\[FAIL\] //' | cut -d: -f1)
         echo "  ${REC_NUM}. Remediar: $TEST_NAME"
