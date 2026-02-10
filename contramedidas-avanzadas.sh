@@ -163,7 +163,7 @@ EOF
         log_change "Creado" "/tmp/tor-dns.conf"
         log_change "Modificado" "/etc/tor/torrc.d/dns.conf"
 
-        sudo systemctl restart tor
+        sudo systemctl restart tor || true
         log_change "Servicio" "tor restart"
 
         log_info "DNS sobre Tor configurado en puerto 9053"
@@ -195,7 +195,7 @@ connection.stable-id=${CONNECTION}/${BOOT}
 EOF
     log_change "Creado" "/etc/NetworkManager/conf.d/99-random-mac.conf"
 
-    sudo systemctl restart NetworkManager
+    sudo systemctl restart NetworkManager || true
     log_change "Servicio" "NetworkManager restart"
     log_info "MAC aleatorio configurado para todas las conexiones"
 else

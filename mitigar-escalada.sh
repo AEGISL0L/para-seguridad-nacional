@@ -184,6 +184,7 @@ fi
 
 echo ""
 if ask "¿Crear configuración de sudo segura en sudoers.d/?"; then
+    mkdir -p /etc/sudoers.d
     cat > /etc/sudoers.d/99-hardening << 'EOF'
 # ============================================================
 # HARDENING SUDO - T1078 (TA0004)
@@ -299,7 +300,7 @@ vm.unprivileged_userfaultfd = 0
 EOF
 
         log_change "Creado" "/etc/sysctl.d/99-anti-privesc.conf"
-        /usr/sbin/sysctl --system > /dev/null 2>&1
+        /usr/sbin/sysctl --system > /dev/null 2>&1 || true
         log_change "Aplicado" "sysctl --system"
         log_info "Protecciones de kernel aplicadas"
     else
@@ -343,6 +344,7 @@ done
 echo ""
 if ask "¿Configurar reglas de auditoría para inyección de procesos?"; then
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/privesc-injection.rules << 'EOF'
 # Monitoreo de inyección de procesos - T1055
 -a always,exit -F arch=b64 -S ptrace -k process_injection

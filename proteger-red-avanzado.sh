@@ -420,7 +420,7 @@ net.ipv4.conf.default.arp_ignore = 1
 EOF
 
     log_change "Creado" "/etc/sysctl.d/99-arp-protection.conf"
-    /usr/sbin/sysctl --system > /dev/null 2>&1
+    /usr/sbin/sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system"
     log_info "Protección ARP aplicada (arp_announce=2, arp_ignore=1)"
 

@@ -74,7 +74,7 @@ net.ipv4.tcp_rfc1337 = 1
 EOF
     log_change "Creado" "/etc/sysctl.d/50-hardening-base.conf"
 
-    sysctl --system > /dev/null 2>&1
+    sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system"
     log_info "Kernel hardening aplicado"
 else
@@ -144,7 +144,7 @@ if systemctl is-enabled avahi-daemon &>/dev/null; then
     if ask "¿Deshabilitar avahi-daemon?"; then
         systemctl stop avahi-daemon 2>/dev/null || true
         log_change "Servicio" "avahi-daemon stop"
-        systemctl disable avahi-daemon
+        systemctl disable avahi-daemon 2>/dev/null || true
         log_change "Servicio" "avahi-daemon disable"
         log_info "avahi-daemon deshabilitado"
     else
@@ -161,7 +161,7 @@ if systemctl is-enabled ModemManager &>/dev/null; then
     if ask "¿Deshabilitar ModemManager?"; then
         systemctl stop ModemManager 2>/dev/null || true
         log_change "Servicio" "ModemManager stop"
-        systemctl disable ModemManager
+        systemctl disable ModemManager 2>/dev/null || true
         log_change "Servicio" "ModemManager disable"
         log_info "ModemManager deshabilitado"
     else
@@ -177,7 +177,7 @@ if systemctl is-enabled bluetooth &>/dev/null; then
     if ask "¿Deshabilitar bluetooth?"; then
         systemctl stop bluetooth 2>/dev/null || true
         log_change "Servicio" "bluetooth stop"
-        systemctl disable bluetooth
+        systemctl disable bluetooth 2>/dev/null || true
         log_change "Servicio" "bluetooth disable"
         log_info "bluetooth deshabilitado"
     else
@@ -267,7 +267,7 @@ EOF
         # Verificar sintaxis antes de reiniciar
         if sshd -t 2>/dev/null; then
             if systemctl is-active "$SSH_SERVICE_NAME" &>/dev/null; then
-                systemctl reload "$SSH_SERVICE_NAME"
+                systemctl reload "$SSH_SERVICE_NAME" || true
                 log_change "Servicio" "$SSH_SERVICE_NAME reload"
             fi
             log_info "SSH hardening aplicado"
@@ -544,7 +544,7 @@ EOF
         # Verificar sintaxis antes de aplicar
         if sshd -t 2>/dev/null; then
             if systemctl is-active "$SSH_SERVICE_NAME" &>/dev/null; then
-                systemctl reload "$SSH_SERVICE_NAME"
+                systemctl reload "$SSH_SERVICE_NAME" || true
                 log_change "Servicio" "$SSH_SERVICE_NAME reload (MFA)"
             fi
             log_info "MFA para SSH activado"

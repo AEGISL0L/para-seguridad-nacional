@@ -175,7 +175,7 @@ EOF
 
         log_change "Creado" "/etc/sysctl.d/99-anti-exploit-web.conf"
 
-        /usr/sbin/sysctl --system > /dev/null 2>&1
+        /usr/sbin/sysctl --system > /dev/null 2>&1 || true
         log_change "Aplicado" "sysctl --system"
         log_info "Protecciones anti-exploit aplicadas (sysctl)"
 

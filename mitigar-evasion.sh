@@ -198,6 +198,7 @@ EOFHIST
 
     # Reglas auditd para monitorear borrado de historial
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat >> /etc/audit/rules.d/60-log-protection.rules << 'EOF'
 
 # T1070.003 - Monitorear borrado de historial de comandos
@@ -371,6 +372,7 @@ if ask "¿Proteger herramientas de seguridad contra desactivación?"; then
 
     # Reglas auditd para detectar manipulación de servicios
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/61-defense-evasion.rules << 'EOF'
 ## Protección de herramientas de seguridad - T1562
 # Monitorear intentos de desactivar servicios de seguridad

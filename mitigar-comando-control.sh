@@ -268,6 +268,7 @@ if ask "¿Configurar control de descarga de herramientas?"; then
 
     # 3a. Auditoría de descarga de binarios
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/67-command-control.rules << 'EOF'
 ## Detección de Command and Control - TA0011
 # T1105 - Ingress Tool Transfer
@@ -523,6 +524,7 @@ EOFTUNNEL
 
     # Auditd para proxies
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat >> /etc/audit/rules.d/67-command-control.rules << 'EOF'
 
 # T1090/T1572 - Proxy/Tunneling

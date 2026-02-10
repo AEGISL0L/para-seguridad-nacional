@@ -38,8 +38,12 @@ chmod 640 /etc/shadow
 log_change "Permisos" "/etc/shadow -> 640"
 chmod 644 /etc/group
 log_change "Permisos" "/etc/group -> 644"
-chmod 440 /etc/sudoers
-log_change "Permisos" "/etc/sudoers -> 440"
+if [[ -f /etc/sudoers ]]; then
+    chmod 440 /etc/sudoers
+    log_change "Permisos" "/etc/sudoers -> 440"
+else
+    log_skip "Permisos /etc/sudoers (archivo no existe)"
+fi
 
 log_info "   Permisos de archivos críticos asegurados"
 
@@ -78,7 +82,7 @@ net.ipv4.tcp_rfc1337 = 1
 EOF
 log_change "Creado" "/etc/sysctl.d/99-process-hardening.conf"
 
-/usr/sbin/sysctl --system > /dev/null 2>&1
+/usr/sbin/sysctl --system > /dev/null 2>&1 || true
 log_change "Aplicado" "sysctl --system (protección de memoria y procesos)"
 log_info "   Protección de memoria y procesos activa"
 

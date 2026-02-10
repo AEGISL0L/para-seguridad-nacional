@@ -89,7 +89,7 @@ net.ipv6.conf.default.accept_ra = 0
 EOF
     log_change "Creado" "/etc/sysctl.d/99-paranoid.conf"
 
-    /usr/sbin/sysctl --system > /dev/null 2>&1
+    /usr/sbin/sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system"
     log_info "Kernel hardening extremo aplicado"
     log_warn "ptrace_scope=2 puede afectar debuggers (gdb, strace)"
@@ -460,7 +460,7 @@ if systemctl is-active cups &>/dev/null; then
         sed -i 's/^Browsing.*/Browsing Off/' /etc/cups/cupsd.conf 2>/dev/null || true
         log_change "Modificado" "/etc/cups/cupsd.conf"
 
-        systemctl restart cups
+        systemctl restart cups || true
         log_change "Servicio" "cups restart"
         log_info "CUPS restringido a localhost"
     else
@@ -468,9 +468,9 @@ if systemctl is-active cups &>/dev/null; then
     fi
 
     if ask "¿Deshabilitar CUPS completamente (no podrás imprimir)?"; then
-        systemctl stop cups
+        systemctl stop cups 2>/dev/null || true
         log_change "Servicio" "cups stop"
-        systemctl disable cups
+        systemctl disable cups 2>/dev/null || true
         log_change "Servicio" "cups disable"
         log_info "CUPS deshabilitado"
     else
@@ -639,7 +639,7 @@ bantime = 72h
 EOF
         log_change "Creado" "/etc/fail2ban/jail.local"
 
-        systemctl restart fail2ban
+        systemctl restart fail2ban || true
         log_change "Servicio" "fail2ban restart"
         log_info "fail2ban configurado en modo agresivo"
         log_info "  - Ban general: 24h, SSH: 48h, DDoS: 72h"

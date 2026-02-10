@@ -69,6 +69,7 @@ if ask "¿Configurar detección de port scanning interno?"; then
 
     # 1b. Reglas auditd para herramientas de scan
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/63-discovery.rules << 'EOF'
 ## Detección de Discovery - TA0007
 # T1046 - Herramientas de escaneo de red

@@ -158,6 +158,7 @@ EOF
 
     # 1d. Reglas auditd para servicios remotos
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/64-lateral-movement.rules << 'EOF'
 ## Detección de movimiento lateral - TA0008
 # T1021 - Conexiones a servicios remotos
@@ -223,6 +224,7 @@ EOF
 
     # 2c. Monitorear acceso a SSH agent sockets ajenos
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat >> /etc/audit/rules.d/64-lateral-movement.rules << 'EOF'
 
 # T1563.001 - SSH Hijacking

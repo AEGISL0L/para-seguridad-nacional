@@ -734,6 +734,7 @@ if ask "¿Configurar monitoreo de actividad de impacto?"; then
 
     # Reglas auditd para detección de impacto
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
 
         cat > /etc/audit/rules.d/impact-detection.rules << 'EOFAUDIT'
 ## ============================================================

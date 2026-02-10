@@ -122,6 +122,7 @@ EOF
 
     # Reglas auditd para acceso a credenciales
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/62-credential-access.rules << 'EOF'
 ## Protección de credenciales - T1003
 # Monitorear acceso a archivos de credenciales
@@ -604,6 +605,7 @@ EOFTIMER
 
     # 5b. Regla auditd para herramientas de captura
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat >> /etc/audit/rules.d/62-credential-access.rules << 'EOF'
 
 # T1040 - Network Sniffing

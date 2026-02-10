@@ -260,6 +260,7 @@ if ask "¿Bloquear acceso a servicios de cloud storage para exfiltración?"; the
 
     # Reglas auditd para herramientas de upload
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/66-exfiltration.rules << 'EOF'
 ## Detección de exfiltración - TA0010
 # T1041/T1048 - Herramientas de transferencia
@@ -470,6 +471,7 @@ EOF
 
     # Auditar montaje de medios
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat >> /etc/audit/rules.d/66-exfiltration.rules << 'EOF'
 
 # T1052 - Exfiltration Over Physical Medium

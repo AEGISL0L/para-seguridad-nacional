@@ -84,6 +84,7 @@ if ask "¿Proteger datos locales sensibles?"; then
 
     # 1b. Auditoría de acceso a datos sensibles
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/65-collection.rules << 'EOF'
 ## Detección de recolección de datos - TA0009
 # T1005 - Acceso a datos sensibles del sistema

@@ -116,7 +116,7 @@ EOF
         nmcli con mod "$conn" connection.autoconnect-priority -1 2>/dev/null
     done
 
-    sudo systemctl restart NetworkManager
+    sudo systemctl restart NetworkManager || true
     log_change "Servicio" "NetworkManager restart"
 
     log_info "WiFi Mesh/P2P deshabilitado"
@@ -221,7 +221,7 @@ connection.stable-id=${CONNECTION}/${BOOT}/${RANDOM}
 EOF
     log_change "Creado" "/etc/NetworkManager/conf.d/99-random-mac-full.conf"
 
-    sudo systemctl restart NetworkManager
+    sudo systemctl restart NetworkManager || true
     log_change "Servicio" "NetworkManager restart"
 
     log_info "MAC aleatorio en cada conexión"

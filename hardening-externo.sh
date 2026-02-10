@@ -248,7 +248,7 @@ net.ipv4.ip_local_port_range = 32768 65535
 EOF
     log_change "Creado" "/etc/sysctl.d/99-network-hardening.conf"
 
-    /usr/sbin/sysctl --system > /dev/null 2>&1
+    /usr/sbin/sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system"
     log_info "Protecciones de red aplicadas"
 else
@@ -290,7 +290,7 @@ net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
     log_change "Creado" "/etc/sysctl.d/99-disable-ipv6.conf"
-    /usr/sbin/sysctl --system > /dev/null 2>&1
+    /usr/sbin/sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system (disable IPv6)"
     log_info "IPv6 deshabilitado"
 else
@@ -471,7 +471,7 @@ maxretry = 3
 EOF
         log_change "Creado" "/etc/fail2ban/jail.local"
 
-        systemctl restart fail2ban
+        systemctl restart fail2ban || true
         log_change "Servicio" "fail2ban restart"
         log_info "fail2ban configurado: SSH 1 semana, DDoS 4 semanas, Reincidentes 1 año"
     else

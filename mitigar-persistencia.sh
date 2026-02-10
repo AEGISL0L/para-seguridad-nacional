@@ -75,6 +75,7 @@ done || true
 
 if ask "¿Configurar monitoreo de cambios en tareas programadas?"; then
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-cron.rules << 'EOF'
 # Monitoreo de persistencia via cron - T1053
 -w /etc/crontab -p wa -k persist_cron
@@ -141,6 +142,7 @@ fi
 echo ""
 if ask "¿Configurar monitoreo de cambios en servicios systemd?"; then
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-systemd.rules << 'EOF'
 # Monitoreo de persistencia via systemd - T1543
 -w /etc/systemd/system/ -p wa -k persist_systemd
@@ -226,6 +228,7 @@ fi
 echo ""
 if ask "¿Configurar monitoreo de scripts de autostart?"; then
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-autostart.rules << 'EOF'
 # Monitoreo de persistencia via autostart - T1547/T1037
 -w /etc/profile -p wa -k persist_login
@@ -298,6 +301,7 @@ done < /etc/shadow 2>/dev/null
 echo ""
 if ask "¿Configurar monitoreo de creación/modificación de cuentas?"; then
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-accounts.rules << 'EOF'
 # Monitoreo de persistencia via cuentas - T1136
 -w /etc/passwd -p wa -k persist_account
@@ -373,6 +377,7 @@ done
 echo ""
 if ask "¿Configurar monitoreo de autenticación?"; then
     if command -v auditctl &>/dev/null; then
+        mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-auth.rules << 'EOF'
 # Monitoreo de persistencia via autenticación - T1556
 -w /etc/pam.d/ -p wa -k persist_auth

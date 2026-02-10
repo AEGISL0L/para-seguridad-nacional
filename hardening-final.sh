@@ -99,11 +99,11 @@ log_section "2. DESHABILITAR BLUETOOTH"
 if systemctl is-active bluetooth &>/dev/null; then
     log_warn "Bluetooth está ACTIVO (vector de ataque)"
     if ask "¿Deshabilitar Bluetooth?"; then
-        systemctl stop bluetooth
+        systemctl stop bluetooth 2>/dev/null || true
         log_change "Servicio" "bluetooth stop"
-        systemctl disable bluetooth
+        systemctl disable bluetooth 2>/dev/null || true
         log_change "Servicio" "bluetooth disable"
-        systemctl mask bluetooth
+        systemctl mask bluetooth 2>/dev/null || true
         log_change "Servicio" "bluetooth mask"
 
         # Bloquear módulo
@@ -264,9 +264,9 @@ for svc in $SERVICES_TO_CHECK; do
         echo ""
         log_warn "$svc está activo"
         if ask "¿Deshabilitar $svc?"; then
-            systemctl stop "$svc"
+            systemctl stop "$svc" 2>/dev/null || true
             log_change "Servicio" "$svc stop"
-            systemctl disable "$svc"
+            systemctl disable "$svc" 2>/dev/null || true
             log_change "Servicio" "$svc disable"
             log_info "$svc deshabilitado"
         else
@@ -349,7 +349,7 @@ vm.mmap_min_addr = 65536
 EOF
     log_change "Creado" "/etc/sysctl.d/99-memory-hardening.conf"
 
-    /usr/sbin/sysctl --system > /dev/null 2>&1
+    /usr/sbin/sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system (memory hardening)"
     log_info "Protecciones de memoria aplicadas"
 else

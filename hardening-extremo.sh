@@ -160,7 +160,7 @@ vm.swappiness = 10
 EOF
 log_change "Creado" "/etc/sysctl.d/99-paranoid-max.conf"
 
-/usr/sbin/sysctl --system > /dev/null 2>&1
+/usr/sbin/sysctl --system > /dev/null 2>&1 || true
 log_change "Aplicado" "sysctl --system"
 log_info "   Kernel en modo paranoico máximo"
 
