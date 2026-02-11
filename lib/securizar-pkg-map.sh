@@ -33,6 +33,20 @@ PKG_MAP[obfs4proxy]="obfs4proxy|obfs4proxy|obfs4proxy|obfs4proxy"
 PKG_MAP[chrony]="chrony|chrony|chrony|chrony"
 PKG_MAP[gocryptfs]="gocryptfs|gocryptfs|gocryptfs|gocryptfs"
 
+# Paquetes de email y SMTP
+PKG_MAP[opendkim]="opendkim|opendkim|opendkim|opendkim"
+PKG_MAP[opendmarc]="opendmarc|opendmarc|opendmarc|opendmarc"
+PKG_MAP[postfix]="postfix|postfix|postfix|postfix"
+PKG_MAP[spamassassin]="spamassassin|spamassassin|spamassassin|spamassassin"
+
+# Paquetes de logging centralizado
+PKG_MAP[rsyslog-gnutls]="rsyslog-module-gnutls|rsyslog-gnutls|rsyslog-gnutls|rsyslog-gnutls"
+
+# Paquetes de cadena de suministro
+PKG_MAP[rpm-sign]="rpm|rpm|-|rpm-tools"
+PKG_MAP[dpkg-sig]="-|dpkg-sig|-|-"
+PKG_MAP[debsigs]="-|debsigs|-|-"
+
 # Paquetes con nombres significativamente diferentes
 PKG_MAP[openscap-utils]="openscap-utils|libopenscap8|openscap-utils|openscap"
 PKG_MAP[scap-security-guide]="scap-security-guide|ssg-base|scap-security-guide|scap-security-guide"
