@@ -19,7 +19,7 @@ Suite completa de hardening y securizacion para Linux, con 44 modulos interactiv
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 43+ categorias de controles
+- **Verificacion proactiva** de 52 categorias de controles
 - **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, mapeo NIST 800-53
@@ -134,7 +134,10 @@ securizar/
 ├── proteger-contra-isp.sh         # Modulo 38: Proteccion contra espionaje ISP
 ├── hardening-criptografico.sh     # Modulo 39: Hardening criptografico
 ├── seguridad-contenedores.sh      # Modulo 40: Seguridad de contenedores
-└── cumplimiento-cis.sh            # Modulo 41: Cumplimiento CIS Benchmarks
+├── cumplimiento-cis.sh            # Modulo 41: Cumplimiento CIS Benchmarks
+├── seguridad-email.sh             # Modulo 42: Seguridad de email
+├── logging-centralizado.sh        # Modulo 43: Logging centralizado y SIEM
+└── seguridad-cadena-suministro.sh # Modulo 44: Cadena de suministro
 ```
 
 ---
@@ -191,7 +194,7 @@ Soporta fallback via `ID_LIKE` para derivadas no reconocidas directamente.
 
 ### `securizar-pkg-map.sh` - Mapeo de paquetes
 
-Tabla de 40+ paquetes con sus nombres equivalentes por distribucion:
+Tabla de 50+ paquetes con sus nombres equivalentes por distribucion:
 
 ```bash
 # Formato: PKG_MAP[nombre_generico]="suse|debian|rhel|arch"
@@ -395,9 +398,9 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 39 | **Hardening criptografico** | `hardening-criptografico.sh` | Auditoria y hardening de algoritmos SSH (KexAlgorithms, Ciphers, MACs, HostKey), TLS system-wide, monitorizacion de certificados, calidad de entropia, hardening GPG, verificacion de cifrado de disco (LUKS), escaneo TLS de servicios locales, auditoria de hashing de contrasenas, hardening criptografico del kernel |
 | 40 | **Seguridad de contenedores** | `seguridad-contenedores.sh` | Hardening de Docker/Podman daemon, restricciones de runtime (seccomp, AppArmor, capabilities), seguridad de imagenes, aislamiento de red de contenedores, seguridad de almacenamiento, seguridad de registro (registry), contenedores rootless, monitorizacion, seguridad Kubernetes basica, auditoria CIS de contenedores |
 | 41 | **Cumplimiento CIS** | `cumplimiento-cis.sh` | Evaluacion CIS Benchmark Level 1 y 2 (sistema de archivos, servicios, red, logging, acceso), mapeo a NIST 800-53, motor de puntuacion CIS con scoring, remediacion automatica segura, generacion de informe de cumplimiento |
-| 42 | **Seguridad de email** | `seguridad-email.sh` | SPF, DKIM, DMARC, TLS obligatorio, anti-relay *(pendiente)* |
-| 43 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog con TLS, integracion SIEM, correlacion, forense *(pendiente)* |
-| 44 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | SBOM, CVEs, firmas, integridad de paquetes *(pendiente)* |
+| 42 | **Seguridad de email** | `seguridad-email.sh` | Hardening de Postfix (banner, VRFY, HELO), SPF (verificacion DNS, sintaxis, ~all vs -all), DKIM (opendkim 2048-bit, rotacion de claves), DMARC (opendmarc, p=reject), TLS obligatorio (DANE, cipher hardening), anti-relay (restricciones, rate limiting, submission 587), proteccion anti-spoofing (header_checks, sender_login_maps), filtrado de spam (SpamAssassin, Bayes, MIME blocking), monitorizacion de email, auditoria completa (SEGURO/MEJORABLE/INSEGURO) |
+| 43 | **Logging centralizado** | `logging-centralizado.sh` | Hardening rsyslog/journald (permisos, async, Forward Secure Sealing), reenvio TLS (rsyslog-gnutls, certificados auto-generados, cola persistente), agregacion CEF/JSON con normalizacion RFC 5424, almacenamiento seguro (chattr +a, hash chain SHA-256, gocryptfs vault), correlacion de eventos (8 patrones: brute force, escalada, lateral, staging, tampering), alertas en tiempo real (omprog, email/webhook, rate limiting), retencion avanzada (365/180/90/30 dias, zstd), integracion SIEM (templates ELK/Splunk/Graylog), forense de logs (timeline, chain of custody), auditoria (COMPLETO/PARCIAL/INSUFICIENTE) |
+| 44 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | Verificacion de firmas GPG por distro (zypper/apt/dnf/pacman), inventario SBOM en CycloneDX JSON con diff, auditoria de CVEs (zypper list-patches/dnf updateinfo/arch-audit), repositorios seguros (HTTPS, whitelist, prioridades), integridad de binarios (rpm -Va/debsums/pacman -Qk, baseline SHA-256), politica de instalacion (hook de logging, enforcement por distro), deteccion de troyanizados (SUID/SGID, orphan binaries, LD_PRELOAD, capabilities, PATH hijack), hardening del gestor de paquetes, monitorizacion de cambios de software (timer 6h), auditoria completa (SEGURO/MEJORABLE/INSEGURO, NIST 800-53 SA) |
 
 ---
 
@@ -416,7 +419,7 @@ Menu principal
 ├── i  Inteligencia (37-38)
 ├── x  Avanzado (39-44)
 ├── a  Aplicar todos los 44 modulos
-├── v  Verificacion proactiva (43+ checks)
+├── v  Verificacion proactiva (52 checks)
 ├── 1-44  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
@@ -435,7 +438,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 43+ verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 52 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -451,6 +454,9 @@ La opcion `v` ejecuta 43+ verificaciones agrupadas por categoria:
 - Cada tactica MITRE ATT&CK (TA0001-TA0011)
 - Respuesta a incidentes, monitorizacion, reportes
 - Caza de amenazas, SOAR, Purple Team
+- Ciberinteligencia, proteccion ISP
+- Criptografia, contenedores, CIS
+- Seguridad de email, logging SIEM, cadena de suministro
 
 ### Session tracking
 
@@ -594,6 +600,45 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `simular-ataques.sh` | 12 simulaciones seguras de tecnicas ATT&CK |
 | `reporte-validacion.sh` | Scoring global (60% controles + 40% deteccion) |
 
+### Seguridad de email
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `verificar-spf.sh` | Auditoria de registros SPF: sintaxis DNS, -all vs ~all, conteo de lookups |
+| `verificar-dmarc.sh` | Auditoria de registros DMARC: politica p=reject, rua/ruf, pct |
+| `rotar-dkim.sh` | Rotacion de claves DKIM con generacion de nuevo par 2048-bit |
+| `detectar-email-spoofing.sh` | Analisis de cabeceras de correo (From/Return-Path/Received) |
+| `monitorizar-email.sh` | Estado de cola, fallos de autenticacion, intentos de relay, stats TLS |
+| `auditoria-email.sh` | Auditoria completa de seguridad email (SEGURO/MEJORABLE/INSEGURO) |
+
+### Logging centralizado y SIEM
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `configurar-log-remoto.sh` | Configura servidor/cliente de reenvio TLS de logs |
+| `securizar-log-integrity.sh` | Cadena de hashes SHA-256 para integridad de logs criticos |
+| `correlacionar-eventos.sh` | Correlacion de 8 patrones de ataque (brute force, escalada, lateral, staging) |
+| `securizar-log-alertas.sh` | Alertas en tiempo real via omprog (email/webhook, rate limiting) |
+| `gestionar-retencion-logs.sh` | Gestion de retencion por categoria (365/180/90/30 dias) |
+| `activar-siem.sh` | Activar integracion SIEM (Elasticsearch, Splunk HEC, Graylog GELF) |
+| `forense-logs.sh` | Timeline forense multi-fuente con chain of custody |
+| `auditoria-logging.sh` | Auditoria de infraestructura de logging (COMPLETO/PARCIAL/INSUFICIENTE) |
+
+### Cadena de suministro
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `verificar-firmas-paquetes.sh` | Verificacion de firmas GPG de todos los paquetes instalados |
+| `generar-sbom.sh` | Generacion de SBOM en formato CycloneDX JSON con diff |
+| `auditar-cves.sh` | Auditoria de CVEs contra paquetes instalados (CRITICAL/HIGH/MEDIUM/LOW) |
+| `verificar-dependencias.sh` | Deteccion de paquetes huerfanos, obsoletos y de terceros |
+| `auditar-repositorios.sh` | Auditoria de repositorios (HTTPS, GPG, whitelist) |
+| `verificar-integridad-binarios.sh` | Verificacion SHA-256 de binarios criticos contra baseline |
+| `securizar-install-hook.sh` | Hook de logging de instalaciones con enforcement de politica |
+| `detectar-troyanizados.sh` | Deteccion de SUID/SGID, orphans, LD_PRELOAD, capabilities, PATH |
+| `monitorizar-software.sh` | Monitorizacion de cambios: installs/removals, SUID, kernel modules |
+| `auditoria-cadena-suministro.sh` | Auditoria completa de supply chain (SEGURO/MEJORABLE/INSEGURO) |
+
 ---
 
 ## Directorios de datos
@@ -607,7 +652,16 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/var/lib/soar/` | SOAR (queue de eventos, acciones ejecutadas, IPs bloqueadas) |
 | `/var/lib/purple-team/` | Purple Team (validacion, evidencia de simulaciones, reportes) |
 | `/var/lib/ciberinteligencia/` | Ciberinteligencia (cache, config, datos, alertas) |
-| `/var/lib/securizar/` | CIS scores y datos generales |
+| `/var/lib/securizar/` | CIS scores, SBOM, binary hashes, CVE audits, software changes |
+| `/var/lib/securizar/sbom/` | Inventarios SBOM en formato CycloneDX JSON |
+| `/var/lib/securizar/binary-hashes/` | Baseline SHA-256 de binarios criticos del sistema |
+| `/var/lib/securizar/cve-audit/` | Resultados de auditorias CVE |
+| `/var/lib/securizar/log-hashes/` | Cadena de hashes para integridad de logs |
+| `/var/lib/securizar/forense/` | Timelines y datos de forense de logs |
+| `/var/log/securizar/` | Logs de correlacion, alertas, cambios de software |
+| `/etc/securizar/email/` | Plantillas SPF, configuracion de seguridad email |
+| `/etc/securizar/siem/` | Templates de integracion SIEM (ELK, Splunk, Graylog) |
+| `/etc/securizar/log-certs/` | Certificados TLS para reenvio seguro de logs |
 
 ---
 
