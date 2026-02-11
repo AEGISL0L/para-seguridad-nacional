@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 44 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia y cumplimiento CIS. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 47 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS, forensia digital y Zero Trust. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,13 +13,13 @@ Suite completa de hardening y securizacion para Linux, con 44 modulos interactiv
 
 ## Caracteristicas principales
 
-- **44 modulos** organizados en 6 categorias con menu interactivo
+- **47 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 52 categorias de controles
+- **Verificacion proactiva** de 55 categorias de controles
 - **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, mapeo NIST 800-53
@@ -55,7 +55,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-44):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-47):
 
 ```
   b  Hardening Base          (modulos 1-10)   ●●●○○○○○○○
@@ -63,9 +63,9 @@ El menu principal muestra 6 categorias con indicadores de progreso. Se navega co
   m  Mitigaciones MITRE      (modulos 19-30)  ○○○○○○○○○○○○
   o  Operaciones de Seguridad(modulos 31-36)  ○○○○○○
   i  Inteligencia            (modulos 37-38)  ○○
-  x  Avanzado                (modulos 39-44)  ○○○○○○
+  x  Avanzado                (modulos 39-47)  ○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-44 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-47 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -82,7 +82,7 @@ sudo bash respuesta-incidentes.sh    # Modulo 31
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (44 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (47 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -137,7 +137,10 @@ securizar/
 ├── cumplimiento-cis.sh            # Modulo 41: Cumplimiento CIS Benchmarks
 ├── seguridad-email.sh             # Modulo 42: Seguridad de email
 ├── logging-centralizado.sh        # Modulo 43: Logging centralizado y SIEM
-└── seguridad-cadena-suministro.sh # Modulo 44: Cadena de suministro
+├── seguridad-cadena-suministro.sh # Modulo 44: Cadena de suministro
+├── segmentacion-red-zt.sh         # Modulo 45: Segmentacion de red y Zero Trust
+├── forense-avanzado.sh            # Modulo 46: Forense avanzado
+└── kernel-livepatch.sh            # Modulo 47: Kernel live patching
 ```
 
 ---
@@ -391,7 +394,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 37 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 38 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Avanzado (modulos 39-44)
+### Categoria 6: Avanzado (modulos 39-47)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -401,6 +404,9 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 42 | **Seguridad de email** | `seguridad-email.sh` | Hardening de Postfix (banner, VRFY, HELO), SPF (verificacion DNS, sintaxis, ~all vs -all), DKIM (opendkim 2048-bit, rotacion de claves), DMARC (opendmarc, p=reject), TLS obligatorio (DANE, cipher hardening), anti-relay (restricciones, rate limiting, submission 587), proteccion anti-spoofing (header_checks, sender_login_maps), filtrado de spam (SpamAssassin, Bayes, MIME blocking), monitorizacion de email, auditoria completa (SEGURO/MEJORABLE/INSEGURO) |
 | 43 | **Logging centralizado** | `logging-centralizado.sh` | Hardening rsyslog/journald (permisos, async, Forward Secure Sealing), reenvio TLS (rsyslog-gnutls, certificados auto-generados, cola persistente), agregacion CEF/JSON con normalizacion RFC 5424, almacenamiento seguro (chattr +a, hash chain SHA-256, gocryptfs vault), correlacion de eventos (8 patrones: brute force, escalada, lateral, staging, tampering), alertas en tiempo real (omprog, email/webhook, rate limiting), retencion avanzada (365/180/90/30 dias, zstd), integracion SIEM (templates ELK/Splunk/Graylog), forense de logs (timeline, chain of custody), auditoria (COMPLETO/PARCIAL/INSUFICIENTE) |
 | 44 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | Verificacion de firmas GPG por distro (zypper/apt/dnf/pacman), inventario SBOM en CycloneDX JSON con diff, auditoria de CVEs (zypper list-patches/dnf updateinfo/arch-audit), repositorios seguros (HTTPS, whitelist, prioridades), integridad de binarios (rpm -Va/debsums/pacman -Qk, baseline SHA-256), politica de instalacion (hook de logging, enforcement por distro), deteccion de troyanizados (SUID/SGID, orphan binaries, LD_PRELOAD, capabilities, PATH hijack), hardening del gestor de paquetes, monitorizacion de cambios de software (timer 6h), auditoria completa (SEGURO/MEJORABLE/INSEGURO, NIST 800-53 SA) |
+| 45 | **Segmentacion de red y Zero Trust** | `segmentacion-red-zt.sh` | Zonas de red con nftables (TRUSTED/INTERNAL/DMZ/RESTRICTED), politicas inter-zona (default-deny, matriz de flujos), microsegmentacion por servicio (nftables per-service), aislamiento de contenedores Docker/Podman (redes internas, ICC disabled), evaluacion de postura de dispositivo Zero Trust (scoring 0-100, JSON), control de acceso basado en identidad (PAM + zonas de red), monitorizacion de trafico inter-zona (tcpdump/conntrack, deteccion de anomalias), validacion de segmentacion (tests de aislamiento), verificacion continua ZT (cron 15min, drift detection), auditoria completa (BUENO/MEJORABLE/DEFICIENTE) |
+| 46 | **Forense avanzado** | `forense-avanzado.sh` | Kit de adquisicion de memoria (LiME/proc/kcore, multi-formato), imagen de disco forense (dc3dd/dd, dual hash SHA-256+MD5, write-blocking), preservacion de datos volatiles (RFC 3227, 10 categorias por orden de volatilidad), recopilacion de artefactos (logs, histories, SUID, hidden files, tarball firmado), timeline unificada (MAC times, logs, journal, wtmp/btmp, CSV con filtrado), analisis de malware (YARA con 6 sets de reglas, analisis estatico de binarios), cadena de custodia digital (JSON manifest, hash verification), analisis de logs (brute force, escalada, anomalias), script maestro de recopilacion total, auditoria de preparacion forense (BUENO/MEJORABLE/DEFICIENTE) |
+| 47 | **Kernel live patching** | `kernel-livepatch.sh` | Auditoria de seguridad del kernel (KASLR, SMEP/SMAP, KPTI, Retpoline, lockdown), setup de live patching (kpatch/livepatch/kGraft por distro), mitigacion de exploits via sysctl (25+ parametros: kptr_restrict, dmesg_restrict, perf_event_paranoid, yama ptrace, unprivileged_bpf, kexec_load_disabled), hardening de modulos kernel (blacklist 15+ modulos peligrosos, modprobe.d), validacion de parametros contra baseline (drift detection, auto-remediacion), monitorizacion de CVEs del kernel (base de datos local, matching por version), politica de actualizacion del kernel, verificacion de Secure Boot y firma de modulos, rollback seguro de kernel (GRUB, kexec), auditoria completa (BUENO/MEJORABLE/DEFICIENTE) |
 
 ---
 
@@ -417,10 +423,10 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (19-30)
 ├── o  Operaciones de Seguridad (31-36)
 ├── i  Inteligencia (37-38)
-├── x  Avanzado (39-44)
-├── a  Aplicar todos los 44 modulos
-├── v  Verificacion proactiva (52 checks)
-├── 1-44  Acceso directo por numero
+├── x  Avanzado (39-47)
+├── a  Aplicar todos los 47 modulos
+├── v  Verificacion proactiva (55 checks)
+├── 1-47  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -438,7 +444,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 52 verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 55 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -457,6 +463,9 @@ La opcion `v` ejecuta 52 verificaciones agrupadas por categoria:
 - Ciberinteligencia, proteccion ISP
 - Criptografia, contenedores, CIS
 - Seguridad de email, logging SIEM, cadena de suministro
+- Segmentacion de red y Zero Trust
+- Forense avanzado
+- Kernel live patching
 
 ### Session tracking
 
@@ -639,6 +648,48 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `monitorizar-software.sh` | Monitorizacion de cambios: installs/removals, SUID, kernel modules |
 | `auditoria-cadena-suministro.sh` | Auditoria completa de supply chain (SEGURO/MEJORABLE/INSEGURO) |
 
+### Segmentacion de red y Zero Trust
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `aplicar-politicas-zona.sh` | Aplicacion y gestion de politicas inter-zona (nftables) |
+| `microsegmentar-servicio.sh` | Microsegmentacion por servicio individual o masiva |
+| `aislar-contenedores-red.sh` | Aislamiento de redes Docker/Podman (internal, ICC) |
+| `evaluar-postura-dispositivo.sh` | Evaluacion Zero Trust del dispositivo (scoring 0-100, JSON) |
+| `aplicar-acceso-identidad.sh` | Control de acceso basado en identidad y zona de red |
+| `monitorizar-trafico-zonas.sh` | Monitorizacion de trafico inter-zona con deteccion de anomalias |
+| `validar-segmentacion.sh` | Tests de aislamiento y validacion de reglas de segmentacion |
+| `verificar-zt-continuo.sh` | Verificacion continua de postura Zero Trust (drift detection) |
+| `auditoria-segmentacion-zt.sh` | Auditoria integral de segmentacion y ZT (BUENO/MEJORABLE/DEFICIENTE) |
+
+### Forense avanzado
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `forense-capturar-ram.sh` | Adquisicion de memoria RAM (LiME/proc/kcore, multi-formato) |
+| `forense-imagen-disco.sh` | Imagen forense de disco (dc3dd/dd, dual hash, write-blocking) |
+| `forense-volatil.sh` | Preservacion de datos volatiles (RFC 3227, 10 categorias) |
+| `forense-artefactos.sh` | Recopilacion de artefactos del sistema (logs, histories, SUID) |
+| `forense-timeline.sh` | Timeline unificada (MAC times, logs, journal, wtmp/btmp, CSV) |
+| `forense-yara-scan.sh` | Escaneo de directorios con 6 sets de reglas YARA |
+| `forense-analizar-binario.sh` | Analisis estatico de binarios (strings, entropia, ELF, YARA) |
+| `forense-custodia.sh` | Cadena de custodia digital (crear/agregar/verificar/transferir) |
+| `forense-analizar-logs.sh` | Analisis automatizado de logs (brute force, escalada, anomalias) |
+| `forense-recopilar-todo.sh` | Script maestro: recopilacion forense completa en orden optimo |
+| `auditoria-forense.sh` | Auditoria de preparacion forense (BUENO/MEJORABLE/DEFICIENTE) |
+
+### Kernel live patching
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-kernel.sh` | Auditoria de seguridad del kernel (KASLR, SMEP, KPTI, Retpoline) |
+| `validar-kernel-params.sh` | Validacion de parametros del kernel contra baseline |
+| `monitorizar-cves-kernel.sh` | Monitorizacion de CVEs contra kernel en ejecucion |
+| `gestionar-kernel-updates.sh` | Gestion de actualizaciones del kernel segun politica |
+| `verificar-secure-boot.sh` | Verificacion de Secure Boot, firmas y MOK |
+| `kernel-rollback.sh` | Rollback seguro de kernel (GRUB, kexec, minimo 2 kernels) |
+| `auditoria-livepatch.sh` | Auditoria integral de kernel y livepatch (BUENO/MEJORABLE/DEFICIENTE) |
+
 ---
 
 ## Directorios de datos
@@ -662,6 +713,20 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/etc/securizar/email/` | Plantillas SPF, configuracion de seguridad email |
 | `/etc/securizar/siem/` | Templates de integracion SIEM (ELK, Splunk, Graylog) |
 | `/etc/securizar/log-certs/` | Certificados TLS para reenvio seguro de logs |
+| `/etc/securizar/zonas-red.conf` | Definicion de zonas de red (TRUSTED/INTERNAL/DMZ/RESTRICTED) |
+| `/etc/securizar/politicas-interzona.conf` | Matriz de politicas inter-zona |
+| `/etc/securizar/microseg-servicios.conf` | Configuracion de microsegmentacion por servicio |
+| `/etc/securizar/acceso-identidad.conf` | Mapeo usuarios/grupos a zonas de red |
+| `/etc/securizar/yara-rules/` | Reglas YARA (crypto miners, shells, webshells, rootkits) |
+| `/etc/securizar/custodia-plantilla.json` | Plantilla de cadena de custodia digital |
+| `/etc/securizar/livepatch.conf` | Configuracion de live patching del kernel |
+| `/etc/securizar/kernel-baseline.conf` | Baseline de parametros de seguridad del kernel |
+| `/etc/securizar/kernel-update-policy.conf` | Politica de actualizacion del kernel |
+| `/var/forensics/` | Almacenamiento de evidencia forense (RAM, disco, artefactos) |
+| `/var/log/securizar/postura-dispositivo.json` | Reporte de postura Zero Trust |
+| `/var/log/securizar/trafico-zonas.log` | Log de trafico inter-zona |
+| `/var/log/securizar/kernel-cves.json` | Resultados de escaneo de CVEs del kernel |
+| `/var/lib/securizar/zt-state.json` | Estado de verificacion continua Zero Trust |
 
 ---
 
@@ -754,7 +819,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 44 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 47 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
