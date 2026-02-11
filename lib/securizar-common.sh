@@ -28,12 +28,19 @@ if [[ -f "$_SECURIZAR_CONF" ]]; then
     _conf_perms=$(stat -c '%a' "$_SECURIZAR_CONF" 2>/dev/null || echo "")
     _conf_safe=1
     if [[ "$_conf_owner" != "0" ]]; then
-        echo "AVISO: securizar.conf no es propiedad de root (uid=$_conf_owner), ignorando" >&2
-        _conf_safe=0
-    elif [[ "${_conf_perms:2:1}" =~ [2367] ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            chown root:root "$_SECURIZAR_CONF" 2>/dev/null && \
+                chmod 600 "$_SECURIZAR_CONF" 2>/dev/null && \
+                _conf_perms=$(stat -c '%a' "$_SECURIZAR_CONF" 2>/dev/null || echo "")
+        else
+            echo "AVISO: securizar.conf no es propiedad de root (uid=$_conf_owner), ignorando" >&2
+            _conf_safe=0
+        fi
+    fi
+    if [[ "$_conf_safe" == "1" ]] && [[ "${_conf_perms:2:1}" =~ [2367] ]]; then
         echo "AVISO: securizar.conf es writable por otros (permisos=$_conf_perms), ignorando" >&2
         _conf_safe=0
-    else
+    elif [[ "$_conf_safe" == "1" ]]; then
         # Verificar que solo contiene asignaciones de variables (KEY=value), comentarios o lineas vacias
         while IFS= read -r _line; do
             # Quitar espacios iniciales

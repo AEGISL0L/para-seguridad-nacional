@@ -17,6 +17,8 @@
 
 set -euo pipefail
 
+DECEPTION_SECTION="${1:-all}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 source "${SCRIPT_DIR}/lib/securizar-firewall.sh"
@@ -25,16 +27,18 @@ require_root
 securizar_setup_traps
 init_backup "deception-tech"
 
-echo ""
-echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║   MODULO 55 - TECNOLOGIA DE ENGANO (DECEPTION TECH)      ║"
-echo "║   Honeypots, tokens, honey files, honey users, DNS        ║"
-echo "║   Servicios falsos, alertas, dashboard, auditoria          ║"
-echo "╚═══════════════════════════════════════════════════════════╝"
-echo ""
+if [[ "$DECEPTION_SECTION" == "all" ]]; then
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════╗"
+    echo "║   MODULO 55 - TECNOLOGIA DE ENGANO (DECEPTION TECH)      ║"
+    echo "║   Honeypots, tokens, honey files, honey users, DNS        ║"
+    echo "║   Servicios falsos, alertas, dashboard, auditoria          ║"
+    echo "╚═══════════════════════════════════════════════════════════╝"
+    echo ""
 
-log_section "MODULO 55: TECNOLOGIA DE ENGANO"
-log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
+    log_section "MODULO 55: TECNOLOGIA DE ENGANO"
+    log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
+fi
 
 # ── Directorios base ─────────────────────────────────────────
 DECEPTION_CONF_DIR="/etc/securizar/deception"
@@ -45,7 +49,123 @@ DECEPTION_ALERT_LOG="/var/log/securizar/deception-alerts.log"
 mkdir -p /etc/securizar
 mkdir -p "$DECEPTION_CONF_DIR"
 mkdir -p "$DECEPTION_LOG_DIR"
+mkdir -p "${DECEPTION_LOG_DIR}/pcap"
 mkdir -p /var/log/securizar
+
+if [[ "$DECEPTION_SECTION" == "all" ]]; then
+# ── Deteccion de despliegue previo ─────────────────────────────
+# Comprobar si ya existe un despliegue para evitar duplicados al re-ejecutar
+DECEPTION_EXISTING=0
+DECEPTION_EXISTING_SUMMARY=""
+
+# Honeypots de red (S1)
+_hp_running=0
+for _hp_port in 2222 2323 2121 4445 3390 3307; do
+    if systemctl is-active "securizar-honeypot@${_hp_port}.service" &>/dev/null; then
+        ((_hp_running++)) || true
+    fi
+done
+if [[ $_hp_running -gt 0 ]]; then
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Honeypots de red: ${_hp_running} servicios activos\n"
+fi
+
+# Honeytokens (S2)
+if [[ -f /etc/securizar/honeytokens.conf ]] && grep -q '^HONEYTOKEN|' /etc/securizar/honeytokens.conf 2>/dev/null; then
+    _ht_count=$(grep -c '^HONEYTOKEN|' /etc/securizar/honeytokens.conf 2>/dev/null || echo 0)
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Honeytokens: ${_ht_count} tokens inventariados\n"
+fi
+
+# Honeyfiles (S3)
+if [[ -f /etc/securizar/honeyfiles.conf ]] && grep -q '^HONEYFILE|' /etc/securizar/honeyfiles.conf 2>/dev/null; then
+    _hf_count=$(grep -c '^HONEYFILE|' /etc/securizar/honeyfiles.conf 2>/dev/null || echo 0)
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Honeyfiles: ${_hf_count} ficheros inventariados\n"
+fi
+
+# Honey users (S4)
+if [[ -f /etc/securizar/honeyusers.conf ]] && grep -q '^HONEYUSER|' /etc/securizar/honeyusers.conf 2>/dev/null; then
+    _hu_count=$(grep -c '^HONEYUSER|' /etc/securizar/honeyusers.conf 2>/dev/null || echo 0)
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Honey users: ${_hu_count} cuentas\n"
+fi
+
+# Honey dirs (S5)
+if [[ -f /etc/securizar/honeydirs.conf ]] && grep -q '^HONEYDIR|' /etc/securizar/honeydirs.conf 2>/dev/null; then
+    _hd_count=$(grep -c '^HONEYDIR|' /etc/securizar/honeydirs.conf 2>/dev/null || echo 0)
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Honey dirs: ${_hd_count} directorios\n"
+fi
+
+# Honey DNS (S6)
+if grep -q "# BEGIN SECURIZAR HONEY DNS" /etc/hosts 2>/dev/null; then
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Honey DNS: entradas activas en /etc/hosts\n"
+fi
+
+# Decoy services (S7)
+_ds_running=0
+for _ds_svc in securizar-decoy-web securizar-decoy-api; do
+    if systemctl is-active "${_ds_svc}.service" &>/dev/null; then
+        ((_ds_running++)) || true
+    fi
+done
+if [[ $_ds_running -gt 0 ]]; then
+    DECEPTION_EXISTING=1
+    DECEPTION_EXISTING_SUMMARY+="  - Servicios decoy: ${_ds_running} activos\n"
+fi
+
+# Firewall rules (S1)
+_fw_rules=0
+case "${FW_BACKEND:-none}" in
+    nftables)
+        if nft list table inet securizar-deception &>/dev/null; then
+            _fw_rules=1
+            DECEPTION_EXISTING_SUMMARY+="  - Firewall: tabla nftables securizar-deception\n"
+        fi ;;
+    iptables)
+        if iptables -t nat -L PREROUTING -n 2>/dev/null | grep -q 'REDIRECT.*honeypot\|REDIRECT.*222[2-3]\|REDIRECT.*2121\|REDIRECT.*4445\|REDIRECT.*3390\|REDIRECT.*3307'; then
+            _fw_rules=1
+            DECEPTION_EXISTING_SUMMARY+="  - Firewall: reglas iptables REDIRECT\n"
+        fi ;;
+esac
+if [[ $_fw_rules -eq 1 ]]; then
+    DECEPTION_EXISTING=1
+fi
+
+# PCAP tcpdump procesos huerfanos
+_pcap_pids=0
+for _pcap_pid_file in "${DECEPTION_CONF_DIR}"/honeypot-*-pcap.pid; do
+    [[ -f "$_pcap_pid_file" ]] || continue
+    _pcap_pid=$(cat "$_pcap_pid_file" 2>/dev/null || echo "")
+    if [[ -n "$_pcap_pid" ]] && kill -0 "$_pcap_pid" 2>/dev/null; then
+        ((_pcap_pids++)) || true
+    fi
+done
+if [[ $_pcap_pids -gt 0 ]]; then
+    DECEPTION_EXISTING_SUMMARY+="  - PCAP: ${_pcap_pids} procesos tcpdump activos\n"
+fi
+
+# Mostrar resumen si hay despliegue previo
+if [[ "$DECEPTION_EXISTING" -eq 1 ]]; then
+    echo ""
+    echo -e "${YELLOW}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}${BOLD}║  DESPLIEGUE PREVIO DETECTADO                              ║${NC}"
+    echo -e "${YELLOW}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}Se han detectado componentes de deception ya desplegados:${NC}"
+    echo -e "$DECEPTION_EXISTING_SUMMARY"
+    echo -e "${CYAN}Al responder 'sí' a cada sección, los componentes existentes se${NC}"
+    echo -e "${CYAN}actualizarán in-place (servicios reiniciados, scripts sobrescritos,${NC}"
+    echo -e "${CYAN}inventarios regenerados). No se crearán duplicados.${NC}"
+    echo ""
+    log_info "Modo actualizacion: componentes existentes seran actualizados"
+fi
+
+# Limpiar variables temporales de deteccion
+unset _hp_running _ht_count _hf_count _hu_count _hd_count _ds_running _fw_rules _pcap_pids _pcap_pid _pcap_pid_file
+fi  # DECEPTION_SECTION == all (deteccion)
 
 # ── Helper: generar ID unico de token ────────────────────────
 generate_token_id() {
@@ -112,6 +232,7 @@ EOFKEY
     chmod 600 "$keyfile"
 }
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S1" ]]; then
 # ============================================================
 # S1: HONEYPOTS DE RED (PUERTOS TRAMPA)
 # ============================================================
@@ -515,11 +636,11 @@ StandardError=journal
 SyslogIdentifier=securizar-honeypot-%i
 
 # Seguridad del servicio
-NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/log/securizar /etc/securizar/deception
 ProtectHome=yes
 PrivateTmp=yes
+AmbientCapabilities=CAP_NET_RAW
 
 [Install]
 WantedBy=multi-user.target
@@ -530,9 +651,24 @@ EOFSVCTEMPLATE
         if ask "¿Habilitar e iniciar honeypots en puertos por defecto (2222,2323,2121,4445,3390,3307)?"; then
             systemctl daemon-reload || true
             for hp_port in 2222 2323 2121 4445 3390 3307; do
+                # Limpiar PCAP tcpdump huerfano antes de (re)iniciar
+                _pcap_pidfile="${DECEPTION_CONF_DIR}/honeypot-${hp_port}-pcap.pid"
+                if [[ -f "$_pcap_pidfile" ]]; then
+                    _old_pcap=$(cat "$_pcap_pidfile" 2>/dev/null || echo "")
+                    if [[ -n "$_old_pcap" ]]; then
+                        kill "$_old_pcap" 2>/dev/null || true
+                    fi
+                    rm -f "$_pcap_pidfile"
+                fi
+
                 systemctl enable "securizar-honeypot@${hp_port}.service" 2>/dev/null || true
-                systemctl start "securizar-honeypot@${hp_port}.service" 2>/dev/null || true
-                log_change "Habilitado" "Honeypot en puerto ${hp_port}"
+                if systemctl is-active "securizar-honeypot@${hp_port}.service" &>/dev/null; then
+                    systemctl restart "securizar-honeypot@${hp_port}.service" 2>/dev/null || true
+                    log_change "Reiniciado" "Honeypot en puerto ${hp_port} (actualizado)"
+                else
+                    systemctl start "securizar-honeypot@${hp_port}.service" 2>/dev/null || true
+                    log_change "Habilitado" "Honeypot en puerto ${hp_port}"
+                fi
             done
         else
             log_skip "Activacion de honeypots en puertos por defecto"
@@ -564,16 +700,23 @@ EOFSVCTEMPLATE
                             nft add table inet securizar-deception 2>/dev/null || true
                             nft add chain inet securizar-deception prerouting \
                                 '{ type nat hook prerouting priority dstnat; policy accept; }' 2>/dev/null || true
-                            nft add rule inet securizar-deception prerouting \
-                                tcp dport "$real_port" redirect to :"$hp_port" 2>/dev/null || true
+                            # Evitar regla duplicada: comprobar si ya existe
+                            if ! nft list chain inet securizar-deception prerouting 2>/dev/null \
+                                    | grep -q "dport ${real_port} redirect to :${hp_port}"; then
+                                nft add rule inet securizar-deception prerouting \
+                                    tcp dport "$real_port" redirect to :"$hp_port" 2>/dev/null || true
+                            fi
                             ;;
                         firewalld)
                             firewall-cmd --permanent \
                                 --add-forward-port="port=${real_port}:proto=tcp:toport=${hp_port}" 2>/dev/null || true
                             ;;
                         iptables)
-                            iptables -t nat -A PREROUTING -p tcp --dport "$real_port" \
-                                -j REDIRECT --to-port "$hp_port" 2>/dev/null || true
+                            if ! iptables -t nat -C PREROUTING -p tcp --dport "$real_port" \
+                                -j REDIRECT --to-port "$hp_port" 2>/dev/null; then
+                                iptables -t nat -A PREROUTING -p tcp --dport "$real_port" \
+                                    -j REDIRECT --to-port "$hp_port" 2>/dev/null || true
+                            fi
                             ;;
                         *)
                             log_warn "Backend de firewall '${FW_BACKEND}' no soporta redireccion"
@@ -620,7 +763,9 @@ EOFSVCTEMPLATE
 else
     log_skip "Honeypots de red (puertos trampa)"
 fi
+fi  # S1
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S2" ]]; then
 # ============================================================
 # S2: HONEY TOKENS (CREDENCIALES CANARIO)
 # ============================================================
@@ -1141,7 +1286,9 @@ EOFAUDITRULES
 else
     log_skip "Honey tokens (credenciales canario)"
 fi
+fi  # S2
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S3" ]]; then
 # ============================================================
 # S3: HONEY FILES (DOCUMENTOS SENUELO)
 # ============================================================
@@ -1547,7 +1694,9 @@ EOFHFAUDIT
 else
     log_skip "Honey files (documentos senuelo)"
 fi
+fi  # S3
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S4" ]]; then
 # ============================================================
 # S4: HONEY USERS (CUENTAS CANARIO)
 # ============================================================
@@ -1890,7 +2039,9 @@ EOFPAMALERT
 else
     log_skip "Honey users (cuentas canario)"
 fi
+fi  # S4
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S5" ]]; then
 # ============================================================
 # S5: HONEY DIRECTORIES (DIRECTORIOS TRAMPA)
 # ============================================================
@@ -2322,7 +2473,9 @@ EOFHDAUDIT
 else
     log_skip "Honey directories (directorios trampa)"
 fi
+fi  # S5
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S6" ]]; then
 # ============================================================
 # S6: HONEY DNS (REGISTROS DNS CANARIO)
 # ============================================================
@@ -2656,7 +2809,9 @@ EOFDNSMASQ
 else
     log_skip "Honey DNS (registros DNS canario)"
 fi
+fi  # S6
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S7" ]]; then
 # ============================================================
 # S7: DECEPTION NETWORK SERVICES (SERVICIOS FALSOS)
 # ============================================================
@@ -3177,12 +3332,22 @@ EOFHTML2
         systemctl daemon-reload || true
         if command -v python3 &>/dev/null; then
             systemctl enable securizar-decoy-web.service 2>/dev/null || true
-            systemctl start securizar-decoy-web.service 2>/dev/null || true
-            log_change "Habilitado" "securizar-decoy-web.service (puerto 8888)"
+            if systemctl is-active securizar-decoy-web.service &>/dev/null; then
+                systemctl restart securizar-decoy-web.service 2>/dev/null || true
+                log_change "Reiniciado" "securizar-decoy-web.service (puerto 8888, actualizado)"
+            else
+                systemctl start securizar-decoy-web.service 2>/dev/null || true
+                log_change "Habilitado" "securizar-decoy-web.service (puerto 8888)"
+            fi
 
             systemctl enable securizar-decoy-api.service 2>/dev/null || true
-            systemctl start securizar-decoy-api.service 2>/dev/null || true
-            log_change "Habilitado" "securizar-decoy-api.service (puerto 9999)"
+            if systemctl is-active securizar-decoy-api.service &>/dev/null; then
+                systemctl restart securizar-decoy-api.service 2>/dev/null || true
+                log_change "Reiniciado" "securizar-decoy-api.service (puerto 9999, actualizado)"
+            else
+                systemctl start securizar-decoy-api.service 2>/dev/null || true
+                log_change "Habilitado" "securizar-decoy-api.service (puerto 9999)"
+            fi
         else
             log_warn "Python3 no disponible - servicios decoy no se pueden iniciar"
         fi
@@ -3195,7 +3360,9 @@ EOFHTML2
 else
     log_skip "Deception network services (servicios falsos)"
 fi
+fi  # S7
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S8" ]]; then
 # ============================================================
 # S8: SISTEMA DE ALERTAS DE DECEPTION
 # ============================================================
@@ -3612,7 +3779,9 @@ EOFTIMER
 else
     log_skip "Sistema de alertas de deception"
 fi
+fi  # S8
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S9" ]]; then
 # ============================================================
 # S9: DASHBOARD DE DECEPTION
 # ============================================================
@@ -4103,7 +4272,9 @@ EOFINFORME
 else
     log_skip "Dashboard de deception e informes"
 fi
+fi  # S9
 
+if [[ "$DECEPTION_SECTION" == "all" || "$DECEPTION_SECTION" == "S10" ]]; then
 # ============================================================
 # S10: AUDITORIA INTEGRAL DE DECEPTION
 # ============================================================
@@ -4567,30 +4738,34 @@ EOFCRONAUDIT
 else
     log_skip "Auditoria integral de deception"
 fi
+fi  # S10
 
 # ============================================================
 # RESUMEN FINAL
 # ============================================================
 show_changes_summary
-echo ""
-echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║     TECNOLOGIA DE ENGANO (DECEPTION) COMPLETADO           ║"
-echo "╚═══════════════════════════════════════════════════════════╝"
-echo ""
-log_info "Backups guardados en: $BACKUP_DIR"
-echo ""
-echo "Comandos utiles post-configuracion:"
-echo "  - Gestionar honeypots:    gestionar-honeypots.sh {start|stop|status|logs}"
-echo "  - Gestionar tokens:       generar-honeytokens.sh {deploy|list|verify|rotate}"
-echo "  - Gestionar honey files:  desplegar-honeyfiles.sh {deploy|list|verify|remove}"
-echo "  - Gestionar honey users:  gestionar-honey-users.sh {create|remove|status|check-auth}"
-echo "  - Gestionar honey dirs:   gestionar-honeydirs.sh {deploy|list|verify|monitor}"
-echo "  - Configurar honey DNS:   configurar-honey-dns.sh {deploy|remove|status}"
-echo "  - Servicios decoy:        gestionar-servicios-decoy.sh {start|stop|status}"
-echo "  - Alertas deception:      alertar-deception.sh NIVEL TIPO 'Mensaje'"
-echo "  - Analisis de logs:       analizar-deception-logs.sh"
-echo "  - Dashboard:              dashboard-deception.sh [24h|7d|30d|all]"
-echo "  - Informe:                informe-deception.sh [24h|7d|30d]"
-echo "  - Auditoria completa:     auditoria-deception.sh"
-echo ""
-log_info "Modulo 55 completado"
+
+if [[ "$DECEPTION_SECTION" == "all" ]]; then
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════╗"
+    echo "║     TECNOLOGIA DE ENGANO (DECEPTION) COMPLETADO           ║"
+    echo "╚═══════════════════════════════════════════════════════════╝"
+    echo ""
+    log_info "Backups guardados en: $BACKUP_DIR"
+    echo ""
+    echo "Comandos utiles post-configuracion:"
+    echo "  - Gestionar honeypots:    gestionar-honeypots.sh {start|stop|status|logs}"
+    echo "  - Gestionar tokens:       generar-honeytokens.sh {deploy|list|verify|rotate}"
+    echo "  - Gestionar honey files:  desplegar-honeyfiles.sh {deploy|list|verify|remove}"
+    echo "  - Gestionar honey users:  gestionar-honey-users.sh {create|remove|status|check-auth}"
+    echo "  - Gestionar honey dirs:   gestionar-honeydirs.sh {deploy|list|verify|monitor}"
+    echo "  - Configurar honey DNS:   configurar-honey-dns.sh {deploy|remove|status}"
+    echo "  - Servicios decoy:        gestionar-servicios-decoy.sh {start|stop|status}"
+    echo "  - Alertas deception:      alertar-deception.sh NIVEL TIPO 'Mensaje'"
+    echo "  - Analisis de logs:       analizar-deception-logs.sh"
+    echo "  - Dashboard:              dashboard-deception.sh [24h|7d|30d|all]"
+    echo "  - Informe:                informe-deception.sh [24h|7d|30d]"
+    echo "  - Auditoria completa:     auditoria-deception.sh"
+    echo ""
+    log_info "Modulo 55 completado"
+fi

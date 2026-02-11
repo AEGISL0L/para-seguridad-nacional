@@ -2240,21 +2240,131 @@ mod_54_cumplimiento_normativo() {
 }
 
 mod_55_deception_tech() {
-    log_section "MÓDULO 55: Tecnología de engaño"
+    local section="${1:-all}"
     local script="$SCRIPT_DIR/tecnologia-engano.sh"
     if [[ -f "$script" ]]; then
         local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 55 completado"
-        else
-            log_warn "Módulo 55 terminó con código $rc"
-        fi
+        bash "$script" "$section" || rc=$?
         return $rc
     else
         log_error "No encontrado: $script"
         return 1
     fi
+}
+
+submenu_deception() {
+    local -a SEC_NAMES=(
+        [1]="Honeypots de Red"
+        [2]="Honey Tokens"
+        [3]="Honey Files"
+        [4]="Honey Users"
+        [5]="Honey Directories"
+        [6]="Honey DNS"
+        [7]="Deception Services"
+        [8]="Alertas de Deception"
+        [9]="Dashboard"
+        [10]="Auditoría Integral"
+    )
+
+    _deception_status() {
+        case $1 in
+            1) systemctl is-active securizar-honeypot@2222 &>/dev/null ;;
+            2) [[ -f /etc/securizar/honeytokens.conf ]] && grep -q 'HONEYTOKEN|' /etc/securizar/honeytokens.conf 2>/dev/null ;;
+            3) [[ -x /usr/local/bin/desplegar-honeyfiles.sh ]] ;;
+            4) id admin_backup &>/dev/null ;;
+            5) [[ -f /etc/securizar/honeydirs.conf ]] && grep -q 'HONEYDIR|' /etc/securizar/honeydirs.conf 2>/dev/null ;;
+            6) grep -q "SECURIZAR HONEY DNS" /etc/hosts 2>/dev/null ;;
+            7) systemctl is-active securizar-decoy-web &>/dev/null ;;
+            8) [[ -x /usr/local/bin/alertar-deception.sh ]] ;;
+            9) [[ -x /usr/local/bin/dashboard-deception.sh ]] ;;
+            10) [[ -x /usr/local/bin/auditoria-deception.sh ]] ;;
+        esac
+    }
+
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} Avanzado ${DIM}❯${NC} ${BOLD}Tecnología de engaño"
+
+        echo -e "  ${DIM}Honeypots, tokens, honey files, usuarios canario, DNS, servicios falsos${NC}"
+        echo ""
+
+        local s
+        for s in 1 2 3 4 5 6 7 8 9 10; do
+            local icon
+            if _deception_status "$s"; then
+                icon="${GREEN}✓${NC}"
+            else
+                icon="${DIM}○${NC}"
+            fi
+            printf "  %b  ${WHITE}%2d${NC}  ${BOLD}%-28s${NC}\n" "$icon" "$s" "${SEC_NAMES[$s]}"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            9)
+                if [[ -x /usr/local/bin/dashboard-deception.sh ]]; then
+                    bash /usr/local/bin/dashboard-deception.sh
+                    echo ""
+                    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+                    echo -ne "  ${DIM}Presiona Enter para volver al submenú...${NC} "
+                    read -r _
+                else
+                    echo ""
+                    echo -e "  ${YELLOW}⚠${NC} Dashboard no instalado. Ejecutando instalación..."
+                    echo ""
+                    local rc=0
+                    mod_55_deception_tech "S9" || rc=$?
+                    if [[ $rc -eq 0 ]]; then
+                        echo -e "  ${GREEN}✓${NC} Sección S9 completada"
+                    else
+                        echo -e "  ${YELLOW}⚠${NC} Sección S9 completada con advertencias (código: $rc)"
+                    fi
+                    _pause
+                fi
+                ;;
+            [1-8]|10)
+                local sn="S${opt}"
+                echo ""
+                echo -e "  ${CYAN}━━${NC} ${BOLD}Módulo 55 / ${SEC_NAMES[$opt]}${NC} ${CYAN}━━${NC}"
+                echo ""
+                local rc=0
+                mod_55_deception_tech "$sn" || rc=$?
+                if [[ $rc -eq 0 ]]; then
+                    echo -e "  ${GREEN}✓${NC} Sección $sn completada"
+                else
+                    echo -e "  ${YELLOW}⚠${NC} Sección $sn completada con advertencias (código: $rc)"
+                fi
+                _pause
+                ;;
+            t|T)
+                echo ""
+                echo -e "  ${BG_CYAN} Tecnología de engaño ${NC}"
+                echo -e "  ${DIM}Se ejecutarán las 10 secciones secuencialmente${NC}"
+                if ask "¿Continuar con todas las secciones?"; then
+                    reset_changes
+                    local rc=0
+                    mod_55_deception_tech "all" || rc=$?
+                    MOD_RUN[55]=1
+                    if [[ $rc -eq 0 ]]; then
+                        echo -e "  ${GREEN}✓${NC} ${BOLD}Módulo 55${NC} completado correctamente"
+                    else
+                        echo -e "  ${YELLOW}⚠${NC} ${BOLD}Módulo 55${NC} completado con advertencias (código: $rc)"
+                    fi
+                    _pause
+                fi
+                ;;
+            b|B|0)  return ;;
+            q|Q)    _exit_securizar ;;
+            "")     continue ;;
+            *)      echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5 ;;
+        esac
+    done
 }
 
 mod_56_seguridad_wireless() {
@@ -4584,7 +4694,8 @@ submenu_avanzado() {
         read -r opt
 
         case "$opt" in
-            39|40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66) _exec_module "$opt" ;;
+            55) submenu_deception ;;
+            39|40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|56|57|58|59|60|61|62|63|64|65|66) _exec_module "$opt" ;;
             t|T)         _run_category "Avanzado" 39 66 ; _pause ;;
             b|B|0)       return ;;
             q|Q)         _exit_securizar ;;
@@ -4658,8 +4769,11 @@ menu_principal() {
         echo -ne "  ${BOLD}❯${NC} "
         read -r opcion
 
-        # Direct module number access (1-65)
-        if [[ "$opcion" =~ ^[0-9]+$ ]] && [[ "$opcion" -ge 1 ]] && [[ "$opcion" -le 66 ]]; then
+        # Direct module number access (1-66)
+        if [[ "$opcion" == "55" ]]; then
+            submenu_deception
+            continue
+        elif [[ "$opcion" =~ ^[0-9]+$ ]] && [[ "$opcion" -ge 1 ]] && [[ "$opcion" -le 66 ]]; then
             _exec_module "$opcion"
             continue
         fi

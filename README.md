@@ -439,7 +439,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 52 | **Seguridad cloud** | `seguridad-cloud.sh` | AWS/Azure/GCP, IMDS hardening, IAM audit, postura cloud, exfiltracion |
 | 53 | **LDAP y Active Directory** | `seguridad-ldap-ad.sh` | OpenLDAP TLS, SSSD, Kerberos, FreeIPA, Samba/Winbind, replicacion |
 | 54 | **Cumplimiento normativo** | `cumplimiento-normativo.sh` | PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001, evidencias, remediacion |
-| 55 | **Tecnologia de engano** | `tecnologia-engano.sh` | Honeypots de red, honeytokens, honey files/users/dirs, DNS, alertas |
+| 55 | **Tecnologia de engano** | `tecnologia-engano.sh` | Honeypots de red, honeytokens, honey files/users/dirs, DNS, alertas. **Submenu interactivo** con 10 secciones individuales y dashboard en vivo |
 | 56 | **Seguridad wireless** | `seguridad-wireless.sh` | WPA3 Enterprise, FreeRADIUS 802.1X, rogue AP, Bluetooth, monitoring |
 | 57 | **Seguridad virtualizacion** | `seguridad-virtualizacion.sh` | KVM/QEMU, libvirt hardening, VM aislamiento, escape protection |
 | 58 | **Seguridad fisica** | `seguridad-fisica.sh` | USBGuard, BIOS/UEFI, GRUB, TPM, Thunderbolt DMA, screen lock |
@@ -476,6 +476,27 @@ Menu principal
 ```
 
 Cada sub-menu muestra sus modulos con estado (`✓` completado, `○` pendiente, `!` archivo faltante) y permite ejecutar modulos individuales o todos los de la categoria con `t`.
+
+El modulo 55 (Tecnologia de engano) dispone de un **submenu propio** con 10 secciones ejecutables individualmente y un dashboard en vivo:
+
+```
+Securizar ❯ Avanzado ❯ Tecnología de engaño
+
+  ✓   1  Honeypots de Red
+  ✓   2  Honey Tokens
+  ✓   3  Honey Files
+  ✓   4  Honey Users
+  ✓   5  Honey Directories
+  ✓   6  Honey DNS
+  ○   7  Deception Services
+  ✓   8  Alertas de Deception
+  ✓   9  Dashboard                  ← Muestra dashboard en vivo si esta instalado
+  ✓  10  Auditoría Integral
+
+  t Todos    b Volver    q Salir
+```
+
+Cada seccion se puede ejecutar individualmente con `sudo bash tecnologia-engano.sh S1` ... `S10`, o todas con `sudo bash tecnologia-engano.sh` (sin argumento).
 
 ### Protecciones de seguridad
 
@@ -825,9 +846,18 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 
 | Herramienta | Funcion |
 |-------------|---------|
-| `auditar-deception.sh` | Auditoria de tecnologia de engano |
-| `gestionar-honeypots.sh` | Gestion de honeypots de red |
-| `gestionar-honeytokens.sh` | Gestion de honeytokens y canary files |
+| `dashboard-deception.sh` | Dashboard en vivo de deception (honeypots, tokens, files, users, dirs, alertas, IPs) |
+| `informe-deception.sh` | Informes automatizados de deception (`24h`, `7d`, `30d`) |
+| `auditoria-deception.sh` | Auditoria integral de deception |
+| `gestionar-honeypots.sh` | Gestion de honeypots de red (`start`, `stop`, `status`, `logs`) |
+| `generar-honeytokens.sh` | Gestion de honeytokens (`deploy`, `list`, `verify`, `rotate`) |
+| `desplegar-honeyfiles.sh` | Gestion de honey files (`deploy`, `list`, `verify`, `remove`) |
+| `gestionar-honey-users.sh` | Gestion de honey users (`create`, `remove`, `status`, `check-auth`) |
+| `gestionar-honeydirs.sh` | Gestion de honey dirs (`deploy`, `list`, `verify`, `monitor`) |
+| `configurar-honey-dns.sh` | Configuracion de honey DNS (`deploy`, `remove`, `status`) |
+| `gestionar-servicios-decoy.sh` | Gestion de servicios decoy (`start`, `stop`, `status`) |
+| `alertar-deception.sh` | Sistema de alertas de deception (`NIVEL TIPO 'Mensaje'`) |
+| `analizar-deception-logs.sh` | Analisis de logs de deception |
 
 ### Seguridad wireless
 
