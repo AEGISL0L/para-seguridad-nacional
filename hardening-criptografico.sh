@@ -1065,26 +1065,26 @@ if ask "¿Auditar hashing de contrasenas?"; then
         case "$hash_field" in
             '$6$'*)
                 # SHA-512 - seguro
-                ((strong_hash_count++)) ;;
+                ((strong_hash_count++)) || true ;;
             '$y$'*)
                 # yescrypt - seguro
-                ((strong_hash_count++)) ;;
+                ((strong_hash_count++)) || true ;;
             '$5$'*)
                 # SHA-256 - aceptable
-                ((strong_hash_count++)) ;;
+                ((strong_hash_count++)) || true ;;
             '$1$'*)
                 # MD5 - DEBIL
                 echo -e "  ${RED}!!${NC}  $username: MD5 (\$1\$) - DEBIL"
-                ((weak_hash_count++)) ;;
+                ((weak_hash_count++)) || true ;;
             '$2a$'*|'$2b$'*|'$2y$'*)
                 # Blowfish/bcrypt - aceptable pero inusual en Linux
                 echo -e "  ${YELLOW}!!${NC}  $username: Blowfish (\$2a\$/\$2b\$) - inusual en Linux"
-                ((weak_hash_count++)) ;;
+                ((weak_hash_count++)) || true ;;
             *)
                 # DES o desconocido
                 if [[ ${#hash_field} -eq 13 ]]; then
                     echo -e "  ${RED}!!${NC}  $username: DES (sin prefijo) - MUY DEBIL"
-                    ((weak_hash_count++))
+                    ((weak_hash_count++)) || true
                 else
                     echo -e "  ${YELLOW}??${NC}  $username: formato desconocido"
                 fi ;;

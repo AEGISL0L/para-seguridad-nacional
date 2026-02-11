@@ -19,6 +19,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
+source "${SCRIPT_DIR}/lib/securizar-firewall.sh"
 
 require_root
 securizar_setup_traps
@@ -50,6 +51,35 @@ mkdir -p /var/log/securizar
 generate_token_id() {
     local prefix="${1:-TKN}"
     echo "${prefix}-$(date +%Y%m%d)-$(openssl rand -hex 4 2>/dev/null || head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+}
+
+# ── Helper: log forense con formato admisible como evidencia ──
+# Genera lineas de log con:
+#   - Timestamp ISO 8601 UTC con milisegundos
+#   - Session ID unico por conexion
+#   - FQDN del host
+#   - Formato key=value estructurado
+#   - Hash SHA-256 de la linea anterior (cadena anti-tampering)
+FORENSIC_PREV_HASH="0000000000000000000000000000000000000000000000000000000000000000"
+FORENSIC_HOSTNAME="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo unknown)"
+
+forensic_timestamp() {
+    date -u '+%Y-%m-%dT%H:%M:%S.%3NZ'
+}
+
+forensic_session_id() {
+    openssl rand -hex 8 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+forensic_log() {
+    local log_file="$1"
+    shift
+    local fields="$*"
+    local ts
+    ts="$(forensic_timestamp)"
+    local line="timestamp=${ts} host=${FORENSIC_HOSTNAME} prev_hash=${FORENSIC_PREV_HASH} ${fields}"
+    echo "$line" >> "$log_file"
+    FORENSIC_PREV_HASH="$(echo -n "$line" | sha256sum 2>/dev/null | cut -d' ' -f1 || echo "nohash")"
 }
 
 # ── Helper: generar credenciales falsas convincentes ─────────
@@ -182,27 +212,47 @@ port_banner() {
     esac
 }
 
-# Log una conexion honeypot
+# Log una conexion honeypot (formato forense)
 log_honeypot_connection() {
     local port="$1"
     local src_ip="$2"
     local data="${3:-}"
+    local src_port="${4:-0}"
     local timestamp
-    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
     local service_name
     service_name="$(port_service_name "$port")"
+    local session_id
+    session_id="$(openssl rand -hex 8 2>/dev/null || echo "nosid")"
+
+    # Metadatos de red mejorados
+    local mac_src="unknown"
+    if [[ "$src_ip" != "unknown" ]] && command -v arp &>/dev/null; then
+        mac_src="$(arp -n "$src_ip" 2>/dev/null | awk '/ether/{print $3}' | head -1)"
+        [[ -z "$mac_src" ]] && mac_src="unknown"
+    fi
+    local data_length=${#data}
+    local payload_hex=""
+    if [[ -n "$data" ]]; then
+        payload_hex="$(echo -n "$data" | xxd -p 2>/dev/null | head -c 512 || echo "")"
+    fi
+    local payload_sha256=""
+    if [[ -n "$data" ]]; then
+        payload_sha256="$(echo -n "$data" | sha256sum 2>/dev/null | cut -d' ' -f1 || echo "")"
+    fi
 
     local log_file="${LOG_DIR}/honeypot-${port}.log"
-    echo "[${timestamp}] SRC=${src_ip} PORT=${port} SERVICE=${service_name} DATA=${data}" >> "$log_file"
+    local log_line="timestamp=${timestamp} session_id=${session_id} src_ip=${src_ip} src_port=${src_port} dst_port=${port} protocol=tcp mac_src=${mac_src} service=${service_name} data_length=${data_length} payload_sha256=${payload_sha256} payload_hex=${payload_hex} data=${data}"
+    echo "$log_line" >> "$log_file"
 
     # Syslog
     logger -t "securizar-honeypot" -p auth.warning \
-        "HONEYPOT CONNECTION: port=${port} src=${src_ip} service=${service_name}"
+        "HONEYPOT CONNECTION: session=${session_id} port=${port} src=${src_ip}:${src_port} service=${service_name} mac=${mac_src}"
 
     # Alerta centralizada
     if [[ -x "$ALERT_SCRIPT" ]]; then
         "$ALERT_SCRIPT" "WARNING" "HONEYPOT" \
-            "Conexion honeypot detectada: ${src_ip} -> puerto ${port} (${service_name})" &
+            "Conexion honeypot detectada: ${src_ip}:${src_port} -> puerto ${port} (${service_name}) session=${session_id}" &
     fi
 }
 
@@ -223,12 +273,20 @@ start_honeypot_port() {
         # ncat listener con logging
         ncat -l -k -p "$port" -c "
             SRC=\$(echo \$NCAT_REMOTE_ADDR 2>/dev/null || echo unknown)
+            SRC_PORT=\$(echo \$NCAT_REMOTE_PORT 2>/dev/null || echo 0)
+            SID=\$(openssl rand -hex 8 2>/dev/null || echo nosid)
+            TS=\$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
             echo '${banner}'
             read -t 5 DATA || DATA=''
-            echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] SRC=\${SRC} PORT=${port} DATA=\${DATA}\" >> ${LOG_DIR}/honeypot-${port}.log
-            logger -t securizar-honeypot -p auth.warning \"HONEYPOT: port=${port} src=\${SRC}\"
+            DLEN=\${#DATA}
+            PHASH=\$(echo -n \"\${DATA}\" | sha256sum 2>/dev/null | cut -d' ' -f1 || echo '')
+            PHEX=\$(echo -n \"\${DATA}\" | xxd -p 2>/dev/null | head -c 512 || echo '')
+            MAC=\$(arp -n \"\${SRC}\" 2>/dev/null | awk '/ether/{print \$3}' | head -1)
+            [[ -z \"\${MAC}\" ]] && MAC=unknown
+            echo \"timestamp=\${TS} session_id=\${SID} src_ip=\${SRC} src_port=\${SRC_PORT} dst_port=${port} protocol=tcp mac_src=\${MAC} service=$(port_service_name "$port") data_length=\${DLEN} payload_sha256=\${PHASH} payload_hex=\${PHEX} data=\${DATA}\" >> ${LOG_DIR}/honeypot-${port}.log
+            logger -t securizar-honeypot -p auth.warning \"HONEYPOT: session=\${SID} port=${port} src=\${SRC}:\${SRC_PORT} mac=\${MAC}\"
             if [[ -x ${ALERT_SCRIPT} ]]; then
-                ${ALERT_SCRIPT} WARNING HONEYPOT \"Conexion: \${SRC} -> ${port}\" &
+                ${ALERT_SCRIPT} WARNING HONEYPOT \"Conexion: \${SRC}:\${SRC_PORT} -> ${port} session=\${SID}\" &
             fi
         " &
         local hp_pid=$!
@@ -237,12 +295,20 @@ start_honeypot_port() {
         socat TCP-LISTEN:"${port}",reuseaddr,fork \
             SYSTEM:"
                 SRC=\$(echo \$SOCAT_PEERADDR 2>/dev/null || echo unknown)
+                SRC_PORT=\$(echo \$SOCAT_PEERPORT 2>/dev/null || echo 0)
+                SID=\$(openssl rand -hex 8 2>/dev/null || echo nosid)
+                TS=\$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
                 echo '${banner}'
                 read -t 5 DATA || DATA=''
-                echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] SRC=\${SRC} PORT=${port} DATA=\${DATA}\" >> ${LOG_DIR}/honeypot-${port}.log
-                logger -t securizar-honeypot -p auth.warning \"HONEYPOT: port=${port} src=\${SRC}\"
+                DLEN=\${#DATA}
+                PHASH=\$(echo -n \"\${DATA}\" | sha256sum 2>/dev/null | cut -d' ' -f1 || echo '')
+                PHEX=\$(echo -n \"\${DATA}\" | xxd -p 2>/dev/null | head -c 512 || echo '')
+                MAC=\$(arp -n \"\${SRC}\" 2>/dev/null | awk '/ether/{print \$3}' | head -1)
+                [[ -z \"\${MAC}\" ]] && MAC=unknown
+                echo \"timestamp=\${TS} session_id=\${SID} src_ip=\${SRC} src_port=\${SRC_PORT} dst_port=${port} protocol=tcp mac_src=\${MAC} service=$(port_service_name "$port") data_length=\${DLEN} payload_sha256=\${PHASH} payload_hex=\${PHEX} data=\${DATA}\" >> ${LOG_DIR}/honeypot-${port}.log
+                logger -t securizar-honeypot -p auth.warning \"HONEYPOT: session=\${SID} port=${port} src=\${SRC}:\${SRC_PORT} mac=\${MAC}\"
                 if [[ -x ${ALERT_SCRIPT} ]]; then
-                    ${ALERT_SCRIPT} WARNING HONEYPOT \"Conexion: \${SRC} -> ${port}\" &
+                    ${ALERT_SCRIPT} WARNING HONEYPOT \"Conexion: \${SRC}:\${SRC_PORT} -> ${port} session=\${SID}\" &
                 fi
             " &
         local hp_pid=$!
@@ -253,6 +319,17 @@ start_honeypot_port() {
 
     echo "$hp_pid" > "$pid_file"
     echo "[+] Honeypot iniciado en puerto ${port} (PID: ${hp_pid})"
+
+    # Captura PCAP forense por puerto
+    if command -v tcpdump &>/dev/null; then
+        local pcap_dir="${LOG_DIR}/pcap"
+        mkdir -p "$pcap_dir"
+        tcpdump -i any -n -w "${pcap_dir}/honeypot-${port}-%Y%m%d-%H%M%S.pcap" \
+            -G 3600 -Z root "port ${port}" &>/dev/null &
+        local pcap_pid=$!
+        echo "$pcap_pid" > "${CONF_DIR}/honeypot-${port}-pcap.pid"
+        echo "[+] Captura PCAP iniciada para puerto ${port} (PID: ${pcap_pid})"
+    fi
 }
 
 # Detener un honeypot
@@ -273,6 +350,16 @@ stop_honeypot_port() {
     else
         echo "[!] No hay honeypot registrado en puerto ${port}"
     fi
+
+    # Detener captura PCAP asociada
+    local pcap_pid_file="${CONF_DIR}/honeypot-${port}-pcap.pid"
+    if [[ -f "$pcap_pid_file" ]]; then
+        local pcap_pid
+        pcap_pid=$(cat "$pcap_pid_file")
+        kill "$pcap_pid" 2>/dev/null || true
+        rm -f "$pcap_pid_file"
+        echo "[+] Captura PCAP del puerto ${port} detenida"
+    fi
 }
 
 # Estado de todos los honeypots
@@ -286,7 +373,7 @@ show_status() {
     local active=0
     local inactive=0
 
-    for pid_file in "${CONF_DIR}"/honeypot-*.pid 2>/dev/null; do
+    for pid_file in "${CONF_DIR}"/honeypot-*.pid; do
         [[ -f "$pid_file" ]] || continue
         local port
         port=$(basename "$pid_file" | sed 's/honeypot-//;s/\.pid//')
@@ -315,12 +402,12 @@ show_status() {
     echo ""
     echo "  Conexiones recientes (ultimas 24h):"
     local total_connections=0
-    for logfile in "${LOG_DIR}"/honeypot-*.log 2>/dev/null; do
+    for logfile in "${LOG_DIR}"/honeypot-*.log; do
         [[ -f "$logfile" ]] || continue
         local port
         port=$(basename "$logfile" | sed 's/honeypot-//;s/\.log//')
         local count
-        count=$(awk -v cutoff="$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date '+%Y-%m-%d %H:%M:%S')" \
+        count=$(awk -v cutoff="$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" \
             '$0 >= "["cutoff {c++} END{print c+0}' "$logfile" 2>/dev/null || echo "0")
         if [[ "$count" -gt 0 ]]; then
             echo "    Puerto ${port}: ${count} conexiones"
@@ -346,7 +433,7 @@ show_logs() {
         fi
     else
         echo "=== Ultimas conexiones a todos los honeypots ==="
-        for logfile in "${LOG_DIR}"/honeypot-*.log 2>/dev/null; do
+        for logfile in "${LOG_DIR}"/honeypot-*.log; do
             [[ -f "$logfile" ]] || continue
             echo "--- $(basename "$logfile") ---"
             tail -10 "$logfile"
@@ -370,7 +457,7 @@ case "${1:-}" in
         if [[ -n "${2:-}" ]]; then
             stop_honeypot_port "$2"
         else
-            for pid_file in "${CONF_DIR}"/honeypot-*.pid 2>/dev/null; do
+            for pid_file in "${CONF_DIR}"/honeypot-*.pid; do
                 [[ -f "$pid_file" ]] || continue
                 local_port=$(basename "$pid_file" | sed 's/honeypot-//;s/\.pid//')
                 stop_honeypot_port "$local_port"
@@ -384,7 +471,7 @@ case "${1:-}" in
         echo "Puertos honeypot por defecto: $DEFAULT_PORTS"
         echo ""
         echo "Honeypots activos:"
-        for pid_file in "${CONF_DIR}"/honeypot-*.pid 2>/dev/null; do
+        for pid_file in "${CONF_DIR}"/honeypot-*.pid; do
             [[ -f "$pid_file" ]] || continue
             echo "  - $(basename "$pid_file" | sed 's/honeypot-//;s/\.pid//')"
         done
@@ -451,9 +538,9 @@ EOFSVCTEMPLATE
             log_skip "Activacion de honeypots en puertos por defecto"
         fi
 
-        # Reglas de firewall opcionales para redireccion
-        if ask "¿Configurar redireccion de puertos reales a honeypots (iptables REDIRECT)?"; then
-            log_info "Configurando reglas de redireccion de puertos..."
+        # Reglas de firewall opcionales para redireccion (multi-backend)
+        if ask "¿Configurar redireccion de puertos reales a honeypots (${FW_BACKEND})?"; then
+            log_info "Configurando reglas de redireccion (backend: ${FW_BACKEND})..."
 
             # Mapa: puerto real -> puerto honeypot
             declare -A REDIRECT_MAP=(
@@ -472,32 +559,57 @@ EOFSVCTEMPLATE
                 if ss -tlnp 2>/dev/null | grep -q ":${real_port} " ; then
                     log_warn "Puerto ${real_port} tiene servicio activo - no se redirige a honeypot"
                 else
-                    iptables -t nat -A PREROUTING -p tcp --dport "$real_port" \
-                        -j REDIRECT --to-port "$hp_port" 2>/dev/null || true
-                    log_change "Redirigido" "Puerto ${real_port} -> ${hp_port} (honeypot)"
+                    case "$FW_BACKEND" in
+                        nftables)
+                            nft add table inet securizar-deception 2>/dev/null || true
+                            nft add chain inet securizar-deception prerouting \
+                                '{ type nat hook prerouting priority dstnat; policy accept; }' 2>/dev/null || true
+                            nft add rule inet securizar-deception prerouting \
+                                tcp dport "$real_port" redirect to :"$hp_port" 2>/dev/null || true
+                            ;;
+                        firewalld)
+                            firewall-cmd --permanent \
+                                --add-forward-port="port=${real_port}:proto=tcp:toport=${hp_port}" 2>/dev/null || true
+                            ;;
+                        iptables)
+                            iptables -t nat -A PREROUTING -p tcp --dport "$real_port" \
+                                -j REDIRECT --to-port "$hp_port" 2>/dev/null || true
+                            ;;
+                        *)
+                            log_warn "Backend de firewall '${FW_BACKEND}' no soporta redireccion"
+                            continue
+                            ;;
+                    esac
+                    log_change "Redirigido" "Puerto ${real_port} -> ${hp_port} (honeypot, via ${FW_BACKEND})"
                 fi
             done
 
-            # Persistir reglas de iptables
-            case "$DISTRO_FAMILY" in
-                suse)
-                    iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+            # Persistir reglas segun backend
+            case "$FW_BACKEND" in
+                nftables)
+                    nft list ruleset > /etc/nftables-securizar-deception.conf 2>/dev/null || true
+                    log_change "Persistidas" "Reglas nftables de redireccion a honeypots"
                     ;;
-                debian)
-                    if command -v netfilter-persistent &>/dev/null; then
-                        netfilter-persistent save 2>/dev/null || true
-                    elif [[ -d /etc/iptables ]]; then
-                        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-                    fi
+                firewalld)
+                    firewall-cmd --reload 2>/dev/null || true
+                    log_change "Persistidas" "Reglas firewalld de redireccion a honeypots"
                     ;;
-                rhel)
-                    iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
-                    ;;
-                arch)
-                    iptables-save > /etc/iptables/iptables.rules 2>/dev/null || true
+                iptables)
+                    case "$DISTRO_FAMILY" in
+                        suse)   iptables-save > /etc/sysconfig/iptables 2>/dev/null || true ;;
+                        debian)
+                            if command -v netfilter-persistent &>/dev/null; then
+                                netfilter-persistent save 2>/dev/null || true
+                            elif [[ -d /etc/iptables ]]; then
+                                iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+                            fi
+                            ;;
+                        rhel)   iptables-save > /etc/sysconfig/iptables 2>/dev/null || true ;;
+                        arch)   iptables-save > /etc/iptables/iptables.rules 2>/dev/null || true ;;
+                    esac
+                    log_change "Persistidas" "Reglas iptables de redireccion a honeypots"
                     ;;
             esac
-            log_change "Persistidas" "Reglas iptables de redireccion a honeypots"
         else
             log_skip "Redireccion de puertos a honeypots"
         fi
@@ -586,7 +698,7 @@ aws_access_key_id = AKIA$(openssl rand -hex 8 2>/dev/null | tr '[:lower:]' '[:up
 aws_secret_access_key = $(openssl rand -base64 30 2>/dev/null | tr -dc 'A-Za-z0-9+/' | head -c 40)
 EOFAWS
     chmod 600 /root/.aws/credentials.bak
-    echo "HONEYTOKEN|${token_id}|AWS_CREDS|/root/.aws/credentials.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYTOKEN|${token_id}|AWS_CREDS|/root/.aws/credentials.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
 
     # En cada home de usuario normal
     while IFS=: read -r username _ uid _ _ homedir _; do
@@ -607,7 +719,7 @@ aws_secret_access_key = ${u_secret}
 EOFUSERAWS
         chmod 600 "${homedir}/.aws/credentials.bak"
         chown "${username}:${username}" "${homedir}/.aws" "${homedir}/.aws/credentials.bak" 2>/dev/null || true
-        echo "HONEYTOKEN|${token_id}|AWS_CREDS|${homedir}/.aws/credentials.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+        echo "HONEYTOKEN|${token_id}|AWS_CREDS|${homedir}/.aws/credentials.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
     done < /etc/passwd
 }
 
@@ -633,7 +745,7 @@ $(openssl rand -base64 48 2>/dev/null)
 -----END OPENSSH PRIVATE KEY-----
 EOFSSHKEY
     chmod 600 "$keyfile"
-    echo "HONEYTOKEN|${token_id}|SSH_KEY|${keyfile}|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYTOKEN|${token_id}|SSH_KEY|${keyfile}|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
 
     # Fake SSH key en /tmp (comun en ataques)
     token_id="$(generate_token_id SSH)"
@@ -647,7 +759,7 @@ $(openssl rand -base64 48 2>/dev/null)
 -----END RSA PRIVATE KEY-----
 EOFSSHTMP
     chmod 600 /tmp/.id_rsa_backup
-    echo "HONEYTOKEN|${token_id}|SSH_KEY|/tmp/.id_rsa_backup|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYTOKEN|${token_id}|SSH_KEY|/tmp/.id_rsa_backup|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
 }
 
 # Desplegar fake database credentials
@@ -684,7 +796,7 @@ auth = $(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 32)
 # CANARY: ${token_id}
 EOFDBCONF
     chmod 600 /etc/securizar/decoy-db.conf
-    echo "HONEYTOKEN|${token_id}|DB_CREDS|/etc/securizar/decoy-db.conf|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYTOKEN|${token_id}|DB_CREDS|/etc/securizar/decoy-db.conf|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
 }
 
 # Desplegar fake .env files
@@ -714,7 +826,7 @@ STRIPE_SECRET_KEY=sk_live_$(openssl rand -hex 24 2>/dev/null)
 # CANARY: ${token_id}
 EOFENVWWW
         chmod 600 /var/www/.env.bak
-        echo "HONEYTOKEN|${token_id}|ENV_FILE|/var/www/.env.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+        echo "HONEYTOKEN|${token_id}|ENV_FILE|/var/www/.env.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
     fi
 
     # En /opt
@@ -728,7 +840,7 @@ API_TOKEN=$(openssl rand -hex 24 2>/dev/null)
 # CANARY: ${token_id}
 EOFENVOPT
     chmod 600 /opt/app-config/.env.production
-    echo "HONEYTOKEN|${token_id}|ENV_FILE|/opt/app-config/.env.production|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYTOKEN|${token_id}|ENV_FILE|/opt/app-config/.env.production|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
 }
 
 # Listar honeytokens
@@ -855,10 +967,8 @@ EOFINVENTORY
         chmod 600 "$HONEYTOKENS_CONF"
 
         # Desplegar fake AWS credentials en /root
-        local aws_token_id
         aws_token_id="$(generate_token_id AWS)"
-        local aws_key_id="AKIA$(openssl rand -hex 8 2>/dev/null | tr '[:lower:]' '[:upper:]')"
-        local aws_secret
+        aws_key_id="AKIA$(openssl rand -hex 8 2>/dev/null | tr '[:lower:]' '[:upper:]')"
         aws_secret="$(openssl rand -base64 30 2>/dev/null | tr -dc 'A-Za-z0-9+/' | head -c 40)"
 
         mkdir -p /root/.aws
@@ -874,7 +984,7 @@ aws_secret_access_key = $(openssl rand -base64 30 2>/dev/null | tr -dc 'A-Za-z0-
 # CANARY: ${aws_token_id}
 EOFAWSCREDS
         chmod 600 /root/.aws/credentials.bak
-        echo "HONEYTOKEN|${aws_token_id}|AWS_CREDS|/root/.aws/credentials.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+        echo "HONEYTOKEN|${aws_token_id}|AWS_CREDS|/root/.aws/credentials.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
         log_change "Desplegado" "Honeytoken AWS: /root/.aws/credentials.bak (${aws_token_id})"
 
         # Desplegar en homes de usuarios normales
@@ -882,7 +992,6 @@ EOFAWSCREDS
             [[ "$uid" -ge 1000 && "$uid" -lt 65534 ]] || continue
             [[ -d "$homedir" ]] || continue
 
-            local u_token_id
             u_token_id="$(generate_token_id AWS)"
             mkdir -p "${homedir}/.aws"
             cat > "${homedir}/.aws/credentials.bak" << EOFUAWS
@@ -893,25 +1002,23 @@ aws_secret_access_key = $(openssl rand -base64 30 2>/dev/null | tr -dc 'A-Za-z0-
 EOFUAWS
             chmod 600 "${homedir}/.aws/credentials.bak"
             chown "${username}:${username}" "${homedir}/.aws" "${homedir}/.aws/credentials.bak" 2>/dev/null || true
-            echo "HONEYTOKEN|${u_token_id}|AWS_CREDS|${homedir}/.aws/credentials.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+            echo "HONEYTOKEN|${u_token_id}|AWS_CREDS|${homedir}/.aws/credentials.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
             log_change "Desplegado" "Honeytoken AWS: ${homedir}/.aws/credentials.bak"
         done < /etc/passwd
 
         # Desplegar fake SSH key en /root
-        local ssh_token_id
         ssh_token_id="$(generate_token_id SSH)"
         generate_fake_ssh_key "/root/.ssh/id_rsa.bak" "$ssh_token_id"
-        echo "HONEYTOKEN|${ssh_token_id}|SSH_KEY|/root/.ssh/id_rsa.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+        echo "HONEYTOKEN|${ssh_token_id}|SSH_KEY|/root/.ssh/id_rsa.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
         log_change "Desplegado" "Honeytoken SSH: /root/.ssh/id_rsa.bak (${ssh_token_id})"
 
         # Fake SSH key en /tmp
         ssh_token_id="$(generate_token_id SSH)"
         generate_fake_ssh_key "/tmp/.id_rsa_backup" "$ssh_token_id"
-        echo "HONEYTOKEN|${ssh_token_id}|SSH_KEY|/tmp/.id_rsa_backup|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+        echo "HONEYTOKEN|${ssh_token_id}|SSH_KEY|/tmp/.id_rsa_backup|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
         log_change "Desplegado" "Honeytoken SSH: /tmp/.id_rsa_backup"
 
         # Desplegar fake DB credentials
-        local db_token_id
         db_token_id="$(generate_token_id DB)"
         cat > /etc/securizar/decoy-db.conf << EOFDBCREDS
 # Database connection configuration - PRODUCTION
@@ -938,11 +1045,10 @@ auth = $(generate_fake_password)
 # CANARY: ${db_token_id}
 EOFDBCREDS
         chmod 600 /etc/securizar/decoy-db.conf
-        echo "HONEYTOKEN|${db_token_id}|DB_CREDS|/etc/securizar/decoy-db.conf|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+        echo "HONEYTOKEN|${db_token_id}|DB_CREDS|/etc/securizar/decoy-db.conf|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
         log_change "Desplegado" "Honeytoken DB: /etc/securizar/decoy-db.conf (${db_token_id})"
 
         # Desplegar fake .env
-        local env_token_id
         env_token_id="$(generate_token_id ENV)"
         if [[ -d /var/www ]]; then
             cat > /var/www/.env.bak << EOFENVBAK
@@ -957,7 +1063,7 @@ STRIPE_SECRET_KEY=sk_live_$(openssl rand -hex 24 2>/dev/null)
 # CANARY: ${env_token_id}
 EOFENVBAK
             chmod 600 /var/www/.env.bak
-            echo "HONEYTOKEN|${env_token_id}|ENV_FILE|/var/www/.env.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+            echo "HONEYTOKEN|${env_token_id}|ENV_FILE|/var/www/.env.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
             log_change "Desplegado" "Honeytoken ENV: /var/www/.env.bak"
         fi
 
@@ -970,7 +1076,7 @@ API_TOKEN=$(openssl rand -hex 24 2>/dev/null)
 # CANARY: ${env_token_id}
 EOFENVPROD
         chmod 600 /opt/app-config/.env.production
-        echo "HONEYTOKEN|${env_token_id}|ENV_FILE|/opt/app-config/.env.production|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYTOKENS_CONF"
+        echo "HONEYTOKEN|${env_token_id}|ENV_FILE|/opt/app-config/.env.production|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYTOKENS_CONF"
         log_change "Desplegado" "Honeytoken ENV: /opt/app-config/.env.production"
 
         log_info "Honeytokens desplegados exitosamente"
@@ -1115,7 +1221,7 @@ GitLab          | root          | G1tL4b_4dm1n!Pr0d
 Kubernetes      | cluster-admin | K8s_Cl5tr#Pr0d!2025
 EOFPWD
     chmod 600 /root/passwords.xlsx.txt
-    echo "HONEYFILE|${token_id}|PASSWORDS|/root/passwords.xlsx.txt|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYFILE|${token_id}|PASSWORDS|/root/passwords.xlsx.txt|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
     echo "  Desplegado: /root/passwords.xlsx.txt"
 
     # /root/backup-keys.txt
@@ -1137,7 +1243,7 @@ Root Token: hvs.$(openssl rand -hex 24 2>/dev/null)
 # CANARY: ${token_id}
 EOFBKPKEYS
     chmod 600 /root/backup-keys.txt
-    echo "HONEYFILE|${token_id}|BACKUP_KEYS|/root/backup-keys.txt|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYFILE|${token_id}|BACKUP_KEYS|/root/backup-keys.txt|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
     echo "  Desplegado: /root/backup-keys.txt"
 
     # /var/www/html/.htpasswd.bak
@@ -1152,7 +1258,7 @@ deploy:\$apr1\$$(openssl rand -hex 4 2>/dev/null)\$$(openssl rand -base64 16 2>/
 # CANARY: ${token_id}
 EOFHTPASSWD
         chmod 600 /var/www/html/.htpasswd.bak
-        echo "HONEYFILE|${token_id}|HTPASSWD|/var/www/html/.htpasswd.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+        echo "HONEYFILE|${token_id}|HTPASSWD|/var/www/html/.htpasswd.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
         echo "  Desplegado: /var/www/html/.htpasswd.bak"
     fi
 
@@ -1187,7 +1293,7 @@ Host backup-server
 # CANARY: ${token_id}
 EOFSSHCONF
     chmod 600 /tmp/.ssh_config
-    echo "HONEYFILE|${token_id}|SSH_CONFIG|/tmp/.ssh_config|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+    echo "HONEYFILE|${token_id}|SSH_CONFIG|/tmp/.ssh_config|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
     echo "  Desplegado: /tmp/.ssh_config"
 
     # bank-accounts.csv en homes de usuario
@@ -1199,14 +1305,14 @@ EOFSSHCONF
         mkdir -p "${homedir}/Documents" 2>/dev/null || continue
         cat > "${homedir}/Documents/bank-accounts.csv" << EOFBANK
 "Account Name","Bank","Account Number","Routing Number","Balance","Notes"
-"Corporate Operations","First National","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 123456789)","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 987654321)","$125,430.00","Primary operations account"
-"Payroll","Chase","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 234567890)","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 876543210)","$89,200.00","Bi-weekly payroll"
-"Emergency Fund","Wells Fargo","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 345678901)","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 765432109)","$250,000.00","Emergency reserve"
-"Investment","Vanguard","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 456789012)","N/A","$1,200,000.00","Long term investments"
+"Corporate Operations","First National","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 123456789)","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 987654321)","\$125,430.00","Primary operations account"
+"Payroll","Chase","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 234567890)","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 876543210)","\$89,200.00","Bi-weekly payroll"
+"Emergency Fund","Wells Fargo","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 345678901)","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 765432109)","\$250,000.00","Emergency reserve"
+"Investment","Vanguard","$(shuf -i 100000000-999999999 -n 1 2>/dev/null || echo 456789012)","N/A","\$1,200,000.00","Long term investments"
 EOFBANK
         chmod 600 "${homedir}/Documents/bank-accounts.csv"
         chown "${username}:${username}" "${homedir}/Documents" "${homedir}/Documents/bank-accounts.csv" 2>/dev/null || true
-        echo "HONEYFILE|${token_id}|FINANCIAL|${homedir}/Documents/bank-accounts.csv|$(date '+%Y-%m-%d %H:%M:%S')" >> "$INVENTORY"
+        echo "HONEYFILE|${token_id}|FINANCIAL|${homedir}/Documents/bank-accounts.csv|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$INVENTORY"
         echo "  Desplegado: ${homedir}/Documents/bank-accounts.csv"
     done < /etc/passwd
 
@@ -1302,7 +1408,6 @@ EOFHONEYFILES
     if ask "¿Desplegar honey files ahora?"; then
 
         # /root/passwords.xlsx.txt
-        local hf_token_id
         hf_token_id="$(generate_token_id HF)"
         cat > /root/passwords.xlsx.txt << 'EOFPWDFILE'
 Company Password Database - CONFIDENTIAL
@@ -1318,7 +1423,7 @@ Jenkins CI      | ci-admin      | J3nk1ns!BuildS3rv3r
 Grafana         | admin         | M0n1t0r#Gr4f4n4!25
 EOFPWDFILE
         chmod 600 /root/passwords.xlsx.txt
-        echo "HONEYFILE|${hf_token_id}|PASSWORDS|/root/passwords.xlsx.txt|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYFILES_INVENTORY"
+        echo "HONEYFILE|${hf_token_id}|PASSWORDS|/root/passwords.xlsx.txt|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYFILES_INVENTORY"
         log_change "Desplegado" "Honey file: /root/passwords.xlsx.txt"
 
         # /root/backup-keys.txt
@@ -1333,7 +1438,7 @@ Root Token: hvs.$(openssl rand -hex 24 2>/dev/null)
 # CANARY: ${hf_token_id}
 EOFBKKEYS
         chmod 600 /root/backup-keys.txt
-        echo "HONEYFILE|${hf_token_id}|BACKUP_KEYS|/root/backup-keys.txt|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYFILES_INVENTORY"
+        echo "HONEYFILE|${hf_token_id}|BACKUP_KEYS|/root/backup-keys.txt|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYFILES_INVENTORY"
         log_change "Desplegado" "Honey file: /root/backup-keys.txt"
 
         # /var/www/html/.htpasswd.bak
@@ -1346,7 +1451,7 @@ webmaster:\$apr1\$yQ8x\$fakehash0987654321fedcba
 # CANARY: ${hf_token_id}
 EOFHTPWD
             chmod 600 /var/www/html/.htpasswd.bak
-            echo "HONEYFILE|${hf_token_id}|HTPASSWD|/var/www/html/.htpasswd.bak|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYFILES_INVENTORY"
+            echo "HONEYFILE|${hf_token_id}|HTPASSWD|/var/www/html/.htpasswd.bak|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYFILES_INVENTORY"
             log_change "Desplegado" "Honey file: /var/www/html/.htpasswd.bak"
         fi
 
@@ -1364,7 +1469,7 @@ Host database-primary
 # CANARY: ${hf_token_id}
 EOFSSHCFG
         chmod 600 /tmp/.ssh_config
-        echo "HONEYFILE|${hf_token_id}|SSH_CONFIG|/tmp/.ssh_config|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYFILES_INVENTORY"
+        echo "HONEYFILE|${hf_token_id}|SSH_CONFIG|/tmp/.ssh_config|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYFILES_INVENTORY"
         log_change "Desplegado" "Honey file: /tmp/.ssh_config"
 
         # bank-accounts.csv en homes
@@ -1373,7 +1478,7 @@ EOFSSHCFG
             [[ -d "$homedir" ]] || continue
             hf_token_id="$(generate_token_id HF)"
             mkdir -p "${homedir}/Documents" 2>/dev/null || continue
-            cat > "${homedir}/Documents/bank-accounts.csv" << EOFBANKACC
+            cat > "${homedir}/Documents/bank-accounts.csv" << 'EOFBANKACC'
 "Account Name","Bank","Account Number","Balance"
 "Corporate Ops","First National","987654321","$125,430.00"
 "Payroll","Chase","123456789","$89,200.00"
@@ -1381,7 +1486,7 @@ EOFSSHCFG
 EOFBANKACC
             chmod 600 "${homedir}/Documents/bank-accounts.csv"
             chown "${username}:${username}" "${homedir}/Documents" "${homedir}/Documents/bank-accounts.csv" 2>/dev/null || true
-            echo "HONEYFILE|${hf_token_id}|FINANCIAL|${homedir}/Documents/bank-accounts.csv|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYFILES_INVENTORY"
+            echo "HONEYFILE|${hf_token_id}|FINANCIAL|${homedir}/Documents/bank-accounts.csv|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYFILES_INVENTORY"
             log_change "Desplegado" "Honey file: ${homedir}/Documents/bank-accounts.csv"
         done < /etc/passwd
 
@@ -1401,16 +1506,21 @@ EOFBANKACC
             fi
 
             cat > "$AUDIT_HF_RULES" << 'EOFHFAUDIT'
-## Securizar Modulo 55 - Monitorizacion de Honey Files
-## Alerta en cualquier acceso a documentos senuelo
+## Securizar Modulo 55 - Monitorizacion Forense de Honey Files
+## Reglas syscall-level: captura proceso, PID, UID, comando completo
 
-# Archivos de contrasenas falsos
--w /root/passwords.xlsx.txt -p rwa -k honeyfile-passwords
--w /root/backup-keys.txt -p rwa -k honeyfile-keys
+# Archivos de contrasenas falsos (syscall-level para forense)
+-a always,exit -F arch=b64 -S open,openat,read,readv -F path=/root/passwords.xlsx.txt -F perm=r -k honeyfile-passwords
+-a always,exit -F arch=b64 -S open,openat,read,readv -F path=/root/backup-keys.txt -F perm=r -k honeyfile-keys
 # Credenciales web falsas
--w /var/www/html/.htpasswd.bak -p rwa -k honeyfile-htpasswd
+-a always,exit -F arch=b64 -S open,openat,read,readv -F path=/var/www/html/.htpasswd.bak -F perm=r -k honeyfile-htpasswd
 # Config SSH falso en /tmp
--w /tmp/.ssh_config -p rwa -k honeyfile-sshconfig
+-a always,exit -F arch=b64 -S open,openat,read,readv -F path=/tmp/.ssh_config -F perm=r -k honeyfile-sshconfig
+# Tambien capturar escritura/modificacion
+-w /root/passwords.xlsx.txt -p wa -k honeyfile-passwords-write
+-w /root/backup-keys.txt -p wa -k honeyfile-keys-write
+-w /var/www/html/.htpasswd.bak -p wa -k honeyfile-htpasswd-write
+-w /tmp/.ssh_config -p wa -k honeyfile-sshconfig-write
 EOFHFAUDIT
 
             # Agregar reglas para documentos financieros por usuario
@@ -1418,7 +1528,7 @@ EOFHFAUDIT
                 [[ "$uid" -ge 1000 && "$uid" -lt 65534 ]] || continue
                 [[ -d "$homedir" ]] || continue
                 if [[ -f "${homedir}/Documents/bank-accounts.csv" ]]; then
-                    echo "-w ${homedir}/Documents/bank-accounts.csv -p rwa -k honeyfile-financial" >> "$AUDIT_HF_RULES"
+                    echo "-a always,exit -F arch=b64 -S open,openat,read,readv -F path=${homedir}/Documents/bank-accounts.csv -F perm=r -k honeyfile-financial" >> "$AUDIT_HF_RULES"
                 fi
             done < /etc/passwd
 
@@ -1520,7 +1630,7 @@ create_honey_users() {
             chsh -s /usr/sbin/nologin "$user" 2>/dev/null || true
 
         # Registrar en inventario
-        echo "HONEYUSER|${user}|${desc}|$(date '+%Y-%m-%d %H:%M:%S')" >> "$CONF"
+        echo "HONEYUSER|${user}|${desc}|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$CONF"
     done
 
     echo "[+] Honey users creados exitosamente"
@@ -1678,7 +1788,7 @@ EOFHONEYUSERS
             passwd -l "$honey_user" 2>/dev/null || usermod -L "$honey_user" 2>/dev/null || true
             usermod -s /usr/sbin/nologin "$honey_user" 2>/dev/null || true
 
-            echo "HONEYUSER|${honey_user}|${honey_desc}|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYUSERS_CONF"
+            echo "HONEYUSER|${honey_user}|${honey_desc}|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYUSERS_CONF"
         done
 
         log_info "Cuentas canario creadas y bloqueadas"
@@ -1743,7 +1853,7 @@ TARGET_USER="${PAM_USER:-${1:-}}"
 
 for hu in $HONEY_USERS; do
     if [[ "$TARGET_USER" == "$hu" ]]; then
-        timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+        timestamp="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
         src="${PAM_RHOST:-local}"
         tty="${PAM_TTY:-unknown}"
         service="${PAM_SERVICE:-unknown}"
@@ -1869,7 +1979,7 @@ EOFBKPREADME
 }
 EOFJSON
     chmod 700 /opt/backup-data
-    echo "HONEYDIR|${token_id}|/opt/backup-data|Fake backup location|$(date '+%Y-%m-%d %H:%M:%S')" >> "$CONF"
+    echo "HONEYDIR|${token_id}|/opt/backup-data|Fake backup location|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$CONF"
     echo "  Desplegado: /opt/backup-data/"
 
     # /var/lib/vault-keys/
@@ -1911,7 +2021,7 @@ seal "awskms" {
 }
 EOFVHCL
     chmod 700 /var/lib/vault-keys
-    echo "HONEYDIR|${token_id}|/var/lib/vault-keys|Fake vault data|$(date '+%Y-%m-%d %H:%M:%S')" >> "$CONF"
+    echo "HONEYDIR|${token_id}|/var/lib/vault-keys|Fake vault data|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$CONF"
     echo "  Desplegado: /var/lib/vault-keys/"
 
     # /etc/securizar/.admin-keys/
@@ -1927,7 +2037,7 @@ Last rotation: $(date '+%Y-%m-%d')
 Next rotation: $(date -d '+90 days' '+%Y-%m-%d' 2>/dev/null || date '+%Y-%m-%d')
 EOFKEYS
     chmod 700 /etc/securizar/.admin-keys
-    echo "HONEYDIR|${token_id}|/etc/securizar/.admin-keys|Fake admin keys|$(date '+%Y-%m-%d %H:%M:%S')" >> "$CONF"
+    echo "HONEYDIR|${token_id}|/etc/securizar/.admin-keys|Fake admin keys|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$CONF"
     echo "  Desplegado: /etc/securizar/.admin-keys/"
 
     # /root/.bitcoin/
@@ -1949,7 +2059,7 @@ server=1
 txindex=1
 EOFBTCCONF
     chmod 700 /root/.bitcoin
-    echo "HONEYDIR|${token_id}|/root/.bitcoin|Fake crypto wallet|$(date '+%Y-%m-%d %H:%M:%S')" >> "$CONF"
+    echo "HONEYDIR|${token_id}|/root/.bitcoin|Fake crypto wallet|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$CONF"
     echo "  Desplegado: /root/.bitcoin/"
 
     echo "[+] Honey directories desplegados exitosamente"
@@ -2057,7 +2167,7 @@ monitor_dirs() {
     fi
 
     inotifywait -m -r -e access,open,modify,delete,move \
-        --format '%T %w%f %e' --timefmt '%Y-%m-%d %H:%M:%S' \
+        --format '%T %w%f %e' --timefmt '%Y-%m-%dT%H:%M:%S' \
         "${dirs[@]}" 2>/dev/null | while read -r timestamp path event; do
         echo "[ALERTA] ${timestamp} ${event}: ${path}"
         logger -t "securizar-honeydir" -p auth.warning \
@@ -2085,7 +2195,6 @@ EOFHONEYDIRS
     if ask "¿Desplegar honey directories ahora?"; then
 
         # /opt/backup-data/
-        local hd_token_id
         hd_token_id="$(generate_token_id HD)"
         mkdir -p /opt/backup-data
         cat > /opt/backup-data/README.txt << 'EOFBKRM'
@@ -2107,7 +2216,7 @@ EOFBKRM
 }
 EOFJSONMF
         chmod 700 /opt/backup-data
-        echo "HONEYDIR|${hd_token_id}|/opt/backup-data|Fake backup location|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYDIRS_CONF"
+        echo "HONEYDIR|${hd_token_id}|/opt/backup-data|Fake backup location|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYDIRS_CONF"
         log_change "Desplegado" "Honey dir: /opt/backup-data/"
 
         # /var/lib/vault-keys/
@@ -2120,7 +2229,7 @@ EOFJSONMF
 }
 EOFVAULTKEYS
         chmod 700 /var/lib/vault-keys
-        echo "HONEYDIR|${hd_token_id}|/var/lib/vault-keys|Fake vault data|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYDIRS_CONF"
+        echo "HONEYDIR|${hd_token_id}|/var/lib/vault-keys|Fake vault data|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYDIRS_CONF"
         log_change "Desplegado" "Honey dir: /var/lib/vault-keys/"
 
         # /etc/securizar/.admin-keys/
@@ -2134,7 +2243,7 @@ master.key     - Master encryption key (AES-256)
 recovery.key   - Disaster recovery key
 EOFKEYINV
         chmod 700 /etc/securizar/.admin-keys
-        echo "HONEYDIR|${hd_token_id}|/etc/securizar/.admin-keys|Fake admin keys|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYDIRS_CONF"
+        echo "HONEYDIR|${hd_token_id}|/etc/securizar/.admin-keys|Fake admin keys|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYDIRS_CONF"
         log_change "Desplegado" "Honey dir: /etc/securizar/.admin-keys/"
 
         # /root/.bitcoin/
@@ -2152,7 +2261,7 @@ rpcpassword=5xtremelySafePassw0rd!
 server=1
 EOFBTCCFG
         chmod 700 /root/.bitcoin
-        echo "HONEYDIR|${hd_token_id}|/root/.bitcoin|Fake crypto wallet|$(date '+%Y-%m-%d %H:%M:%S')" >> "$HONEYDIRS_CONF"
+        echo "HONEYDIR|${hd_token_id}|/root/.bitcoin|Fake crypto wallet|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$HONEYDIRS_CONF"
         log_change "Desplegado" "Honey dir: /root/.bitcoin/"
 
         log_info "Honey directories desplegados"
@@ -2169,11 +2278,19 @@ EOFBTCCFG
             fi
 
             cat > "$AUDIT_HD_RULES" << 'EOFHDAUDIT'
-## Securizar Modulo 55 - Monitorizacion de Honey Directories
--w /opt/backup-data/ -p rwa -k honeydir-backup
--w /var/lib/vault-keys/ -p rwa -k honeydir-vault
--w /etc/securizar/.admin-keys/ -p rwa -k honeydir-adminkeys
--w /root/.bitcoin/ -p rwa -k honeydir-bitcoin
+## Securizar Modulo 55 - Monitorizacion Forense de Honey Directories
+## Reglas syscall-level para capturar proceso, PID, UID en accesos
+
+# Lectura a directorios trampa (syscall open/openat)
+-a always,exit -F arch=b64 -S open,openat -F dir=/opt/backup-data/ -F perm=r -k honeydir-backup-read
+-a always,exit -F arch=b64 -S open,openat -F dir=/var/lib/vault-keys/ -F perm=r -k honeydir-vault-read
+-a always,exit -F arch=b64 -S open,openat -F dir=/etc/securizar/.admin-keys/ -F perm=r -k honeydir-adminkeys-read
+-a always,exit -F arch=b64 -S open,openat -F dir=/root/.bitcoin/ -F perm=r -k honeydir-bitcoin-read
+# Escritura/modificacion (watch rules para cambios)
+-w /opt/backup-data/ -p wa -k honeydir-backup-write
+-w /var/lib/vault-keys/ -p wa -k honeydir-vault-write
+-w /etc/securizar/.admin-keys/ -p wa -k honeydir-adminkeys-write
+-w /root/.bitcoin/ -p wa -k honeydir-bitcoin-write
 EOFHDAUDIT
             chmod 640 "$AUDIT_HD_RULES"
             augenrules --load 2>/dev/null || auditctl -R "$AUDIT_HD_RULES" 2>/dev/null || true
@@ -2347,7 +2464,7 @@ deploy_dns() {
     # Guardar configuracion
     : > "$CONF"
     for hostname in "${!HONEY_DNS_ENTRIES[@]}"; do
-        echo "HONEYDNS|${hostname}|${honeypot_ip}|${HONEY_DNS_ENTRIES[$hostname]}|$(date '+%Y-%m-%d %H:%M:%S')" >> "$CONF"
+        echo "HONEYDNS|${hostname}|${honeypot_ip}|${HONEY_DNS_ENTRIES[$hostname]}|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')" >> "$CONF"
     done
 
     echo "[+] Honey DNS desplegado (IP: ${honeypot_ip})"
@@ -2497,20 +2614,20 @@ EOFHOSTS
 
         # Guardar config
         cat > "${DECEPTION_CONF_DIR}/honeydns.conf" << EOFDNSCONF
-HONEYDNS|admin-panel.internal|${HONEYPOT_IP}|Panel admin falso|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|vpn-gateway.internal|${HONEYPOT_IP}|VPN gateway falso|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|database-primary.internal|${HONEYPOT_IP}|DB primaria falsa|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|jenkins-ci.internal|${HONEYPOT_IP}|Jenkins CI falso|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|gitlab.internal|${HONEYPOT_IP}|GitLab falso|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|vault.internal|${HONEYPOT_IP}|Vault falso|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|kubernetes-api.internal|${HONEYPOT_IP}|K8s API falsa|$(date '+%Y-%m-%d %H:%M:%S')
-HONEYDNS|monitoring.internal|${HONEYPOT_IP}|Monitoreo falso|$(date '+%Y-%m-%d %H:%M:%S')
+HONEYDNS|admin-panel.internal|${HONEYPOT_IP}|Panel admin falso|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|vpn-gateway.internal|${HONEYPOT_IP}|VPN gateway falso|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|database-primary.internal|${HONEYPOT_IP}|DB primaria falsa|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|jenkins-ci.internal|${HONEYPOT_IP}|Jenkins CI falso|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|gitlab.internal|${HONEYPOT_IP}|GitLab falso|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|vault.internal|${HONEYPOT_IP}|Vault falso|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|kubernetes-api.internal|${HONEYPOT_IP}|K8s API falsa|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
+HONEYDNS|monitoring.internal|${HONEYPOT_IP}|Monitoreo falso|$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')
 EOFDNSCONF
         chmod 600 "${DECEPTION_CONF_DIR}/honeydns.conf"
 
         # Configurar DNS local si existe
         if systemctl is-active dnsmasq &>/dev/null; then
-            local dnsmasq_honey="/etc/dnsmasq.d/honey-dns.conf"
+            dnsmasq_honey="/etc/dnsmasq.d/honey-dns.conf"
             if [[ -f "$dnsmasq_honey" ]]; then
                 cp -a "$dnsmasq_honey" "$BACKUP_DIR/"
             fi
@@ -2654,7 +2771,7 @@ class DecoyHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=WEB_DIR, **kwargs)
 
     def log_request_details(self, method, extra=""):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = (lambda t: t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z")(datetime.datetime.utcnow())
         client_ip = self.client_address[0]
         path = self.path
         user_agent = self.headers.get("User-Agent", "unknown")
@@ -2757,7 +2874,7 @@ ALERT_SCRIPT = "/usr/local/bin/alertar-deception.sh"
 
 class DecoyAPIHandler(http.server.BaseHTTPRequestHandler):
     def log_api_request(self, method, body=""):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = (lambda t: t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z")(datetime.datetime.utcnow())
         client_ip = self.client_address[0]
         path = self.path
         auth_header = self.headers.get("Authorization", "none")
@@ -3192,7 +3309,7 @@ if [[ $LEVEL_NUM -lt $MIN_LEVEL_NUM ]]; then
     exit 0
 fi
 
-TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
+TIMESTAMP="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 HOSTNAME="$(hostname 2>/dev/null || echo unknown)"
 
 # Rate limiting
@@ -3355,7 +3472,7 @@ mkdir -p "$LOG_DIR"
 
 echo "═══════════════════════════════════════════════════"
 echo "  ANALISIS DE LOGS DE DECEPTION"
-echo "  Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "  Fecha: $(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 echo "═══════════════════════════════════════════════════"
 echo ""
 
@@ -3366,7 +3483,7 @@ unique_ips=0
 
 # Analizar honeypot logs
 echo "--- Honeypots ---"
-for logfile in "${HONEYPOT_LOG_DIR}"/honeypot-*.log 2>/dev/null; do
+for logfile in "${HONEYPOT_LOG_DIR}"/honeypot-*.log; do
     [[ -f "$logfile" ]] || continue
     port=$(basename "$logfile" | sed 's/honeypot-//;s/\.log//')
     count=$(wc -l < "$logfile" 2>/dev/null || echo "0")
@@ -3434,7 +3551,7 @@ fi
 # Guardar reporte
 {
     echo "ANALISIS DE DECEPTION LOGS"
-    echo "Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Fecha: $(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
     echo "Hostname: $(hostname)"
     echo ""
     echo "Total eventos: ${total_events}"
@@ -3552,7 +3669,7 @@ echo "║           DASHBOARD DE DECEPTION TECHNOLOGY                   ║"
 echo "║           securizar Modulo 55                                 ║"
 echo "╠═══════════════════════════════════════════════════════════════╣"
 echo -e "║  Host: $(hostname)$(printf '%*s' $((38 - ${#HOSTNAME})) '')                  ║"
-echo "║  Fecha: $(date '+%Y-%m-%d %H:%M:%S')                              ║"
+echo "║  Fecha: $(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')                              ║"
 echo -e "║  Periodo: ${PERIOD_LABEL}$(printf '%*s' $((38 - ${#PERIOD_LABEL})) '')             ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -3563,7 +3680,8 @@ echo -e "${BOLD}${CYAN}┌── HONEYPOTS DE RED ──────────
 active_honeypots=0
 total_hp_connections=0
 
-for pid_file in "${DECEPTION_CONF_DIR}"/honeypot-*.pid 2>/dev/null; do
+shopt -s nullglob
+for pid_file in "${DECEPTION_CONF_DIR}"/honeypot-*.pid; do
     [[ -f "$pid_file" ]] || continue
     port=$(basename "$pid_file" | sed 's/honeypot-//;s/\.pid//')
     pid=$(cat "$pid_file" 2>/dev/null || echo "0")
@@ -3594,6 +3712,7 @@ for pid_file in "${DECEPTION_CONF_DIR}"/honeypot-*.pid 2>/dev/null; do
 
     echo -e "${CYAN}│${NC}  ${status_icon} Puerto ${port} (${svc_name})  Conexiones: ${connections}"
 done
+shopt -u nullglob
 
 if [[ $active_honeypots -eq 0 ]]; then
     # Verificar servicios systemd
@@ -3836,14 +3955,14 @@ esac
     echo "============================================================"
     echo ""
     echo "Hostname: $(hostname)"
-    echo "Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Fecha: $(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
     echo "Periodo: ${PERIOD_LABEL}"
     echo ""
 
     # Honeypots
     echo "--- HONEYPOTS DE RED ---"
     active=0
-    for pid_file in /etc/securizar/deception/honeypot-*.pid 2>/dev/null; do
+    for pid_file in /etc/securizar/deception/honeypot-*.pid; do
         [[ -f "$pid_file" ]] || continue
         port=$(basename "$pid_file" | sed 's/honeypot-//;s/\.pid//')
         pid=$(cat "$pid_file" 2>/dev/null || echo "0")
@@ -4052,7 +4171,7 @@ echo "║     AUDITORIA INTEGRAL DE DECEPTION TECHNOLOGY            ║"
 echo "║     securizar Modulo 55                                   ║"
 echo "╠═══════════════════════════════════════════════════════════╣"
 echo "║  Host: $(hostname)"
-echo "║  Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "║  Fecha: $(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -4409,7 +4528,7 @@ echo ""
 {
     echo "AUDITORIA INTEGRAL DE DECEPTION TECHNOLOGY"
     echo "securizar Modulo 55"
-    echo "Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Fecha: $(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
     echo "Hostname: $(hostname)"
     echo ""
     echo "Honeypots: ${hp_active}/${hp_total}"

@@ -4,7 +4,7 @@
 # Linux Multi-Distro (openSUSE, Debian/Ubuntu, RHEL/Fedora, Arch)
 # ============================================================
 # Protege contra vigilancia a nivel de ISP:
-#   - Kill switch VPN (iptables DROP si cae la VPN)
+#   - Kill switch VPN (nftables/iptables/firewalld DROP si cae la VPN)
 #   - Prevención de fugas DNS (modo estricto DoT + DNSSEC)
 #   - ECH (Encrypted Client Hello) oculta SNI
 #   - Prevención de fugas WebRTC
@@ -49,7 +49,7 @@ echo ""
 
 echo "Capacidades que se instalarán:"
 echo ""
-echo -e "  ${CYAN}S1${NC}  VPN Kill Switch (iptables, no tráfico sin VPN)"
+echo -e "  ${CYAN}S1${NC}  VPN Kill Switch (nftables/firewalld, no tráfico sin VPN)"
 echo -e "  ${CYAN}S2${NC}  Prevención de fugas DNS (DoT estricto, DNSSEC)"
 echo -e "  ${CYAN}S3${NC}  ECH (Encrypted Client Hello, oculta SNI)"
 echo -e "  ${CYAN}S4${NC}  Prevención de fugas WebRTC"
@@ -68,75 +68,110 @@ mkdir -p "$ISP_CONF_DIR"
 # ============================================================
 log_section "S1: VPN KILL SWITCH"
 
-echo "Crea reglas iptables que bloquean TODO tráfico si la VPN cae."
+echo "Crea reglas firewall que bloquean TODO tráfico si la VPN cae."
 echo "Permite: loopback, LAN, DHCP, interfaces VPN (wg0/tun0)."
+echo "Compatible con nftables, iptables y firewalld."
 echo ""
 
 if ask "¿Configurar VPN Kill Switch?"; then
 
-    # Script para activar kill switch
+    # Script para activar kill switch (multi-backend)
     cat > "${ISP_CONF_DIR}/vpn-killswitch.sh" << 'KILLSWITCH_ON'
 #!/bin/bash
 # VPN Kill Switch - Activar
 # Bloquea todo tráfico que no pase por VPN (wg0/tun0)
 set -euo pipefail
 
-CHAIN="SECURIZAR_KS"
+if command -v nft &>/dev/null; then
+    # ── nftables (openSUSE, sistemas modernos) ──
+    nft delete table inet securizar_ks 2>/dev/null || true
+    nft add table inet securizar_ks
+    nft add chain inet securizar_ks output '{ type filter hook output priority 0; policy accept; }'
 
-# Limpiar cadena previa si existe
-iptables -D OUTPUT -j "$CHAIN" 2>/dev/null || true
-iptables -F "$CHAIN" 2>/dev/null || true
-iptables -X "$CHAIN" 2>/dev/null || true
+    # Permitir loopback
+    nft add rule inet securizar_ks output oifname "lo" accept
+    # Permitir LAN (RFC1918)
+    nft add rule inet securizar_ks output ip daddr 10.0.0.0/8 accept
+    nft add rule inet securizar_ks output ip daddr 172.16.0.0/12 accept
+    nft add rule inet securizar_ks output ip daddr 192.168.0.0/16 accept
+    # Permitir DHCP
+    nft add rule inet securizar_ks output udp dport 67-68 accept
+    # Permitir DNS local (stubby DoT)
+    nft add rule inet securizar_ks output tcp dport 853 accept
+    # Permitir interfaces VPN
+    nft add rule inet securizar_ks output oifname "wg0" accept
+    nft add rule inet securizar_ks output oifname "tun0" accept
+    nft add rule inet securizar_ks output oifname "tun*" accept
+    # Permitir conexiones establecidas
+    nft add rule inet securizar_ks output ct state established,related accept
+    # DROP todo lo demás
+    nft add rule inet securizar_ks output drop
 
-# Crear cadena
-iptables -N "$CHAIN"
+    echo "[+] VPN Kill Switch ACTIVADO via nftables"
 
-# Permitir loopback
-iptables -A "$CHAIN" -o lo -j ACCEPT
+elif command -v iptables &>/dev/null; then
+    # ── iptables (sistemas legacy) ──
+    CHAIN="SECURIZAR_KS"
+    iptables -D OUTPUT -j "$CHAIN" 2>/dev/null || true
+    iptables -F "$CHAIN" 2>/dev/null || true
+    iptables -X "$CHAIN" 2>/dev/null || true
+    iptables -N "$CHAIN"
+    iptables -A "$CHAIN" -o lo -j ACCEPT
+    iptables -A "$CHAIN" -d 10.0.0.0/8 -j ACCEPT
+    iptables -A "$CHAIN" -d 172.16.0.0/12 -j ACCEPT
+    iptables -A "$CHAIN" -d 192.168.0.0/16 -j ACCEPT
+    iptables -A "$CHAIN" -p udp --dport 67:68 -j ACCEPT
+    iptables -A "$CHAIN" -p tcp --dport 853 -j ACCEPT
+    iptables -A "$CHAIN" -o wg0 -j ACCEPT
+    iptables -A "$CHAIN" -o tun0 -j ACCEPT
+    iptables -A "$CHAIN" -o tun+ -j ACCEPT
+    iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A "$CHAIN" -j DROP
+    iptables -I OUTPUT -j "$CHAIN"
+    echo "[+] VPN Kill Switch ACTIVADO via iptables"
 
-# Permitir LAN (RFC1918)
-iptables -A "$CHAIN" -d 10.0.0.0/8 -j ACCEPT
-iptables -A "$CHAIN" -d 172.16.0.0/12 -j ACCEPT
-iptables -A "$CHAIN" -d 192.168.0.0/16 -j ACCEPT
-
-# Permitir DHCP
-iptables -A "$CHAIN" -p udp --dport 67:68 -j ACCEPT
-
-# Permitir interfaz VPN
-iptables -A "$CHAIN" -o wg0 -j ACCEPT
-iptables -A "$CHAIN" -o tun0 -j ACCEPT
-iptables -A "$CHAIN" -o tun+ -j ACCEPT
-
-# Permitir conexiones ya establecidas
-iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-
-# DROP todo lo demás
-iptables -A "$CHAIN" -j DROP
-
-# Insertar en OUTPUT
-iptables -I OUTPUT -j "$CHAIN"
-
-echo "[+] VPN Kill Switch ACTIVADO - tráfico sin VPN bloqueado"
+elif command -v firewall-cmd &>/dev/null; then
+    # ── firewalld ──
+    firewall-cmd --set-default-zone=drop 2>/dev/null || true
+    firewall-cmd --add-rich-rule='rule family="ipv4" destination address="10.0.0.0/8" accept' --permanent 2>/dev/null || true
+    firewall-cmd --add-rich-rule='rule family="ipv4" destination address="172.16.0.0/12" accept' --permanent 2>/dev/null || true
+    firewall-cmd --add-rich-rule='rule family="ipv4" destination address="192.168.0.0/16" accept' --permanent 2>/dev/null || true
+    firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    echo "[+] VPN Kill Switch ACTIVADO via firewalld (zona drop)"
+else
+    echo "[!] No se encontró nftables, iptables ni firewalld"
+    exit 1
+fi
 KILLSWITCH_ON
     chmod 700 "${ISP_CONF_DIR}/vpn-killswitch.sh"
-    log_change "Creado" "${ISP_CONF_DIR}/vpn-killswitch.sh"
+    log_change "Creado" "${ISP_CONF_DIR}/vpn-killswitch.sh (multi-backend)"
 
-    # Script para desactivar kill switch
+    # Script para desactivar kill switch (multi-backend)
     cat > "${ISP_CONF_DIR}/vpn-killswitch-off.sh" << 'KILLSWITCH_OFF'
 #!/bin/bash
 # VPN Kill Switch - Desactivar
 set -euo pipefail
 
-CHAIN="SECURIZAR_KS"
+if command -v nft &>/dev/null; then
+    nft delete table inet securizar_ks 2>/dev/null || true
+    echo "[+] VPN Kill Switch DESACTIVADO (nftables)"
+elif command -v iptables &>/dev/null; then
+    CHAIN="SECURIZAR_KS"
+    iptables -D OUTPUT -j "$CHAIN" 2>/dev/null || true
+    iptables -F "$CHAIN" 2>/dev/null || true
+    iptables -X "$CHAIN" 2>/dev/null || true
+    echo "[+] VPN Kill Switch DESACTIVADO (iptables)"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --set-default-zone=public 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    echo "[+] VPN Kill Switch DESACTIVADO (firewalld → zona public)"
+fi
 
-iptables -D OUTPUT -j "$CHAIN" 2>/dev/null || true
-iptables -F "$CHAIN" 2>/dev/null || true
-iptables -X "$CHAIN" 2>/dev/null || true
-
-echo "[+] VPN Kill Switch DESACTIVADO - tráfico normal restaurado"
+echo "[+] Tráfico normal restaurado"
 KILLSWITCH_OFF
     chmod 700 "${ISP_CONF_DIR}/vpn-killswitch-off.sh"
-    log_change "Creado" "${ISP_CONF_DIR}/vpn-killswitch-off.sh"
+    log_change "Creado" "${ISP_CONF_DIR}/vpn-killswitch-off.sh (multi-backend)"
 
     # Hook NetworkManager dispatcher
     if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
@@ -169,120 +204,384 @@ else
 fi
 
 # ============================================================
-# S2 — PREVENCIÓN DE FUGAS DNS
+# S2 — PREVENCIÓN DE FUGAS DNS (DNS-over-TLS con unbound)
 # ============================================================
 log_section "S2: PREVENCIÓN DE FUGAS DNS"
 
-echo "Refuerza DNS-over-TLS a modo ESTRICTO con DNSSEC."
-echo "Bloquea puerto 53 saliente excepto por VPN/localhost."
-echo "Desactiva mDNS y LLMNR."
+echo "Configura unbound como resolvedor DNS local con DNS-over-TLS (DoT, puerto 853)."
+echo "El ISP bloquea puerto 53 hacia DNS externos (1.1.1.1, 9.9.9.9)."
+echo "Unbound cifra las consultas por el puerto 853, que el ISP no puede bloquear."
+echo "Incluye DNSSEC, cache local y desactiva mDNS/LLMNR."
 echo ""
 
-if ask "¿Configurar prevención de fugas DNS?"; then
+if ask "¿Configurar DNS cifrado con unbound (DNS-over-TLS)?"; then
 
-    # Configurar resolved en modo estricto
-    mkdir -p /etc/systemd/resolved.conf.d
-    cat > /etc/systemd/resolved.conf.d/02-isp-dns-leak-prevention.conf << 'DNS_CONF'
-# Securizar Módulo 38 - Prevención de fugas DNS ISP
-[Resolve]
-# DNS-over-TLS estricto (falla si no hay TLS, no cae a plaintext)
-DNSOverTLS=yes
-DNSSEC=yes
-
-# Servidores DNS con soporte DoT
-DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net
-FallbackDNS=8.8.8.8#dns.google 8.8.4.4#dns.google
-
-# Desactivar protocolos de descubrimiento local (fugas)
-MulticastDNS=no
-LLMNR=no
-
-# Dominios: usar DoT para todo
-Domains=~.
-DNS_CONF
-    log_change "Creado" "/etc/systemd/resolved.conf.d/02-isp-dns-leak-prevention.conf"
-
-    # Reiniciar resolved
-    systemctl restart systemd-resolved 2>/dev/null || true
-    log_change "Servicio" "systemd-resolved reiniciado"
-
-    # Bloquear puerto 53 saliente excepto VPN/localhost
-    if ! iptables -C OUTPUT -o lo -p udp --dport 53 -j ACCEPT 2>/dev/null; then
-        iptables -A OUTPUT -o lo -p udp --dport 53 -j ACCEPT
-        iptables -A OUTPUT -o lo -p tcp --dport 53 -j ACCEPT
-    fi
-    # Permitir DNS por VPN
-    for vpn_iface in wg0 tun0; do
-        if ! iptables -C OUTPUT -o "$vpn_iface" -p udp --dport 53 -j ACCEPT 2>/dev/null; then
-            iptables -A OUTPUT -o "$vpn_iface" -p udp --dport 53 -j ACCEPT 2>/dev/null || true
-            iptables -A OUTPUT -o "$vpn_iface" -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
-        fi
-    done
-    # Bloquear DNS plaintext saliente en el resto de interfaces
-    if ! iptables -C OUTPUT -p udp --dport 53 -j REJECT 2>/dev/null; then
-        iptables -A OUTPUT -p udp --dport 53 -j REJECT
-        iptables -A OUTPUT -p tcp --dport 53 -j REJECT
-    fi
-    log_change "Firewall" "Puerto 53 saliente bloqueado (excepto lo/VPN)"
-
-    # Detectar nameservers ISP
-    if [[ -f /etc/resolv.conf ]]; then
-        local_ns=$(grep -E '^nameserver' /etc/resolv.conf 2>/dev/null | grep -vE '127\.|::1' || true)
-        if [[ -n "$local_ns" ]]; then
-            log_warn "Nameservers posiblemente del ISP detectados en /etc/resolv.conf:"
-            echo "$local_ns" | sed 's/^/    /'
-            echo "  Se recomienda que apunten a 127.0.0.53 (systemd-resolved)"
+    # ── Instalar unbound si no está ──
+    if ! command -v unbound &>/dev/null; then
+        if command -v zypper &>/dev/null; then
+            zypper install -y unbound 2>/dev/null || log_warn "No se pudo instalar unbound via zypper"
+        elif command -v apt-get &>/dev/null; then
+            apt-get install -y unbound 2>/dev/null || log_warn "No se pudo instalar unbound via apt"
+        elif command -v dnf &>/dev/null; then
+            dnf install -y unbound 2>/dev/null || log_warn "No se pudo instalar unbound via dnf"
+        elif command -v pacman &>/dev/null; then
+            pacman -S --noconfirm unbound 2>/dev/null || log_warn "No se pudo instalar unbound via pacman"
         fi
     fi
 
-    # Script de detección de fugas DNS
+    if ! command -v unbound &>/dev/null; then
+        log_warn "unbound no se pudo instalar. Sección S2 omitida."
+    else
+
+    # ── Obtener ancla DNSSEC ──
+    # unbound-anchor genera formato correcto en /var/lib/unbound/root.key
+    if command -v unbound-anchor &>/dev/null; then
+        mkdir -p /var/lib/unbound
+        unbound-anchor -a /var/lib/unbound/root.key 2>/dev/null || true
+        chown unbound:unbound /var/lib/unbound/root.key 2>/dev/null || true
+        log_change "DNSSEC" "Ancla de confianza actualizada (/var/lib/unbound/root.key)"
+    fi
+
+    # ── Configurar unbound para DoT estricto ──
+    # Backup de configuración original
+    cp /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak-securizar 2>/dev/null || true
+
+    cat > /etc/unbound/unbound.conf << 'UNBOUND_CONF'
+# ============================================================
+# Securizar Módulo 38 - DNS-over-TLS con unbound
+# Todas las consultas DNS se cifran por el puerto 853
+# El ISP NO puede ver ni interceptar las consultas
+# ============================================================
+
+server:
+    # Escuchar en localhost (todas las apps del sistema usan esto)
+    interface: 127.0.0.1
+    interface: ::1
+    port: 53
+
+    # Acceso solo desde localhost
+    access-control: 127.0.0.0/8 allow
+    access-control: ::1/128 allow
+    access-control: 0.0.0.0/0 refuse
+    access-control: ::/0 refuse
+
+    # No ejecutar como root
+    username: "unbound"
+    directory: "/etc/unbound"
+    chroot: ""
+
+    # DNSSEC: validar firmas criptográficas de respuestas DNS
+    auto-trust-anchor-file: "/var/lib/unbound/root.key"
+    val-clean-additional: yes
+
+    # Cache para rendimiento (evita consultas repetidas al ISP)
+    cache-min-ttl: 300
+    cache-max-ttl: 86400
+    msg-cache-size: 50m
+    rrset-cache-size: 100m
+    key-cache-size: 50m
+    neg-cache-size: 10m
+    prefetch: yes
+    prefetch-key: yes
+
+    # Privacidad: minimizar datos enviados al DNS upstream
+    qname-minimisation: yes
+    qname-minimisation-strict: no
+    minimal-responses: yes
+    hide-identity: yes
+    hide-version: yes
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+    harden-referral-path: yes
+
+    # Rendimiento
+    num-threads: 2
+    so-reuseport: yes
+    infra-cache-numhosts: 10000
+
+    # Desactivar IPv6 si no hay conectividad IPv6
+    do-ip6: no
+
+    # TLS para conexiones upstream (DoT)
+    tls-cert-bundle: "/etc/ssl/ca-bundle.pem"
+
+    # Logs mínimos (privacidad)
+    verbosity: 1
+    log-queries: no
+    log-replies: no
+    logfile: "/var/log/unbound/unbound.log"
+    use-syslog: no
+
+# ── DNS-over-TLS: servidores upstream cifrados (puerto 853) ──
+forward-zone:
+    name: "."
+    # SOLO TLS: si falla TLS, falla la consulta (nunca plaintext)
+    forward-tls-upstream: yes
+
+    # Cloudflare (privacidad, sin logs, rápido)
+    forward-addr: 1.1.1.1@853#cloudflare-dns.com
+    forward-addr: 1.0.0.1@853#cloudflare-dns.com
+
+    # Quad9 (bloqueo de malware + privacidad)
+    forward-addr: 9.9.9.9@853#dns.quad9.net
+    forward-addr: 149.112.112.112@853#dns.quad9.net
+
+    # Google DNS (respaldo)
+    forward-addr: 8.8.8.8@853#dns.google
+    forward-addr: 8.8.4.4@853#dns.google
+UNBOUND_CONF
+    log_change "Creado" "/etc/unbound/unbound.conf (DoT estricto, DNSSEC, cache)"
+
+    # ── Crear directorio de log ──
+    mkdir -p /var/log/unbound
+    chown unbound:unbound /var/log/unbound 2>/dev/null || true
+
+    # ── Verificar configuración antes de iniciar ──
+    if unbound-checkconf /etc/unbound/unbound.conf &>/dev/null; then
+        log_info "Configuración de unbound válida"
+    else
+        log_warn "Error en configuración de unbound:"
+        unbound-checkconf /etc/unbound/unbound.conf 2>&1 | sed 's/^/    /' || true
+    fi
+
+    # ── Activar servicio unbound ──
+    systemctl enable unbound 2>/dev/null || true
+    systemctl restart unbound 2>/dev/null || true
+    log_change "Servicio" "unbound habilitado e iniciado"
+
+    # ── Configurar DNS del sistema para usar unbound ──
+    dns_configured=false
+
+    if command -v nmcli &>/dev/null; then
+        active_conn=$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)
+        if [[ -n "$active_conn" ]]; then
+            # Backup DNS anterior
+            current_dns=$(nmcli -t -f ipv4.dns con show "$active_conn" 2>/dev/null || echo "")
+            echo "# Backup DNS anterior: $current_dns" > "${ISP_CONF_DIR}/dns-backup.conf"
+            echo "# Conexión: $active_conn" >> "${ISP_CONF_DIR}/dns-backup.conf"
+            echo "# Fecha: $(date)" >> "${ISP_CONF_DIR}/dns-backup.conf"
+            log_change "Backup" "DNS anterior guardado en ${ISP_CONF_DIR}/dns-backup.conf"
+
+            # Apuntar DNS a unbound local
+            nmcli con modify "$active_conn" ipv4.dns "127.0.0.1" 2>/dev/null || true
+            nmcli con modify "$active_conn" ipv4.dns-priority -1 2>/dev/null || true
+            nmcli con modify "$active_conn" ipv4.ignore-auto-dns yes 2>/dev/null || true
+
+            # Si dnsmasq es plugin de NM, configurar reenvío a unbound
+            nm_dns=$(grep -r "dns=" /etc/NetworkManager/ 2>/dev/null | grep -o "dns=.*" | head -1 || echo "")
+            if [[ "$nm_dns" == *"dnsmasq"* ]]; then
+                mkdir -p /etc/NetworkManager/dnsmasq.d
+                cat > /etc/NetworkManager/dnsmasq.d/securizar-dot.conf << 'DNSMASQ_CONF'
+# Securizar Módulo 38 - Reenviar DNS a unbound (DoT)
+no-resolv
+server=127.0.0.1#53
+cache-size=0
+DNSMASQ_CONF
+                log_change "dnsmasq" "Configurado para reenviar a unbound"
+            fi
+
+            # Aplicar cambios (reconectar)
+            nmcli con down "$active_conn" 2>/dev/null || true
+            sleep 2
+            nmcli con up "$active_conn" 2>/dev/null || true
+            log_change "NetworkManager" "DNS redirigido a unbound (127.0.0.1 → DoT puerto 853)"
+            dns_configured=true
+        fi
+    fi
+
+    if [[ "$dns_configured" != "true" ]]; then
+        # Fallback: modificar resolv.conf
+        cp /etc/resolv.conf /etc/resolv.conf.bak-securizar 2>/dev/null || true
+        cat > /etc/resolv.conf << 'RESOLV_CONF'
+# Securizar Módulo 38 - DNS via unbound (DoT cifrado)
+nameserver 127.0.0.1
+options edns0 trust-ad
+RESOLV_CONF
+        chattr +i /etc/resolv.conf 2>/dev/null || true
+        log_change "resolv.conf" "Forzado a usar unbound, archivo inmutable"
+    fi
+
+    # ── Desactivar mDNS y LLMNR (fugas en red local) ──
+    if systemctl is-active avahi-daemon &>/dev/null; then
+        systemctl stop avahi-daemon 2>/dev/null || true
+        systemctl disable avahi-daemon 2>/dev/null || true
+        log_change "avahi-daemon" "Desactivado (prevención fuga mDNS)"
+    fi
+
+    # ── Permitir puerto 853 saliente en firewall ──
+    if command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
+        firewall-cmd --add-rich-rule='rule family="ipv6" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
+        log_change "Firewall" "Puerto 853 (DoT) saliente permitido"
+    elif command -v nft &>/dev/null; then
+        nft add table inet securizar-dot 2>/dev/null || true
+        nft flush table inet securizar-dot 2>/dev/null || true
+        nft add chain inet securizar-dot output '{ type filter hook output priority 0; policy accept; }' 2>/dev/null || true
+        nft add rule inet securizar-dot output tcp dport 853 accept 2>/dev/null || true
+        log_change "Firewall" "Puerto 853 (DoT) saliente permitido via nftables"
+    fi
+
+    # ── Eliminar tabla nftables antigua que bloqueaba puerto 53 ──
+    if command -v nft &>/dev/null; then
+        if nft list tables 2>/dev/null | grep -q "securizar-dns"; then
+            nft delete table inet securizar-dns 2>/dev/null || true
+            log_change "Firewall" "Eliminada tabla nftables securizar-dns (obsoleta)"
+        fi
+    fi
+
+    # ── Verificar que unbound funciona ──
+    sleep 2
+    if ss -tlnp 2>/dev/null | grep -q "unbound" || ss -ulnp 2>/dev/null | grep -q "unbound"; then
+        log_info "unbound escuchando en 127.0.0.1:53"
+
+        # Test rápido de resolución
+        if nslookup example.com 127.0.0.1 &>/dev/null; then
+            log_info "Resolución DNS via DoT funcionando correctamente"
+        else
+            log_warn "unbound activo pero la resolución falla. Verifica: sudo unbound-checkconf"
+        fi
+    else
+        log_warn "unbound no parece estar escuchando. Verifica con: systemctl status unbound"
+    fi
+
+    # ── Script de verificación de DNS cifrado ──
     cat > "${ISP_BIN_DIR}/detectar-dns-leak.sh" << 'DNS_LEAK'
 #!/bin/bash
-# Detectar fugas DNS - comprueba que las consultas usan DoT
+# Detectar fugas DNS - verifica que las consultas usan DNS-over-TLS via unbound
 set -euo pipefail
 
-echo "=== Detección de fugas DNS ==="
+echo "╔═══════════════════════════════════════════════╗"
+echo "║   DETECCIÓN DE FUGAS DNS                      ║"
+echo "╚═══════════════════════════════════════════════╝"
 echo ""
 
-# Verificar resolved
-if systemctl is-active systemd-resolved &>/dev/null; then
-    echo "[+] systemd-resolved activo"
-    resolvectl status 2>/dev/null | grep -E 'DNS Server|DNSOverTLS|DNSSEC' | sed 's/^/    /'
-else
-    echo "[!] systemd-resolved NO activo"
-fi
-
-echo ""
-
-# Verificar que puerto 53 está bloqueado
-echo "=== Reglas iptables puerto 53 ==="
-iptables -L OUTPUT -n -v 2>/dev/null | grep -E ':53|dpt:53' | sed 's/^/    /' || echo "    (sin reglas)"
-
-echo ""
-
-# Test de resolución
-echo "=== Test de resolución DNS ==="
-for domain in example.com cloudflare.com; do
-    if result=$(resolvectl query "$domain" 2>&1); then
-        echo "[+] $domain: resuelve correctamente vía DoT"
+# Verificar unbound
+echo "=== Estado de unbound (DNS-over-TLS) ==="
+if systemctl is-active unbound &>/dev/null; then
+    echo "  [OK] unbound activo"
+    if ss -tlnp 2>/dev/null | grep -q "unbound"; then
+        echo "  [OK] Escuchando en 127.0.0.1:53"
     else
-        echo "[!] $domain: fallo en resolución"
+        echo "  [!!] unbound activo pero NO escucha en puerto 53"
+    fi
+    # Verificar DoT configurado
+    if grep -q "forward-tls-upstream: yes" /etc/unbound/unbound.conf 2>/dev/null; then
+        echo "  [OK] DNS-over-TLS (DoT) habilitado"
+    else
+        echo "  [!!] DoT NO configurado en unbound"
+    fi
+    # Verificar DNSSEC
+    if grep -q "auto-trust-anchor-file" /etc/unbound/unbound.conf 2>/dev/null; then
+        echo "  [OK] DNSSEC habilitado"
+    else
+        echo "  [--] DNSSEC no configurado"
+    fi
+else
+    echo "  [!!] unbound NO activo - DNS NO cifrado!"
+    echo "       Ejecuta: sudo systemctl start unbound"
+fi
+echo ""
+
+# Verificar resolv.conf
+echo "=== Configuración DNS actual ==="
+if [[ -f /etc/resolv.conf ]]; then
+    grep "^nameserver" /etc/resolv.conf | while read -r line; do
+        ns=$(echo "$line" | awk '{print $2}')
+        if [[ "$ns" == "127.0.0.1" || "$ns" == "::1" || "$ns" == "127.0.0.53" ]]; then
+            echo "  [OK] $line (local/unbound)"
+        else
+            echo "  [!!] $line (DNS externo sin cifrar - FUGA!)"
+        fi
+    done
+else
+    echo "  [!!] /etc/resolv.conf no encontrado"
+fi
+echo ""
+
+# Test de resolución via DoT
+echo "=== Test de resolución DNS (via unbound/DoT) ==="
+for domain in example.com cloudflare.com opensuse.org; do
+    if result=$(nslookup "$domain" 127.0.0.1 2>&1); then
+        ip=$(echo "$result" | grep -A1 "Name:" | grep "Address:" | head -1 | awk '{print $2}')
+        echo "  [OK] $domain -> ${ip:-resuelto} (via unbound/DoT)"
+    else
+        echo "  [!!] $domain -> FALLO"
     fi
 done
-
 echo ""
 
-# Comprobar conexiones DNS activas
-echo "=== Conexiones DNS activas (puerto 53/853) ==="
-ss -tnp 2>/dev/null | grep -E ':53 |:853 ' | sed 's/^/    /' || echo "    (ninguna)"
-
+# Comprobar conexiones TLS a puerto 853
+echo "=== Conexiones DNS-over-TLS activas (puerto 853) ==="
+dot_conns=$(ss -tnp 2>/dev/null | grep ":853" || true)
+if [[ -n "$dot_conns" ]]; then
+    echo "$dot_conns" | sed 's/^/  /'
+    echo "  [OK] Conexiones DoT detectadas - DNS cifrado"
+else
+    echo "  [--] Sin conexiones DoT activas (se crean bajo demanda)"
+fi
 echo ""
-echo "Si ves conexiones al puerto 53 (no 853), hay fuga DNS."
+
+# Verificar que NO hay fugas al puerto 53 externo
+echo "=== Verificacion de fugas (puerto 53 plaintext) ==="
+plain_dns=$(ss -tnp 2>/dev/null | grep ":53 " | grep -v "127\." || true)
+if [[ -n "$plain_dns" ]]; then
+    echo "$plain_dns" | sed 's/^/  /'
+    echo "  [!!] FUGA DNS DETECTADA - conexiones sin cifrar al puerto 53"
+else
+    echo "  [OK] Sin conexiones DNS plaintext al exterior"
+fi
+echo ""
+
+# Cache stats
+echo "=== Cache de unbound ==="
+unbound-control stats_noreset 2>/dev/null | grep -E "total.num|cache.count" | sed 's/^/  /' || echo "  (unbound-control no disponible)"
+echo ""
+
+echo "Si todo muestra [OK], tu DNS esta cifrado y el ISP NO puede ver tus consultas."
 DNS_LEAK
     chmod 755 "${ISP_BIN_DIR}/detectar-dns-leak.sh"
     log_change "Creado" "${ISP_BIN_DIR}/detectar-dns-leak.sh"
 
-    log_info "Prevención de fugas DNS configurada (modo estricto)"
+    # ── Script para restaurar DNS original ──
+    cat > "${ISP_BIN_DIR}/restaurar-dns-isp.sh" << 'DNS_RESTORE'
+#!/bin/bash
+# Restaurar DNS original (deshacer proteccion DoT)
+set -euo pipefail
+echo "Restaurando DNS original..."
+if [[ -f /etc/securizar/dns-backup.conf ]]; then
+    echo "Configuracion anterior:"
+    cat /etc/securizar/dns-backup.conf
+fi
+echo ""
+# Detener unbound
+systemctl stop unbound 2>/dev/null || true
+systemctl disable unbound 2>/dev/null || true
+echo "[+] unbound detenido"
+# Restaurar NetworkManager
+active_conn=$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)
+if [[ -n "$active_conn" ]]; then
+    nmcli con modify "$active_conn" ipv4.dns "" 2>/dev/null || true
+    nmcli con modify "$active_conn" ipv4.ignore-auto-dns no 2>/dev/null || true
+    nmcli con down "$active_conn" && sleep 2 && nmcli con up "$active_conn"
+    echo "[+] NetworkManager restaurado"
+fi
+# Restaurar resolv.conf
+if [[ -f /etc/resolv.conf.bak-securizar ]]; then
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    cp /etc/resolv.conf.bak-securizar /etc/resolv.conf
+    echo "[+] resolv.conf restaurado"
+fi
+echo ""
+echo "DNS restaurado. Ahora usa el DNS del router/ISP (sin cifrar)."
+DNS_RESTORE
+    chmod 755 "${ISP_BIN_DIR}/restaurar-dns-isp.sh"
+    log_change "Creado" "${ISP_BIN_DIR}/restaurar-dns-isp.sh (restaurar DNS original)"
+
+    log_info "DNS-over-TLS configurado con unbound (puerto 853, cifrado, DNSSEC, ISP no puede interceptar)"
+
+    fi  # cierre del if ! command -v unbound
 else
     log_skip "Prevención de fugas DNS"
 fi
@@ -848,7 +1147,11 @@ check "Interfaz VPN activa (wg0/tun0)" $vpn_fail "No se detectó interfaz VPN"
 echo ""
 echo -e "${BOLD}── Kill Switch ──${NC}"
 ks_fail=1
-if iptables -L SECURIZAR_KS -n &>/dev/null; then
+if nft list table inet securizar_ks &>/dev/null 2>&1; then
+    ks_fail=0
+elif iptables -L SECURIZAR_KS -n &>/dev/null 2>&1; then
+    ks_fail=0
+elif firewall-cmd --get-default-zone 2>/dev/null | grep -q "drop"; then
     ks_fail=0
 fi
 check "Kill switch VPN activo" $ks_fail "Ejecutar: /etc/securizar/vpn-killswitch.sh"
@@ -856,30 +1159,32 @@ check "Kill switch VPN activo" $ks_fail "Ejecutar: /etc/securizar/vpn-killswitch
 # 3. DNS
 echo ""
 echo -e "${BOLD}── DNS ──${NC}"
-# DoT estricto
+# unbound activo (DNS-over-TLS)
 dot_fail=1
-if [[ -f /etc/systemd/resolved.conf.d/02-isp-dns-leak-prevention.conf ]]; then
-    if grep -q "DNSOverTLS=yes" /etc/systemd/resolved.conf.d/02-isp-dns-leak-prevention.conf 2>/dev/null; then
+if systemctl is-active unbound &>/dev/null; then
+    if grep -q "forward-tls-upstream: yes" /etc/unbound/unbound.conf 2>/dev/null; then
         dot_fail=0
     fi
 fi
-check "DNS-over-TLS estricto" $dot_fail "Falta configuración DoT estricta"
+check "DNS-over-TLS (unbound) activo" $dot_fail "Ejecutar: sudo systemctl start unbound"
 
-# Puerto 53 bloqueado
-p53_fail=1
-if iptables -L OUTPUT -n 2>/dev/null | grep -q "REJECT.*dpt:53"; then
-    p53_fail=0
+# DNS apunta a unbound (local)
+dns_local_fail=1
+if grep -qE "^nameserver\s+127\.0\.0\.1" /etc/resolv.conf 2>/dev/null; then
+    dns_local_fail=0
+elif nmcli -t -f ipv4.dns con show "$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)" 2>/dev/null | grep -q "127.0.0.1"; then
+    dns_local_fail=0
 fi
-check "Puerto 53 saliente bloqueado" $p53_fail "DNS plaintext puede fugarse"
+check "DNS apunta a unbound (127.0.0.1)" $dns_local_fail "DNS no redirigido a unbound local"
 
-# DNSSEC
+# DNSSEC via unbound
 dnssec_fail=1
-if [[ -f /etc/systemd/resolved.conf.d/02-isp-dns-leak-prevention.conf ]]; then
-    if grep -q "DNSSEC=yes" /etc/systemd/resolved.conf.d/02-isp-dns-leak-prevention.conf 2>/dev/null; then
+if [[ -f /etc/unbound/unbound.conf ]]; then
+    if grep -q "auto-trust-anchor-file" /etc/unbound/unbound.conf 2>/dev/null; then
         dnssec_fail=0
     fi
 fi
-check "DNSSEC habilitado" $dnssec_fail "DNSSEC no configurado"
+check "DNSSEC habilitado (unbound)" $dnssec_fail "DNSSEC no configurado en unbound"
 
 # 4. IPv6
 echo ""

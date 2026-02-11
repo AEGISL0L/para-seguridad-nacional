@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 50 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS, forensia digital y Zero Trust. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 66 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS y auditoria de red con Wireshark. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,16 +13,22 @@ Suite completa de hardening y securizacion para Linux, con 50 modulos interactiv
 
 ## Caracteristicas principales
 
-- **50 modulos** organizados en 6 categorias con menu interactivo
+- **66 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 58 categorias de controles
+- **Verificacion proactiva** de 74 categorias de controles
 - **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
-- **Cumplimiento**: CIS Benchmarks Level 1/2, mapeo NIST 800-53
+- **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
+- **Anti-ransomware**: canary files, LVM snapshots, whitelisting, YARA, containment
+- **DevSecOps**: CI/CD pipeline security, SAST, secrets detection, code signing
+- **Seguridad de APIs**: rate limiting, JWT/OAuth2, mTLS, GraphQL, WAF
+- **IoT**: MQTT hardening, device inventory, firmware integrity, segmentacion
+- **DNS avanzado**: DNSSEC, DoT/DoH, RPZ sinkhole, tunneling detection
+- **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias, correlacion IDS
 
 ---
 
@@ -55,7 +61,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-50):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-66):
 
 ```
   b  Hardening Base          (modulos 1-10)   ●●●○○○○○○○
@@ -63,9 +69,9 @@ El menu principal muestra 6 categorias con indicadores de progreso. Se navega co
   m  Mitigaciones MITRE      (modulos 19-30)  ○○○○○○○○○○○○
   o  Operaciones de Seguridad(modulos 31-36)  ○○○○○○
   i  Inteligencia            (modulos 37-38)  ○○
-  x  Avanzado                (modulos 39-50)  ○○○○○○○○○○○○
+  x  Avanzado                (modulos 39-66)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-50 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-66 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -82,7 +88,7 @@ sudo bash respuesta-incidentes.sh    # Modulo 31
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (50 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (66 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -143,7 +149,23 @@ securizar/
 ├── kernel-livepatch.sh            # Modulo 47: Kernel live patching
 ├── seguridad-bases-datos.sh       # Modulo 48: Seguridad de bases de datos
 ├── backup-recuperacion.sh         # Modulo 49: Backup y recuperacion
-└── seguridad-web.sh               # Modulo 50: Seguridad web
+├── seguridad-web.sh               # Modulo 50: Seguridad web
+├── seguridad-secrets.sh           # Modulo 51: Gestion de secretos
+├── seguridad-cloud.sh             # Modulo 52: Seguridad cloud
+├── seguridad-ldap-ad.sh           # Modulo 53: LDAP y Active Directory
+├── cumplimiento-normativo.sh      # Modulo 54: Cumplimiento normativo
+├── tecnologia-engano.sh           # Modulo 55: Tecnologia de engano
+├── seguridad-wireless.sh          # Modulo 56: Seguridad wireless
+├── seguridad-virtualizacion.sh    # Modulo 57: Seguridad de virtualizacion
+├── seguridad-fisica.sh            # Modulo 58: Seguridad fisica avanzada
+├── zero-trust-identity.sh         # Modulo 59: Zero Trust Identity
+├── proteger-ransomware.sh         # Modulo 60: Proteccion anti-ransomware
+├── gestion-parches.sh             # Modulo 61: Gestion de parches
+├── devsecops-hardening.sh         # Modulo 62: DevSecOps hardening
+├── seguridad-api.sh               # Modulo 63: Seguridad de APIs
+├── seguridad-iot.sh               # Modulo 64: Seguridad IoT
+├── seguridad-dns-avanzada.sh      # Modulo 65: DNS avanzado
+└── auditoria-red-wireshark.sh     # Modulo 66: Auditoria de red con Wireshark
 ```
 
 ---
@@ -397,22 +419,38 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 37 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 38 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Avanzado (modulos 39-50)
+### Categoria 6: Avanzado (modulos 39-66)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
-| 39 | **Hardening criptografico** | `hardening-criptografico.sh` | Auditoria y hardening de algoritmos SSH (KexAlgorithms, Ciphers, MACs, HostKey), TLS system-wide, monitorizacion de certificados, calidad de entropia, hardening GPG, verificacion de cifrado de disco (LUKS), escaneo TLS de servicios locales, auditoria de hashing de contrasenas, hardening criptografico del kernel |
-| 40 | **Seguridad de contenedores** | `seguridad-contenedores.sh` | Hardening de Docker/Podman daemon, restricciones de runtime (seccomp, AppArmor, capabilities), seguridad de imagenes, aislamiento de red de contenedores, seguridad de almacenamiento, seguridad de registro (registry), contenedores rootless, monitorizacion, seguridad Kubernetes basica, auditoria CIS de contenedores |
-| 41 | **Cumplimiento CIS** | `cumplimiento-cis.sh` | Evaluacion CIS Benchmark Level 1 y 2 (sistema de archivos, servicios, red, logging, acceso), mapeo a NIST 800-53, motor de puntuacion CIS con scoring, remediacion automatica segura, generacion de informe de cumplimiento |
-| 42 | **Seguridad de email** | `seguridad-email.sh` | Hardening de Postfix (banner, VRFY, HELO), SPF (verificacion DNS, sintaxis, ~all vs -all), DKIM (opendkim 2048-bit, rotacion de claves), DMARC (opendmarc, p=reject), TLS obligatorio (DANE, cipher hardening), anti-relay (restricciones, rate limiting, submission 587), proteccion anti-spoofing (header_checks, sender_login_maps), filtrado de spam (SpamAssassin, Bayes, MIME blocking), monitorizacion de email, auditoria completa (SEGURO/MEJORABLE/INSEGURO) |
-| 43 | **Logging centralizado** | `logging-centralizado.sh` | Hardening rsyslog/journald (permisos, async, Forward Secure Sealing), reenvio TLS (rsyslog-gnutls, certificados auto-generados, cola persistente), agregacion CEF/JSON con normalizacion RFC 5424, almacenamiento seguro (chattr +a, hash chain SHA-256, gocryptfs vault), correlacion de eventos (8 patrones: brute force, escalada, lateral, staging, tampering), alertas en tiempo real (omprog, email/webhook, rate limiting), retencion avanzada (365/180/90/30 dias, zstd), integracion SIEM (templates ELK/Splunk/Graylog), forense de logs (timeline, chain of custody), auditoria (COMPLETO/PARCIAL/INSUFICIENTE) |
-| 44 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | Verificacion de firmas GPG por distro (zypper/apt/dnf/pacman), inventario SBOM en CycloneDX JSON con diff, auditoria de CVEs (zypper list-patches/dnf updateinfo/arch-audit), repositorios seguros (HTTPS, whitelist, prioridades), integridad de binarios (rpm -Va/debsums/pacman -Qk, baseline SHA-256), politica de instalacion (hook de logging, enforcement por distro), deteccion de troyanizados (SUID/SGID, orphan binaries, LD_PRELOAD, capabilities, PATH hijack), hardening del gestor de paquetes, monitorizacion de cambios de software (timer 6h), auditoria completa (SEGURO/MEJORABLE/INSEGURO, NIST 800-53 SA) |
-| 45 | **Segmentacion de red y Zero Trust** | `segmentacion-red-zt.sh` | Zonas de red con nftables (TRUSTED/INTERNAL/DMZ/RESTRICTED), politicas inter-zona (default-deny, matriz de flujos), microsegmentacion por servicio (nftables per-service), aislamiento de contenedores Docker/Podman (redes internas, ICC disabled), evaluacion de postura de dispositivo Zero Trust (scoring 0-100, JSON), control de acceso basado en identidad (PAM + zonas de red), monitorizacion de trafico inter-zona (tcpdump/conntrack, deteccion de anomalias), validacion de segmentacion (tests de aislamiento), verificacion continua ZT (cron 15min, drift detection), auditoria completa (BUENO/MEJORABLE/DEFICIENTE) |
-| 46 | **Forense avanzado** | `forense-avanzado.sh` | Kit de adquisicion de memoria (LiME/proc/kcore, multi-formato), imagen de disco forense (dc3dd/dd, dual hash SHA-256+MD5, write-blocking), preservacion de datos volatiles (RFC 3227, 10 categorias por orden de volatilidad), recopilacion de artefactos (logs, histories, SUID, hidden files, tarball firmado), timeline unificada (MAC times, logs, journal, wtmp/btmp, CSV con filtrado), analisis de malware (YARA con 6 sets de reglas, analisis estatico de binarios), cadena de custodia digital (JSON manifest, hash verification), analisis de logs (brute force, escalada, anomalias), script maestro de recopilacion total, auditoria de preparacion forense (BUENO/MEJORABLE/DEFICIENTE) |
-| 47 | **Kernel live patching** | `kernel-livepatch.sh` | Auditoria de seguridad del kernel (KASLR, SMEP/SMAP, KPTI, Retpoline, lockdown), setup de live patching (kpatch/livepatch/kGraft por distro), mitigacion de exploits via sysctl (25+ parametros: kptr_restrict, dmesg_restrict, perf_event_paranoid, yama ptrace, unprivileged_bpf, kexec_load_disabled), hardening de modulos kernel (blacklist 15+ modulos peligrosos, modprobe.d), validacion de parametros contra baseline (drift detection, auto-remediacion), monitorizacion de CVEs del kernel (base de datos local, matching por version), politica de actualizacion del kernel, verificacion de Secure Boot y firma de modulos, rollback seguro de kernel (GRUB, kexec), auditoria completa (BUENO/MEJORABLE/DEFICIENTE) |
-| 48 | **Seguridad de bases de datos** | `seguridad-bases-datos.sh` | PostgreSQL hardening (pg_hba.conf, SSL, logging, connection limits), MySQL/MariaDB hardening (bind-address, local-infile, secure transport, password validation), Redis hardening (requirepass, bind, protected-mode, rename-command, ACL), MongoDB hardening (authorization, bindIp, JavaScript disable, audit), autenticacion y control de acceso (role-based, minimum privilege, audit scripts), cifrado de bases de datos (at rest e in transit, TLS para todos los motores), backup seguro de bases de datos (encrypted dumps, GPG signing, retention), audit logging (pgaudit, MariaDB audit, query monitoring), prevencion de SQL injection y monitorizacion de queries (log-based detection, pattern matching), auditoria de seguridad de bases de datos (multi-engine audit con scoring) |
-| 49 | **Backup y recuperacion** | `backup-recuperacion.sh` | Estrategia 3-2-1 (config generator, validation), backup cifrado con Borg (repokey-blake2, zstd, retention, systemd timer), backup cifrado con Restic (AES-256, S3/SFTP support, health check), backups inmutables WORM (chattr +i, btrfs snapshots, lockdown), verificacion y restauracion automatica (integrity check, test restore), backup de sistema completo bare metal (full disk/partition image), RTO/RPO y planificacion (DR plan generator, compliance, SLA), backup offsite automatizado (SFTP, S3, rsync, cron automation), proteccion anti-ransomware (honeypots, process monitoring, lockdown), auditoria de backup y DR (scoring, compliance check) |
-| 50 | **Seguridad web** | `seguridad-web.sh` | Hardening de nginx (server_tokens, buffers, timeouts, rate limiting, DH params), hardening de Apache/httpd (ServerTokens, TraceEnable, mod_info/status disable), cabeceras de seguridad HTTP (CSP, HSTS, X-Frame-Options, Permissions-Policy), ModSecurity WAF (OWASP CRS, SecRuleEngine, anomaly detection), optimizacion TLS/SSL (TLS 1.2/1.3, OCSP stapling, session tickets off), rate limiting y proteccion DDoS (nftables rules, connection limits, geoblocking), reglas WAF personalizadas (SQL injection, XSS, path traversal, scanners), control de acceso y autenticacion (htpasswd, IP restrict, admin protection), monitorizacion y analisis de logs web (real-time analysis, pattern detection), auditoria de seguridad web (OWASP Top 10 compliance, scoring) |
+| 39 | **Hardening criptografico** | `hardening-criptografico.sh` | Algoritmos SSH, TLS system-wide, certificados, entropia, GPG, LUKS, kernel crypto |
+| 40 | **Seguridad de contenedores** | `seguridad-contenedores.sh` | Docker/Podman daemon, seccomp, AppArmor, imagenes, registry, rootless, K8s, CIS |
+| 41 | **Cumplimiento CIS** | `cumplimiento-cis.sh` | CIS Benchmark L1/L2, NIST 800-53, scoring, remediacion, informes |
+| 42 | **Seguridad de email** | `seguridad-email.sh` | Postfix, SPF, DKIM 2048-bit, DMARC, TLS/DANE, anti-relay, SpamAssassin |
+| 43 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog TLS, CEF/JSON, hash chain SHA-256, correlacion 8 patrones, SIEM, forense |
+| 44 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | GPG, SBOM CycloneDX, CVEs, repositorios, integridad binarios, troyanizados |
+| 45 | **Segmentacion de red** | `segmentacion-red-zt.sh` | Zonas nftables, microsegmentacion, contenedores, postura ZT, identidad |
+| 46 | **Forense avanzado** | `forense-avanzado.sh` | RAM (LiME), disco forense, volatiles RFC 3227, YARA, custodia digital, timeline |
+| 47 | **Kernel live patching** | `kernel-livepatch.sh` | KASLR/SMEP/KPTI, kpatch/kGraft, sysctl 25+ params, modulos, CVEs, rollback |
+| 48 | **Seguridad de BBDD** | `seguridad-bases-datos.sh` | PostgreSQL, MySQL, Redis, MongoDB, cifrado, pgaudit, SQLi detection |
+| 49 | **Backup y DR** | `backup-recuperacion.sh` | 3-2-1, Borg, Restic, WORM inmutable, bare metal, RTO/RPO, offsite |
+| 50 | **Seguridad web** | `seguridad-web.sh` | nginx/Apache, CSP/HSTS, ModSecurity WAF OWASP CRS, TLS, DDoS, logs |
+| 51 | **Gestion de secretos** | `seguridad-secrets.sh` | Vault, rotacion credenciales, escaneo secretos, SSH keys, pass/gopass/SOPS |
+| 52 | **Seguridad cloud** | `seguridad-cloud.sh` | AWS/Azure/GCP, IMDS hardening, IAM audit, postura cloud, exfiltracion |
+| 53 | **LDAP y Active Directory** | `seguridad-ldap-ad.sh` | OpenLDAP TLS, SSSD, Kerberos, FreeIPA, Samba/Winbind, replicacion |
+| 54 | **Cumplimiento normativo** | `cumplimiento-normativo.sh` | PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001, evidencias, remediacion |
+| 55 | **Tecnologia de engano** | `tecnologia-engano.sh` | Honeypots de red, honeytokens, honey files/users/dirs, DNS, alertas |
+| 56 | **Seguridad wireless** | `seguridad-wireless.sh` | WPA3 Enterprise, FreeRADIUS 802.1X, rogue AP, Bluetooth, monitoring |
+| 57 | **Seguridad virtualizacion** | `seguridad-virtualizacion.sh` | KVM/QEMU, libvirt hardening, VM aislamiento, escape protection |
+| 58 | **Seguridad fisica** | `seguridad-fisica.sh` | USBGuard, BIOS/UEFI, GRUB, TPM, Thunderbolt DMA, screen lock |
+| 59 | **Zero Trust Identity** | `zero-trust-identity.sh` | CISA ZT maturity, continuous auth, device trust, IAP, microseg |
+| 60 | **Anti-ransomware** | `proteger-ransomware.sh` | Canary files, LVM snapshots, exec whitelisting, YARA, SMB, containment |
+| 61 | **Gestion de parches** | `gestion-parches.sh` | Auto-patch, CVE scan, SBOM, staging/rollback, advisories, compliance |
+| 62 | **DevSecOps** | `devsecops-hardening.sh` | Git security, CI/CD, Trivy, SAST, secrets detection, code signing |
+| 63 | **Seguridad de APIs** | `seguridad-api.sh` | Rate limiting, JWT/OAuth2, CORS, mTLS, GraphQL, webhooks, audit |
+| 64 | **Seguridad IoT** | `seguridad-iot.sh` | Inventario IoT, MQTT TLS, CoAP, firmware, credenciales, Zigbee/BLE |
+| 65 | **DNS avanzado** | `seguridad-dns-avanzada.sh` | DNSSEC, DoT/DoH, Unbound, RPZ sinkhole, tunneling, cache poisoning |
+| 66 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, anomalias, correlacion IDS |
 
 ---
 
@@ -429,10 +467,10 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (19-30)
 ├── o  Operaciones de Seguridad (31-36)
 ├── i  Inteligencia (37-38)
-├── x  Avanzado (39-50)
-├── a  Aplicar todos los 50 modulos
-├── v  Verificacion proactiva (58 checks)
-├── 1-50  Acceso directo por numero
+├── x  Avanzado (39-66)
+├── a  Aplicar todos los 66 modulos
+├── v  Verificacion proactiva (74 checks)
+├── 1-66  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -450,7 +488,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 58 verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 74 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -475,6 +513,12 @@ La opcion `v` ejecuta 58 verificaciones agrupadas por categoria:
 - Seguridad de bases de datos
 - Backup y recuperacion
 - Seguridad web
+- Gestion de secretos, seguridad cloud, LDAP/AD
+- Cumplimiento normativo, tecnologia de engano, wireless
+- Virtualizacion, seguridad fisica, Zero Trust Identity
+- Anti-ransomware, gestion de parches, DevSecOps
+- Seguridad de APIs, IoT, DNS avanzado
+- Auditoria de red (Wireshark/tshark)
 
 ### Session tracking
 
@@ -743,6 +787,144 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `analizar-logs-web.sh` | Analisis de logs web (real-time analysis, pattern detection) |
 | `auditoria-seguridad-web.sh` | Auditoria de seguridad web (OWASP Top 10 compliance, scoring) |
 
+### Gestion de secretos
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-secretos.sh` | Auditoria integral de gestion de secretos |
+| `escanear-secretos.sh` | Escaneo de secretos en filesystem (API keys, passwords, tokens) |
+| `rotar-credenciales.sh` | Rotacion automatica de credenciales |
+| `auditar-ssh-keys.sh` | Auditoria de claves SSH (edad, fortaleza, authorized_keys) |
+
+### Seguridad cloud
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-seguridad-cloud.sh` | Auditoria integral de seguridad cloud |
+| `auditar-iam-cloud.sh` | Auditoria de IAM (AWS/Azure/GCP) |
+| `verificar-imds.sh` | Verificacion de seguridad IMDS (Instance Metadata Service) |
+
+### LDAP y Active Directory
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-ldap-ad.sh` | Auditoria integral de LDAP/AD |
+| `hardening-openldap.sh` | Hardening de OpenLDAP (TLS, ACLs, logging) |
+| `auditar-kerberos.sh` | Auditoria de Kerberos (tickets, keytabs, cifrado) |
+
+### Cumplimiento normativo
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-cumplimiento.sh` | Auditoria de cumplimiento multi-framework |
+| `evaluar-pci-dss.sh` | Evaluacion PCI-DSS v4.0 |
+| `evaluar-gdpr.sh` | Evaluacion GDPR |
+| `generar-evidencias.sh` | Generacion de evidencias de cumplimiento |
+
+### Tecnologia de engano
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-deception.sh` | Auditoria de tecnologia de engano |
+| `gestionar-honeypots.sh` | Gestion de honeypots de red |
+| `gestionar-honeytokens.sh` | Gestion de honeytokens y canary files |
+
+### Seguridad wireless
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-wireless.sh` | Auditoria integral de seguridad wireless |
+| `detectar-rogue-ap.sh` | Deteccion de puntos de acceso no autorizados |
+| `hardening-bluetooth.sh` | Hardening de Bluetooth |
+
+### Seguridad de virtualizacion
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-virtualizacion.sh` | Auditoria de seguridad de virtualizacion |
+| `securizar-libvirt.sh` | Hardening de libvirt/KVM/QEMU |
+
+### Seguridad fisica
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-seguridad-fisica.sh` | Auditoria de seguridad fisica |
+| `gestionar-usbguard.sh` | Gestion de politicas USBGuard |
+
+### Zero Trust Identity
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `evaluar-zero-trust.sh` | Evaluacion de madurez Zero Trust (CISA model) |
+| `verificar-device-trust.sh` | Verificacion de confianza de dispositivo |
+
+### Anti-ransomware
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `detectar-ransomware.sh` | Deteccion de actividad ransomware (canary files, YARA, patrones) |
+| `respuesta-ransomware.sh` | Respuesta automatizada: contencion, aislamiento, evidencia |
+| `auditar-anti-ransomware.sh` | Auditoria de preparacion anti-ransomware |
+
+### Gestion de parches
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `escanear-cves.sh` | Escaneo de CVEs contra paquetes instalados |
+| `generar-sbom.sh` | Generacion de SBOM (Software Bill of Materials) |
+| `auditar-parches.sh` | Auditoria de gestion de parches y compliance |
+| `parche-emergencia.sh` | Procedimiento de parche de emergencia por CVE |
+
+### DevSecOps
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-devsecops.sh` | Auditoria integral DevSecOps |
+| `sast-scanner.sh` | SAST multi-lenguaje (Python, JS, Go, C/C++) |
+| `detectar-secretos-codigo.sh` | Deteccion de secretos en repositorios de codigo |
+| `instalar-precommit-hooks.sh` | Instalacion de hooks pre-commit de seguridad |
+
+### Seguridad de APIs
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-seguridad-api.sh` | Auditoria integral de seguridad de APIs |
+| `gestionar-mtls.sh` | Gestion de mTLS (CA, certificados, revocacion) |
+| `auditar-graphql.sh` | Auditoria de seguridad GraphQL |
+| `auditar-headers-api.sh` | Auditoria de CORS y headers de seguridad API |
+
+### Seguridad IoT
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `descubrir-dispositivos-iot.sh` | Descubrimiento e inventario de dispositivos IoT |
+| `hardening-mqtt.sh` | Hardening de broker MQTT (Mosquitto TLS, ACL) |
+| `auditar-seguridad-iot.sh` | Auditoria integral de seguridad IoT |
+| `monitorear-trafico-iot.sh` | Monitorizacion de trafico IoT anomalo |
+
+### DNS avanzado
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-dns-avanzado.sh` | Auditoria integral de seguridad DNS |
+| `verificar-dnssec.sh` | Verificacion de DNSSEC y cadena de confianza |
+| `actualizar-dns-blocklist.sh` | Actualizacion de blocklists DNS (RPZ/sinkhole) |
+| `detectar-dns-tunneling.sh` | Deteccion de DNS tunneling (entropia, patrones) |
+| `monitorear-dns.sh` | Monitorizacion continua de DNS (hijacking, disponibilidad) |
+
+### Auditoria de red (Wireshark)
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditoria-red-captura.sh` | Captura automatizada con 6 perfiles (general, inseguros, dns, escaneos, lateral, exfiltracion) |
+| `auditoria-red-analisis.sh` | Analisis de seguridad de capturas (protocolos, DNS, credenciales, TLS, ARP) |
+| `auditoria-red-listar.sh` | Listado de capturas de red disponibles |
+| `auditoria-red-anomalias.sh` | Deteccion de anomalias de red (ARP spoofing, escaneos, DNS tunneling, C2) |
+| `auditoria-red-reporte.sh` | Generacion de reportes consolidados de auditoria de red |
+| `auditoria-red-csv.sh` | Exportacion de capturas a CSV para analisis externo |
+| `auditoria-red-correlacion.sh` | Correlacion de capturas con alertas Suricata IDS |
+| `auditoria-red-rotacion.sh` | Rotacion y retencion de capturas (politica configurable) |
+
 ---
 
 ## Directorios de datos
@@ -791,6 +973,20 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/var/log/securizar/db-audit.log` | Log de auditoria de bases de datos |
 | `/var/log/securizar/backup-dr.log` | Log de operaciones de backup y DR |
 | `/var/log/securizar/web-security.log` | Log de seguridad web y deteccion de ataques |
+| `/etc/securizar/ransomware-canary.conf` | Configuracion de canary files anti-ransomware |
+| `/etc/securizar/patch-policy.conf` | Politica de parcheo automatico |
+| `/etc/securizar/devsecops-policy.conf` | Politica de seguridad DevSecOps |
+| `/etc/securizar/api-security-policy.conf` | Politica de seguridad de APIs |
+| `/etc/securizar/iot-security-policy.conf` | Politica de seguridad IoT |
+| `/etc/securizar/dns-security-policy.conf` | Politica de seguridad DNS |
+| `/etc/securizar/auditoria-red-policy.conf` | Politica de auditoria de red (retencion, perfiles) |
+| `/etc/securizar/wireshark-filters/` | Filtros BPF y display para auditoria de seguridad |
+| `/etc/securizar/wireshark-profiles/` | Perfiles de captura (6 perfiles predefinidos) |
+| `/var/lib/securizar/capturas-red/` | Capturas de red (.pcapng) |
+| `/var/lib/securizar/reportes-red/` | Reportes de auditoria de red |
+| `/var/lib/securizar/sbom/` | Inventarios SBOM generados |
+| `/var/lib/securizar/iot-inventory.json` | Inventario de dispositivos IoT |
+| `/var/lib/securizar/patch-staging/` | Area de staging de parches |
 
 ---
 
@@ -883,7 +1079,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 50 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 66 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
