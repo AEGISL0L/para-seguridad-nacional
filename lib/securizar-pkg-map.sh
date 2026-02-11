@@ -28,6 +28,9 @@ PKG_MAP[mokutil]="mokutil|mokutil|mokutil|mokutil"
 PKG_MAP[usbguard]="usbguard|usbguard|usbguard|usbguard"
 PKG_MAP[suricata]="suricata|suricata|suricata|suricata"
 PKG_MAP[tor]="tor|tor|tor|tor"
+PKG_MAP[stunnel]="stunnel|stunnel4|stunnel|stunnel"
+PKG_MAP[obfs4proxy]="obfs4proxy|obfs4proxy|obfs4proxy|obfs4proxy"
+PKG_MAP[chrony]="chrony|chrony|chrony|chrony"
 PKG_MAP[gocryptfs]="gocryptfs|gocryptfs|gocryptfs|gocryptfs"
 
 # Paquetes con nombres significativamente diferentes
