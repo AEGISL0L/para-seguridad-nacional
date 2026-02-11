@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 47 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS, forensia digital y Zero Trust. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 50 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS, forensia digital y Zero Trust. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,13 +13,13 @@ Suite completa de hardening y securizacion para Linux, con 47 modulos interactiv
 
 ## Caracteristicas principales
 
-- **47 modulos** organizados en 6 categorias con menu interactivo
+- **50 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 55 categorias de controles
+- **Verificacion proactiva** de 58 categorias de controles
 - **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, mapeo NIST 800-53
@@ -55,7 +55,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-47):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-50):
 
 ```
   b  Hardening Base          (modulos 1-10)   ●●●○○○○○○○
@@ -63,9 +63,9 @@ El menu principal muestra 6 categorias con indicadores de progreso. Se navega co
   m  Mitigaciones MITRE      (modulos 19-30)  ○○○○○○○○○○○○
   o  Operaciones de Seguridad(modulos 31-36)  ○○○○○○
   i  Inteligencia            (modulos 37-38)  ○○
-  x  Avanzado                (modulos 39-47)  ○○○○○○○○○
+  x  Avanzado                (modulos 39-50)  ○○○○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-47 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-50 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -82,7 +82,7 @@ sudo bash respuesta-incidentes.sh    # Modulo 31
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (47 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (50 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -140,7 +140,10 @@ securizar/
 ├── seguridad-cadena-suministro.sh # Modulo 44: Cadena de suministro
 ├── segmentacion-red-zt.sh         # Modulo 45: Segmentacion de red y Zero Trust
 ├── forense-avanzado.sh            # Modulo 46: Forense avanzado
-└── kernel-livepatch.sh            # Modulo 47: Kernel live patching
+├── kernel-livepatch.sh            # Modulo 47: Kernel live patching
+├── seguridad-bases-datos.sh       # Modulo 48: Seguridad de bases de datos
+├── backup-recuperacion.sh         # Modulo 49: Backup y recuperacion
+└── seguridad-web.sh               # Modulo 50: Seguridad web
 ```
 
 ---
@@ -394,7 +397,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 37 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 38 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Avanzado (modulos 39-47)
+### Categoria 6: Avanzado (modulos 39-50)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -407,6 +410,9 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 45 | **Segmentacion de red y Zero Trust** | `segmentacion-red-zt.sh` | Zonas de red con nftables (TRUSTED/INTERNAL/DMZ/RESTRICTED), politicas inter-zona (default-deny, matriz de flujos), microsegmentacion por servicio (nftables per-service), aislamiento de contenedores Docker/Podman (redes internas, ICC disabled), evaluacion de postura de dispositivo Zero Trust (scoring 0-100, JSON), control de acceso basado en identidad (PAM + zonas de red), monitorizacion de trafico inter-zona (tcpdump/conntrack, deteccion de anomalias), validacion de segmentacion (tests de aislamiento), verificacion continua ZT (cron 15min, drift detection), auditoria completa (BUENO/MEJORABLE/DEFICIENTE) |
 | 46 | **Forense avanzado** | `forense-avanzado.sh` | Kit de adquisicion de memoria (LiME/proc/kcore, multi-formato), imagen de disco forense (dc3dd/dd, dual hash SHA-256+MD5, write-blocking), preservacion de datos volatiles (RFC 3227, 10 categorias por orden de volatilidad), recopilacion de artefactos (logs, histories, SUID, hidden files, tarball firmado), timeline unificada (MAC times, logs, journal, wtmp/btmp, CSV con filtrado), analisis de malware (YARA con 6 sets de reglas, analisis estatico de binarios), cadena de custodia digital (JSON manifest, hash verification), analisis de logs (brute force, escalada, anomalias), script maestro de recopilacion total, auditoria de preparacion forense (BUENO/MEJORABLE/DEFICIENTE) |
 | 47 | **Kernel live patching** | `kernel-livepatch.sh` | Auditoria de seguridad del kernel (KASLR, SMEP/SMAP, KPTI, Retpoline, lockdown), setup de live patching (kpatch/livepatch/kGraft por distro), mitigacion de exploits via sysctl (25+ parametros: kptr_restrict, dmesg_restrict, perf_event_paranoid, yama ptrace, unprivileged_bpf, kexec_load_disabled), hardening de modulos kernel (blacklist 15+ modulos peligrosos, modprobe.d), validacion de parametros contra baseline (drift detection, auto-remediacion), monitorizacion de CVEs del kernel (base de datos local, matching por version), politica de actualizacion del kernel, verificacion de Secure Boot y firma de modulos, rollback seguro de kernel (GRUB, kexec), auditoria completa (BUENO/MEJORABLE/DEFICIENTE) |
+| 48 | **Seguridad de bases de datos** | `seguridad-bases-datos.sh` | PostgreSQL hardening (pg_hba.conf, SSL, logging, connection limits), MySQL/MariaDB hardening (bind-address, local-infile, secure transport, password validation), Redis hardening (requirepass, bind, protected-mode, rename-command, ACL), MongoDB hardening (authorization, bindIp, JavaScript disable, audit), autenticacion y control de acceso (role-based, minimum privilege, audit scripts), cifrado de bases de datos (at rest e in transit, TLS para todos los motores), backup seguro de bases de datos (encrypted dumps, GPG signing, retention), audit logging (pgaudit, MariaDB audit, query monitoring), prevencion de SQL injection y monitorizacion de queries (log-based detection, pattern matching), auditoria de seguridad de bases de datos (multi-engine audit con scoring) |
+| 49 | **Backup y recuperacion** | `backup-recuperacion.sh` | Estrategia 3-2-1 (config generator, validation), backup cifrado con Borg (repokey-blake2, zstd, retention, systemd timer), backup cifrado con Restic (AES-256, S3/SFTP support, health check), backups inmutables WORM (chattr +i, btrfs snapshots, lockdown), verificacion y restauracion automatica (integrity check, test restore), backup de sistema completo bare metal (full disk/partition image), RTO/RPO y planificacion (DR plan generator, compliance, SLA), backup offsite automatizado (SFTP, S3, rsync, cron automation), proteccion anti-ransomware (honeypots, process monitoring, lockdown), auditoria de backup y DR (scoring, compliance check) |
+| 50 | **Seguridad web** | `seguridad-web.sh` | Hardening de nginx (server_tokens, buffers, timeouts, rate limiting, DH params), hardening de Apache/httpd (ServerTokens, TraceEnable, mod_info/status disable), cabeceras de seguridad HTTP (CSP, HSTS, X-Frame-Options, Permissions-Policy), ModSecurity WAF (OWASP CRS, SecRuleEngine, anomaly detection), optimizacion TLS/SSL (TLS 1.2/1.3, OCSP stapling, session tickets off), rate limiting y proteccion DDoS (nftables rules, connection limits, geoblocking), reglas WAF personalizadas (SQL injection, XSS, path traversal, scanners), control de acceso y autenticacion (htpasswd, IP restrict, admin protection), monitorizacion y analisis de logs web (real-time analysis, pattern detection), auditoria de seguridad web (OWASP Top 10 compliance, scoring) |
 
 ---
 
@@ -423,10 +429,10 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (19-30)
 ├── o  Operaciones de Seguridad (31-36)
 ├── i  Inteligencia (37-38)
-├── x  Avanzado (39-47)
-├── a  Aplicar todos los 47 modulos
-├── v  Verificacion proactiva (55 checks)
-├── 1-47  Acceso directo por numero
+├── x  Avanzado (39-50)
+├── a  Aplicar todos los 50 modulos
+├── v  Verificacion proactiva (58 checks)
+├── 1-50  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -444,7 +450,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 55 verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 58 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -466,6 +472,9 @@ La opcion `v` ejecuta 55 verificaciones agrupadas por categoria:
 - Segmentacion de red y Zero Trust
 - Forense avanzado
 - Kernel live patching
+- Seguridad de bases de datos
+- Backup y recuperacion
+- Seguridad web
 
 ### Session tracking
 
@@ -690,6 +699,50 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `kernel-rollback.sh` | Rollback seguro de kernel (GRUB, kexec, minimo 2 kernels) |
 | `auditoria-livepatch.sh` | Auditoria integral de kernel y livepatch (BUENO/MEJORABLE/DEFICIENTE) |
 
+### Seguridad de bases de datos
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditar-postgresql.sh` | Auditoria de PostgreSQL (pg_hba.conf, SSL, logging, connection limits) |
+| `auditar-mysql.sh` | Auditoria de MySQL/MariaDB (bind-address, local-infile, secure transport, password validation) |
+| `auditar-redis.sh` | Auditoria de Redis (requirepass, bind, protected-mode, rename-command, ACL) |
+| `auditar-mongodb.sh` | Auditoria de MongoDB (authorization, bindIp, JavaScript disable, audit) |
+| `auditar-acceso-db.sh` | Auditoria de autenticacion y control de acceso (role-based, minimum privilege) |
+| `verificar-cifrado-db.sh` | Verificacion de cifrado de bases de datos (at rest e in transit, TLS) |
+| `backup-seguro-db.sh` | Backup seguro de bases de datos (encrypted dumps, GPG signing, retention) |
+| `configurar-audit-db.sh` | Configuracion de audit logging (pgaudit, MariaDB audit, query monitoring) |
+| `detectar-sqli.sh` | Deteccion de SQL injection (log-based detection, pattern matching) |
+| `auditoria-bases-datos.sh` | Auditoria completa de seguridad de bases de datos (multi-engine, scoring) |
+
+### Backup y recuperacion
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `verificar-estrategia-321.sh` | Verificacion de estrategia de backup 3-2-1 (config generator, validation) |
+| `securizar-backup-borg.sh` | Backup cifrado con Borg (repokey-blake2, zstd, retention, systemd timer) |
+| `securizar-backup-restic.sh` | Backup cifrado con Restic (AES-256, S3/SFTP support, health check) |
+| `securizar-backup-inmutable.sh` | Backups inmutables WORM (chattr +i, btrfs snapshots, lockdown) |
+| `verificar-backups.sh` | Verificacion de integridad de backups (integrity check, test restore) |
+| `restaurar-backup.sh` | Restauracion automatica de backups |
+| `backup-sistema-completo.sh` | Backup de sistema completo bare metal (full disk/partition image) |
+| `validar-rto-rpo.sh` | Validacion RTO/RPO y planificacion DR (DR plan generator, compliance, SLA) |
+| `securizar-backup-offsite.sh` | Backup offsite automatizado (SFTP, S3, rsync, cron automation) |
+| `proteger-backups-ransomware.sh` | Proteccion anti-ransomware (honeypots, process monitoring, lockdown) |
+| `auditoria-backup-dr.sh` | Auditoria de backup y DR (scoring, compliance check) |
+
+### Seguridad web
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `verificar-headers-seguridad.sh` | Verificacion de cabeceras de seguridad HTTP (CSP, HSTS, X-Frame-Options) |
+| `gestionar-modsecurity.sh` | Gestion de ModSecurity WAF (OWASP CRS, SecRuleEngine, anomaly detection) |
+| `verificar-tls-web.sh` | Verificacion y optimizacion TLS/SSL (TLS 1.2/1.3, OCSP stapling) |
+| `detectar-ddos-web.sh` | Deteccion y proteccion DDoS (nftables rules, connection limits, geoblocking) |
+| `configurar-acceso-web.sh` | Control de acceso y autenticacion web (htpasswd, IP restrict, admin protection) |
+| `monitorizar-web.sh` | Monitorizacion de servicios web en tiempo real |
+| `analizar-logs-web.sh` | Analisis de logs web (real-time analysis, pattern detection) |
+| `auditoria-seguridad-web.sh` | Auditoria de seguridad web (OWASP Top 10 compliance, scoring) |
+
 ---
 
 ## Directorios de datos
@@ -727,6 +780,17 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/var/log/securizar/trafico-zonas.log` | Log de trafico inter-zona |
 | `/var/log/securizar/kernel-cves.json` | Resultados de escaneo de CVEs del kernel |
 | `/var/lib/securizar/zt-state.json` | Estado de verificacion continua Zero Trust |
+| `/var/lib/securizar/db-security/` | Datos de auditoria de seguridad de bases de datos |
+| `/var/lib/securizar/backup-dr/` | Datos de auditoria de backup y DR, estrategia 3-2-1 |
+| `/var/lib/securizar/web-security/` | Datos de auditoria de seguridad web |
+| `/etc/securizar/db-audit.conf` | Configuracion de audit logging de bases de datos |
+| `/etc/securizar/backup-strategy.conf` | Configuracion de estrategia de backup 3-2-1 |
+| `/etc/securizar/backup-offsite.conf` | Configuracion de backup offsite automatizado |
+| `/etc/securizar/waf-rules/` | Reglas WAF personalizadas (SQL injection, XSS, path traversal) |
+| `/etc/securizar/web-access.conf` | Configuracion de control de acceso web |
+| `/var/log/securizar/db-audit.log` | Log de auditoria de bases de datos |
+| `/var/log/securizar/backup-dr.log` | Log de operaciones de backup y DR |
+| `/var/log/securizar/web-security.log` | Log de seguridad web y deteccion de ataques |
 
 ---
 
@@ -819,7 +883,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 47 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 50 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
