@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 67 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco) y hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 68 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2) y respuesta a incidentes (forense, contencion, playbooks, timeline). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,7 +13,7 @@ Suite completa de hardening y securizacion para Linux, con 67 modulos interactiv
 
 ## Caracteristicas principales
 
-- **67 modulos** organizados en 6 categorias con menu interactivo
+- **68 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
@@ -66,7 +66,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-67):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-68):
 
 ```
   b  Hardening Base          (modulos 1-9)   ●●●○○○○○○○
@@ -76,7 +76,7 @@ El menu principal muestra 6 categorias con indicadores de progreso. Se navega co
   i  Inteligencia            (modulos 35-36)  ○○
   x  Avanzado                (modulos 37-67)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-67 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-68 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -92,7 +92,7 @@ sudo bash mitigar-acceso-inicial.sh  # Modulo 18
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (67 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (68 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -171,8 +171,7 @@ securizar/
 ├── auditoria-red-infraestructura.sh # Modulo 65: Auditoria de infraestructura de red
 ├── seguridad-runtime-kernel.sh    # Modulo 66: Proteccion runtime del kernel
 ├── hardening-memoria-procesos.sh  # Modulo 67: Hardening de memoria y procesos
-│
-└── respuesta-incidentes.sh        # Standalone: Respuesta a incidentes (IR, forense, playbooks)
+└── respuesta-incidentes.sh        # Modulo 68: Respuesta a incidentes (IR, forense, playbooks)
 ```
 
 ---
@@ -424,7 +423,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 35 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Avanzado (modulos 37-67)
+### Categoria 6: Avanzado (modulos 37-68)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -459,6 +458,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap, TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes |
 | 66 | **Runtime kernel** | `seguridad-runtime-kernel.sh` | LKRG, kernel lockdown, eBPF hardening, Falco runtime monitoring, module signing, CPU mitigations (Spectre/MDS/TAA/Retbleed), kernel memory protection, debug restriction, runtime integrity, audit con scoring |
 | 67 | **Memoria y procesos** | `hardening-memoria-procesos.sh` | Hardened allocator, stack protection (SSP/CET), user namespace restriction, cgroups v2, seccomp-BPF generator, ASLR/PIE enforcement, W^X strict (noexec), ptrace control (yama), coredump sanitization, process integrity audit |
+| 68 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Recoleccion forense, playbooks contencion MITRE, preservacion evidencia, aislamiento de red, timeline de ataque, recuperacion post-incidente |
 
 ---
 
@@ -475,10 +475,10 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (18-29)
 ├── o  Operaciones de Seguridad (30-34)
 ├── i  Inteligencia (35-36)
-├── x  Avanzado (37-67)
-├── a  Aplicar todos los 67 modulos
-├── v  Verificacion proactiva (76 checks)
-├── 1-67  Acceso directo por numero
+├── x  Avanzado (37-68)
+├── a  Aplicar todos los 68 modulos
+├── v  Verificacion proactiva (77 checks)
+├── 1-68  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -1143,7 +1143,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 67 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 68 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
