@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 65 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark y auditoria de infraestructura de red (nmap, TLS/SSL, SNMP, baseline/drift). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 67 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco) y hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,13 +13,13 @@ Suite completa de hardening y securizacion para Linux, con 65 modulos interactiv
 
 ## Caracteristicas principales
 
-- **65 modulos** organizados en 6 categorias con menu interactivo
+- **67 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 74 categorias de controles
+- **Verificacion proactiva** de 76 categorias de controles
 - **Operaciones SOC**: monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
@@ -30,6 +30,10 @@ Suite completa de hardening y securizacion para Linux, con 65 modulos interactiv
 - **DNS avanzado**: DNSSEC, DoT/DoH, RPZ sinkhole, tunneling detection
 - **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias, correlacion IDS
 - **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift
+- **Runtime kernel**: LKRG, kernel lockdown, eBPF hardening, Falco, module signing, CPU mitigations
+- **Memoria y procesos**: ASLR, PIE enforcement, W^X, seccomp-BPF, cgroups v2, ptrace, coredumps
+- **YARA + Sigma**: reglas de deteccion de malware y correlacion de eventos de evasion
+- **Post-quantum crypto**: evaluacion de preparacion ML-KEM/ML-DSA, Certificate Transparency
 
 ---
 
@@ -62,7 +66,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-65):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-67):
 
 ```
   b  Hardening Base          (modulos 1-9)   ●●●○○○○○○○
@@ -70,9 +74,9 @@ El menu principal muestra 6 categorias con indicadores de progreso. Se navega co
   m  Mitigaciones MITRE      (modulos 18-29)  ○○○○○○○○○○○○
   o  Operaciones de Seguridad(modulos 30-34)  ○○○○○
   i  Inteligencia            (modulos 35-36)  ○○
-  x  Avanzado                (modulos 37-65)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
+  x  Avanzado                (modulos 37-67)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-65 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-67 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -88,7 +92,7 @@ sudo bash mitigar-acceso-inicial.sh  # Modulo 18
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (65 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (67 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -164,7 +168,9 @@ securizar/
 ├── seguridad-iot.sh               # Modulo 62: Seguridad IoT
 ├── seguridad-dns-avanzada.sh      # Modulo 63: DNS avanzado
 ├── auditoria-red-wireshark.sh     # Modulo 64: Auditoria de red con Wireshark
-└── auditoria-red-infraestructura.sh # Modulo 65: Auditoria de infraestructura de red
+├── auditoria-red-infraestructura.sh # Modulo 65: Auditoria de infraestructura de red
+├── seguridad-runtime-kernel.sh    # Modulo 66: Proteccion runtime del kernel
+└── hardening-memoria-procesos.sh  # Modulo 67: Hardening de memoria y procesos
 ```
 
 ---
@@ -387,7 +393,7 @@ Defensas especificas contra cada tactica del framework MITRE ATT&CK.
 | 20 | **Persistencia** | `mitigar-persistencia.sh` | TA0003 | T1053 (cron/timers), T1543 (servicios systemd), T1547/T1037 (autostart), T1136 (cuentas), T1556 (autenticacion), T1574 (PATH hijack) |
 | 21 | **Escalada de privilegios** | `mitigar-escalada.sh` | TA0004 | T1548 (SUID/SGID), T1134 (capabilities), T1078 (sudo), T1068 (kernel sysctl), T1055 (anti-ptrace), T1053 (cron privesc) |
 | 22 | **Impacto** | `mitigar-impacto.sh` | TA0040 | T1486/T1561 (backups offsite rsync), T1486 (ClamAV anti-ransomware con YARA), T1490 (proteccion snapshots/checksums), T1485 (monitoreo auditd) |
-| 23 | **Evasion de defensas** | `mitigar-evasion.sh` | TA0005 | T1070 (logs append-only), T1036 (masquerading), T1562 (watchdog servicios), T1014 (rootkits rkhunter), T1218 (LOLBins), T1564 (artefactos ocultos), T1027 (ofuscacion) |
+| 23 | **Evasion de defensas** | `mitigar-evasion.sh` | TA0005 | T1070 (logs append-only), T1036 (masquerading), T1562 (watchdog servicios), T1014 (rootkits rkhunter + YARA scanning), T1218 (LOLBins), T1564 (artefactos ocultos + reglas Sigma), T1027 (ofuscacion) |
 | 24 | **Acceso a credenciales** | `mitigar-credenciales.sh` | TA0006 | T1003 (credential dumping), T1110 (fuerza bruta faillock), T1557 (MITM arpwatch), T1552 (credenciales expuestas), T1040 (modo promiscuo), T1056 (keyloggers) |
 | 25 | **Descubrimiento** | `mitigar-descubrimiento.sh` | TA0007 | T1046 (portscan rate-limit), T1057 (hidepid procesos), T1082 (info sistema), T1016/T1049 (red), T1087/T1069 (cuentas), T1518 (software) |
 | 26 | **Movimiento lateral** | `mitigar-movimiento-lateral.sh` | TA0008 | T1021 (SSH anti-forwarding), T1021.001/005 (RDP/VNC desactivado), T1021.002 (Samba firma obligatoria), T1563 (SSH agent), T1080 (contenido compartido noexec), M1030 (segmentacion) |
@@ -405,7 +411,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 |---|--------|--------|-------------|
 | 30 | **Monitorizacion continua** | `monitorizar-continuo.sh` | Dashboard de estado (`security-dashboard.sh`), correlacion de alertas multi-fuente (5 patrones de ataque), baseline de comportamiento del sistema, health check de controles (cron diario), digest periodico (timer 06:00) |
 | 31 | **Reportes de seguridad** | `reportar-seguridad.sh` | Reporte de cobertura MITRE ATT&CK, exportacion ATT&CK Navigator JSON layer, reporte de cumplimiento por categoria, inventario de activos de seguridad, resumen ejecutivo con score de postura |
-| 32 | **Caza de amenazas** | `cazar-amenazas.sh` | UEBA (baseline de usuarios + deteccion de anomalias), 5 playbooks de hunting (persistencia oculta, LOLBins, lateral silencioso, exfil lenta, C2 encubierto), deteccion persistencia avanzada T1098 (timer 15min), busqueda retrospectiva en logs, anomalias de red (beaconing, asimetrico, C2) |
+| 32 | **Caza de amenazas** | `cazar-amenazas.sh` | UEBA (baseline de usuarios + deteccion de anomalias), 5 playbooks de hunting (persistencia oculta, LOLBins, lateral silencioso, exfil lenta, C2 encubierto), deteccion persistencia avanzada T1098 (timer 15min), busqueda retrospectiva en logs, anomalias de red (beaconing, asimetrico, C2), hunting /proc + eBPF (deleted binaries, mount namespaces, capabilities) |
 | 33 | **Automatizacion de respuesta** | `automatizar-respuesta.sh` | SOAR ligero: motor de respuesta automatica (6 tipos de eventos), bloqueo IP/cuenta, preservacion de evidencia, gestion de bloqueos (listar/whitelist/limpiar), notificaciones por severidad, reglas configurables en `/etc/security/soar-rules.conf` |
 | 34 | **Validacion de controles** | `validar-controles.sh` | Purple team: validador de autenticacion (15 tests), red (15 tests), endpoint (21 tests), simulador seguro de 12 tecnicas ATT&CK, reporte consolidado con scoring global (60% controles + 40% deteccion), validacion semanal automatica |
 
@@ -416,7 +422,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 35 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Avanzado (modulos 37-65)
+### Categoria 6: Avanzado (modulos 37-67)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -449,6 +455,8 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 63 | **DNS avanzado** | `seguridad-dns-avanzada.sh` | DNSSEC, DoT/DoH, Unbound, RPZ sinkhole, tunneling, cache poisoning |
 | 64 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, anomalias, correlacion IDS |
 | 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap, TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes |
+| 66 | **Runtime kernel** | `seguridad-runtime-kernel.sh` | LKRG, kernel lockdown, eBPF hardening, Falco runtime monitoring, module signing, CPU mitigations (Spectre/MDS/TAA/Retbleed), kernel memory protection, debug restriction, runtime integrity, audit con scoring |
+| 67 | **Memoria y procesos** | `hardening-memoria-procesos.sh` | Hardened allocator, stack protection (SSP/CET), user namespace restriction, cgroups v2, seccomp-BPF generator, ASLR/PIE enforcement, W^X strict (noexec), ptrace control (yama), coredump sanitization, process integrity audit |
 
 ---
 
@@ -465,10 +473,10 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (18-29)
 ├── o  Operaciones de Seguridad (30-34)
 ├── i  Inteligencia (35-36)
-├── x  Avanzado (37-65)
-├── a  Aplicar todos los 65 modulos
-├── v  Verificacion proactiva (74 checks)
-├── 1-65  Acceso directo por numero
+├── x  Avanzado (37-67)
+├── a  Aplicar todos los 67 modulos
+├── v  Verificacion proactiva (76 checks)
+├── 1-67  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -1133,7 +1141,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 65 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 67 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
