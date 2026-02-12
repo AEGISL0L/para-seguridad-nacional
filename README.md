@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 68 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2) y respuesta a incidentes (forense, contencion, playbooks, timeline). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 70 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2), respuesta a incidentes (forense, custodia digital, IOCs, escalacion, hunting, metricas IR), EDR con osquery (threat detection, Wazuh, fleet, baseline/drift) y gestion de vulnerabilidades (Trivy, grype, OpenSCAP, CVSS/EPSS, drift). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,13 +13,13 @@ Suite completa de hardening y securizacion para Linux, con 68 modulos interactiv
 
 ## Caracteristicas principales
 
-- **68 modulos** organizados en 6 categorias con menu interactivo
+- **70 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 76 categorias de controles
+- **Verificacion proactiva** de 79 categorias de controles
 - **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
@@ -34,6 +34,8 @@ Suite completa de hardening y securizacion para Linux, con 68 modulos interactiv
 - **Memoria y procesos**: ASLR, PIE enforcement, W^X, seccomp-BPF, cgroups v2, ptrace, coredumps
 - **YARA + Sigma**: reglas de deteccion de malware y correlacion de eventos de evasion
 - **Post-quantum crypto**: evaluacion de preparacion ML-KEM/ML-DSA, Certificate Transparency
+- **EDR con osquery**: packs de seguridad, deteccion de amenazas, Wazuh, FleetDM, baseline/drift, alertas syslog
+- **Gestion de vulnerabilidades**: Trivy, grype, OpenSCAP, priorizacion CVSS+EPSS+KEV, reporting HTML, drift, madurez
 
 ---
 
@@ -66,7 +68,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-68):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-70):
 
 ```
   b  Hardening Base          (modulos 1-9)   ●●●○○○○○○○
@@ -74,9 +76,9 @@ El menu principal muestra 6 categorias con indicadores de progreso. Se navega co
   m  Mitigaciones MITRE      (modulos 18-29)  ○○○○○○○○○○○○
   o  Operaciones de Seguridad(modulos 30-34)  ○○○○○
   i  Inteligencia            (modulos 35-36)  ○○
-  x  Avanzado                (modulos 37-67)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
+  x  Avanzado                (modulos 37-70)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-68 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-70 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -92,7 +94,7 @@ sudo bash mitigar-acceso-inicial.sh  # Modulo 18
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (68 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (70 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -171,7 +173,9 @@ securizar/
 ├── auditoria-red-infraestructura.sh # Modulo 65: Auditoria de infraestructura de red
 ├── seguridad-runtime-kernel.sh    # Modulo 66: Proteccion runtime del kernel
 ├── hardening-memoria-procesos.sh  # Modulo 67: Hardening de memoria y procesos
-└── respuesta-incidentes.sh        # Modulo 68: Respuesta a incidentes (IR, forense, playbooks)
+├── respuesta-incidentes.sh        # Modulo 68: Respuesta a incidentes (IR, forense, custodia, IOCs, hunting)
+├── edr-osquery.sh                 # Modulo 69: EDR con osquery (threat detection, Wazuh, fleet, baseline)
+└── gestion-vulnerabilidades.sh    # Modulo 70: Gestion de vulnerabilidades (Trivy, grype, SCAP, CVSS/EPSS)
 ```
 
 ---
@@ -377,7 +381,7 @@ Modulos avanzados de proteccion preventiva.
 | 10 | **Kernel boot y Secure Boot** | `hardening-kernel-boot.sh` | Parametros GRUB cmdline, verificacion Secure Boot, modulos firmados, proteccion GRUB con contrasena, lockdown del kernel |
 | 11 | **Sandboxing de servicios** | `hardening-servicios-systemd.sh` | Drop-ins systemd para sshd, fail2ban, firewalld, NetworkManager, security-monitor con ProtectSystem, ProtectHome, NoNewPrivileges |
 | 12 | **Seguridad de cuentas** | `hardening-cuentas.sh` | Politicas de contrasenas en login.defs, faillock, deteccion de cuentas sin contrasena, verificacion UID=0 extra, shells de sistema, cuentas inactivas |
-| 13 | **Red avanzada** | `proteger-red-avanzado.sh` | Suricata IDS con reglas ET Open, DNS over TLS (systemd-resolved), plantilla WireGuard VPN, arpwatch y proteccion ARP |
+| 13 | **Red avanzada** | `proteger-red-avanzado.sh` | Suricata IDS, DNS over TLS, WireGuard VPN, arpwatch, captura forense ring buffer, custom IDS rules, DNS sinkhole, baseline de trafico, auditoria de red |
 | 14 | **Automatizacion** | `automatizar-seguridad.sh` | Cron jobs para AIDE, parches de seguridad, lynis, rkhunter, logrotate, digest diario; timer systemd de notificaciones |
 | 15 | **Sandboxing de aplicaciones** | `sandbox-aplicaciones.sh` | Firejail (perfiles para Firefox, Thunderbird, LibreOffice, Dolphin, firecfg), bubblewrap |
 | 16 | **Auditoria externa** | `auditoria-externa.sh` | Reconocimiento MITRE TA0043: puertos expuestos, banners, fingerprinting OS, DNS, cabeceras HTTP, SNMP, consulta Shodan/Censys, metadatos web, certificados SSL/TLS, defensas anti-escaneo |
@@ -423,7 +427,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 35 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Avanzado (modulos 37-68)
+### Categoria 6: Avanzado (modulos 37-70)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -458,7 +462,9 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap, TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes |
 | 66 | **Runtime kernel** | `seguridad-runtime-kernel.sh` | LKRG, kernel lockdown, eBPF hardening, Falco runtime monitoring, module signing, CPU mitigations (Spectre/MDS/TAA/Retbleed), kernel memory protection, debug restriction, runtime integrity, audit con scoring |
 | 67 | **Memoria y procesos** | `hardening-memoria-procesos.sh` | Hardened allocator, stack protection (SSP/CET), user namespace restriction, cgroups v2, seccomp-BPF generator, ASLR/PIE enforcement, W^X strict (noexec), ptrace control (yama), coredump sanitization, process integrity audit |
-| 68 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Recoleccion forense, playbooks contencion MITRE, preservacion evidencia, aislamiento de red, timeline de ataque, recuperacion post-incidente |
+| 68 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Recoleccion forense, playbooks contencion MITRE, timeline, aislamiento de red, recuperacion, cadena de custodia digital, extraccion de IOCs, comunicacion/escalacion, hunting de IOCs en flota, metricas IR (MTTD/MTTR/MTTC) |
+| 69 | **EDR con Osquery** | `edr-osquery.sh` | Osquery multi-distro, packs de seguridad (10 queries), deteccion de amenazas (10 queries), guia Wazuh, decorators custom, alertas syslog/JSON, baseline y drift, FleetDM prep, queries diferenciales, auditoria EDR |
+| 70 | **Gestion de vulnerabilidades** | `gestion-vulnerabilidades.sh` | Trivy, grype, OpenSCAP, escaneo sistema/contenedores, priorizacion CVSS+EPSS+KEV, analisis dependencias, reporting HTML/JSON, verificacion parches, escaneo programado semanal, auditoria madurez (L1-L5) |
 
 ---
 
@@ -475,10 +481,10 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (18-29)
 ├── o  Operaciones de Seguridad (30-34)
 ├── i  Inteligencia (35-36)
-├── x  Avanzado (37-68)
-├── a  Aplicar todos los 68 modulos
-├── v  Verificacion proactiva (77 checks)
-├── 1-68  Acceso directo por numero
+├── x  Avanzado (37-70)
+├── a  Aplicar todos los 70 modulos
+├── v  Verificacion proactiva (79 checks)
+├── 1-70  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -517,7 +523,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 74 verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 79 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -549,6 +555,10 @@ La opcion `v` ejecuta 74 verificaciones agrupadas por categoria:
 - Seguridad de APIs, IoT, DNS avanzado
 - Auditoria de red (Wireshark/tshark)
 - Auditoria de infraestructura de red (nmap, TLS, SNMP, baseline)
+- Runtime kernel, memoria y procesos
+- Respuesta a incidentes
+- EDR con Osquery (packs, threat detection, baseline, auditoria)
+- Gestion de vulnerabilidades (escaneo, priorizacion, reporting, auditoria)
 
 ### Session tracking
 
@@ -641,6 +651,11 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `ir-aislar-red.sh` | `/usr/local/bin/` | Aislamiento de red de emergencia (mantiene SSH) |
 | `ir-restaurar-red.sh` | `/usr/local/bin/` | Restauracion de red post-aislamiento |
 | `ir-recuperacion.sh` | `/usr/local/bin/` | Guia de recuperacion post-incidente |
+| `ir-cadena-custodia.sh` | `/usr/local/bin/` | Cadena de custodia digital con SHA-256/512 y GPG |
+| `ir-extraer-iocs.sh` | `/usr/local/bin/` | Extraccion de IOCs (IPs, dominios, hashes) con exportacion STIX 2.1 |
+| `ir-escalar.sh` | `/usr/local/bin/` | Comunicacion y escalacion con 4 plantillas y matriz de severidad |
+| `ir-hunt-fleet.sh` | `/usr/local/bin/` | Hunting de IOCs en flota via SSH paralelo |
+| `ir-post-review.sh` | `/usr/local/bin/` | Metricas IR (MTTD/MTTR/MTTC/MTTE), scoring madurez IR (5 niveles) |
 
 ### Monitorizacion continua
 
@@ -833,6 +848,10 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `auditar-seguridad-cloud.sh` | Auditoria integral de seguridad cloud |
 | `auditar-iam-cloud.sh` | Auditoria de IAM (AWS/Azure/GCP) |
 | `verificar-imds.sh` | Verificacion de seguridad IMDS (Instance Metadata Service) |
+| `auditar-cloud-init.sh` | Auditoria de cloud-init (credenciales, permisos, modulos peligrosos) |
+| `enforcar-imds-hoplimit.sh` | Enforcement de hop-limit IMDSv2 con nftables |
+| `auditar-credenciales-cloud.sh` | Auditoria de rotacion de credenciales cloud (AWS/Azure/GCP) |
+| `filtrado-egress-cloud.sh` | Filtrado de trafico saliente cloud con whitelist |
 
 ### LDAP y Active Directory
 
@@ -979,6 +998,31 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `auditoria-red-reporte-global.sh` | Reporte consolidado con puntuacion 0-100, grado A-D, exportacion JSON para SIEM |
 | `auditoria-red-limpieza.sh` | Limpieza de reportes y scans antiguos segun politica de retencion |
 
+### EDR con Osquery
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `securizar-edr-wazuh.sh` | Guia de integracion Wazuh/OSSEC (multi-distro) |
+| `securizar-edr-alerts.sh` | Alertas syslog/JSON para osquery (dispatcher con tail/summary) |
+| `securizar-edr-baseline.sh` | Baseline y drift detection (learn/check/status, timer semanal) |
+| `securizar-edr-fleet.sh` | Template de integracion FleetDM (enrollment, TLS) |
+| `securizar-edr-scheduled.sh` | Procesamiento de queries diferenciales (severidad, cron diario) |
+| `auditoria-edr.sh` | Auditoria EDR con scoring (12 checks, 5 niveles, cron semanal) |
+
+### Gestion de vulnerabilidades
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `securizar-vuln-system.sh` | Escaneo de vulnerabilidades del sistema (Trivy/grype/fallback) |
+| `securizar-vuln-containers.sh` | Escaneo de contenedores Docker/Podman con threshold policy |
+| `securizar-vuln-openscap.sh` | Evaluacion OpenSCAP con auto-deteccion de perfil SSG |
+| `securizar-vuln-prioritize.sh` | Priorizacion CVSS+EPSS+KEV (risk score combinado) |
+| `securizar-vuln-deps.sh` | Analisis de dependencias (SUID binaries, librerias criticas) |
+| `securizar-vuln-report.sh` | Reporting ejecutivo HTML/JSON/texto con dashboard |
+| `securizar-vuln-patch-verify.sh` | Verificacion pre/post-patch con diff y rollback |
+| `securizar-vuln-scheduled.sh` | Escaneo programado semanal con drift detection (timer systemd) |
+| `auditoria-vuln-management.sh` | Auditoria de madurez L1-L5 con scoring (cron semanal) |
+
 ---
 
 ## Directorios de datos
@@ -1051,6 +1095,16 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/etc/securizar/auditoria-red/politica-tls.conf` | Politica de seguridad TLS/SSL |
 | `/etc/securizar/auditoria-red/servicios-aprobados.conf` | Inventario de servicios aprobados |
 | `/etc/securizar/auditoria-red/auditoria-programada.conf` | Configuracion de auditorias periodicas |
+| `/etc/osquery/` | Configuracion de osquery (osquery.conf, packs, flags) |
+| `/etc/osquery/packs/securizar-security.conf` | Pack de queries de seguridad (10 queries) |
+| `/etc/osquery/packs/securizar-threat-detection.conf` | Pack de deteccion de amenazas (10 queries) |
+| `/etc/securizar/edr/` | Configuracion EDR (decorators, baselines) |
+| `/var/lib/securizar/edr-baseline/` | Snapshots de baseline EDR |
+| `/etc/securizar/vuln-management/` | Configuracion de gestion de vulnerabilidades |
+| `/var/lib/securizar/vuln-management/` | Datos de escaneos, reportes, parches |
+| `/etc/securizar/cloud-egress-whitelist.conf` | Whitelist de trafico saliente cloud |
+| `/usr/local/lib/incident-response/templates/` | Plantillas de comunicacion IR (CSIRT, gerencia, legal, usuarios) |
+| `/etc/securizar/escalation-matrix.conf` | Matriz de escalacion por severidad |
 
 ---
 
@@ -1143,7 +1197,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 68 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 70 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
@@ -1195,11 +1249,37 @@ sudo /usr/local/bin/auditoria-red-reporte-global.sh --json              # Report
 ### Responder a un incidente
 
 ```bash
-# Despues de instalar modulo 31
+# Despues de instalar modulo 68
 sudo /usr/local/bin/ir-recolectar-forense.sh          # Recoleccion forense
 sudo /usr/local/bin/ir-responder.sh malware            # Ejecutar playbook
 sudo /usr/local/bin/ir-aislar-red.sh                   # Aislar red (emergencia)
 sudo /usr/local/bin/ir-timeline.sh                     # Generar timeline
+sudo /usr/local/bin/ir-cadena-custodia.sh seal /tmp/evidencia  # Cadena de custodia
+sudo /usr/local/bin/ir-extraer-iocs.sh /tmp/evidencia  # Extraer IOCs
+sudo /usr/local/bin/ir-hunt-fleet.sh iocs.txt          # Hunting en flota
+sudo /usr/local/bin/ir-post-review.sh                  # Metricas IR
+```
+
+### EDR y deteccion de amenazas
+
+```bash
+# Despues de instalar modulo 69
+sudo /usr/local/bin/securizar-edr-baseline.sh learn    # Crear baseline
+sudo /usr/local/bin/securizar-edr-baseline.sh check    # Detectar drift
+sudo /usr/local/bin/securizar-edr-alerts.sh --tail     # Alertas en tiempo real
+sudo /usr/local/bin/auditoria-edr.sh                   # Auditoria EDR
+```
+
+### Gestion de vulnerabilidades
+
+```bash
+# Despues de instalar modulo 70
+sudo /usr/local/bin/securizar-vuln-system.sh           # Escaneo del sistema
+sudo /usr/local/bin/securizar-vuln-containers.sh       # Escaneo de contenedores
+sudo /usr/local/bin/securizar-vuln-prioritize.sh CVE-2024-1234  # Priorizacion
+sudo /usr/local/bin/securizar-vuln-report.sh --format html     # Reporte HTML
+sudo /usr/local/bin/securizar-vuln-patch-verify.sh --before    # Pre-patch snapshot
+sudo /usr/local/bin/auditoria-vuln-management.sh       # Auditoria madurez
 ```
 
 ---

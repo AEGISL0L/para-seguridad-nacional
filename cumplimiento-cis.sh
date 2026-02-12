@@ -28,6 +28,20 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 securizar_setup_traps
 
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc true  # S1: auditoria filesystem (siempre re-evaluar)
+_pc true  # S2: auditoria servicios (siempre re-evaluar)
+_pc true  # S3: auditoria red (siempre re-evaluar)
+_pc true  # S4: auditoria logging (siempre re-evaluar)
+_pc true  # S5: auditoria acceso (siempre re-evaluar)
+_pc true  # S6: controles nivel 2 (siempre re-evaluar)
+_pc check_file_exists /var/lib/securizar/nist-mapping.json
+_pc check_executable /usr/local/bin/cis-scoring.sh
+_pc true  # S9: remediacion automatica (siempre re-evaluar)
+_pc check_executable /usr/local/bin/reporte-cumplimiento-cis.sh
+_precheck_result
+
 # ── Variables globales ───────────────────────────────────────
 CIS_BASE="/var/lib/securizar"
 CIS_SCORES_DIR="${CIS_BASE}/cis-scores"
@@ -878,6 +892,40 @@ if ask "¿Evaluar controles CIS Nivel 2?"; then
         fi
     done
 
+    # ── S6b: CIS Level 2 - Módulos kernel peligrosos ──
+    log_info "Verificando módulos kernel CIS Level 2..."
+
+    MODPROBE_CIS="/etc/modprobe.d/cis-level2-modules.conf"
+    if [[ ! -f "$MODPROBE_CIS" ]]; then
+        cat > "$MODPROBE_CIS" << 'EOFMOD'
+# CIS Level 2 - Módulos kernel innecesarios deshabilitados
+# Generado por cumplimiento-cis.sh
+
+# Filesystems innecesarios (CIS 1.1.1.x)
+install cramfs /bin/true
+install freevxfs /bin/true
+install hfs /bin/true
+install hfsplus /bin/true
+install jffs2 /bin/true
+install udf /bin/true
+install vfat /bin/true
+
+# Protocolos de red obsoletos (CIS 3.4.x)
+install dccp /bin/true
+install sctp /bin/true
+install rds /bin/true
+install tipc /bin/true
+
+# Otros módulos innecesarios
+install squashfs /bin/true
+install fat /bin/true
+EOFMOD
+        log_change "Creado" "$MODPROBE_CIS"
+        log_info "Módulos kernel CIS Level 2 deshabilitados"
+    else
+        log_info "  [PASS] $MODPROBE_CIS ya existe"
+    fi
+
     log_info "Evaluacion CIS Nivel 2 completada"
 
 else
@@ -898,7 +946,9 @@ echo "  IA (Identification), SC (System/Comms), SI (System Integrity)"
 echo "  MP (Media Protection), PE (Physical), SA (System Acquisition)"
 echo ""
 
-if ask "¿Generar mapeo NIST 800-53?"; then
+if check_file_exists /var/lib/securizar/nist-mapping.json; then
+    log_already "Mapeo NIST 800-53 (nist-mapping.json existe)"
+elif ask "¿Generar mapeo NIST 800-53?"; then
 
     nist_file="${CIS_BASE}/nist-mapping.json"
 
@@ -1007,6 +1057,71 @@ EOFNIST
         fi
     done
 
+    # ── S7b: DISA STIG cross-reference ──
+    log_info "Generando mapeo DISA STIG..."
+
+    cat > /var/lib/securizar/stig-mapping.json << 'EOFSTIG'
+{
+  "_metadata": {
+    "generated_by": "securizar - cumplimiento-cis.sh",
+    "standard": "DISA STIG",
+    "description": "Mapeo de controles CIS a DISA STIG IDs"
+  },
+  "mappings": {
+    "CIS-1.1": {"stig": "V-230223", "title": "Filesystem separate partitions", "severity": "medium"},
+    "CIS-1.1.1": {"stig": "V-230300", "title": "Disable cramfs/freevxfs/hfs/udf", "severity": "low"},
+    "CIS-1.3.1": {"stig": "V-230234", "title": "AIDE installed", "severity": "medium"},
+    "CIS-1.4.1": {"stig": "V-230236", "title": "Bootloader password", "severity": "high"},
+    "CIS-1.5.1": {"stig": "V-230269", "title": "Core dumps restricted", "severity": "medium"},
+    "CIS-1.5.3": {"stig": "V-230268", "title": "ASLR enabled", "severity": "medium"},
+    "CIS-2.1": {"stig": "V-230310", "title": "Unnecessary services", "severity": "medium"},
+    "CIS-3.1": {"stig": "V-230505", "title": "IP forwarding disabled", "severity": "medium"},
+    "CIS-3.2": {"stig": "V-230533", "title": "ICMP redirects", "severity": "medium"},
+    "CIS-4.1": {"stig": "V-230386", "title": "auditd enabled", "severity": "medium"},
+    "CIS-4.2": {"stig": "V-230475", "title": "rsyslog configured", "severity": "medium"},
+    "CIS-5.1": {"stig": "V-230332", "title": "SSH Protocol 2", "severity": "high"},
+    "CIS-5.2": {"stig": "V-230380", "title": "Password complexity", "severity": "medium"},
+    "CIS-5.3": {"stig": "V-230340", "title": "Account lockout", "severity": "medium"},
+    "CIS-6.1": {"stig": "V-230258", "title": "File permissions", "severity": "medium"}
+  }
+}
+EOFSTIG
+    log_change "Creado" "/var/lib/securizar/stig-mapping.json"
+
+    cat > /usr/local/bin/reporte-dual-cis-stig.sh << 'EOFDUAL'
+#!/bin/bash
+# Reporte dual CIS/STIG - muestra mapeo cruzado
+set -euo pipefail
+BOLD='\033[1m'; DIM='\033[2m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+echo -e "${BOLD}=== REPORTE DUAL CIS / DISA STIG ===${NC}"
+echo ""
+
+NIST_FILE="/var/lib/securizar/nist-mapping.json"
+STIG_FILE="/var/lib/securizar/stig-mapping.json"
+
+if [[ -f "$STIG_FILE" ]] && command -v jq &>/dev/null; then
+    echo -e "${CYAN}Mapeo CIS → STIG:${NC}"
+    jq -r '.mappings | to_entries[] | "\(.key)\t\(.value.stig)\t\(.value.severity)\t\(.value.title)"' "$STIG_FILE" 2>/dev/null | \
+        while IFS=$'\t' read -r cis stig sev title; do
+            printf "  %-12s → %-10s [%-6s] %s\n" "$cis" "$stig" "$sev" "$title"
+        done
+else
+    echo "  Requiere jq y stig-mapping.json"
+fi
+
+if [[ -f "$NIST_FILE" ]] && command -v jq &>/dev/null; then
+    echo ""
+    echo -e "${CYAN}Familias NIST cubiertas:${NC}"
+    jq -r '.modules | to_entries[] | .value.families[]' "$NIST_FILE" 2>/dev/null | sort | uniq -c | sort -rn | while read -r count family; do
+        printf "  %-6s %s\n" "$family" "($count módulos)"
+    done
+fi
+EOFDUAL
+    chmod 755 /usr/local/bin/reporte-dual-cis-stig.sh
+    log_change "Creado" "/usr/local/bin/reporte-dual-cis-stig.sh"
+    log_info "Mapeo DISA STIG y reporte dual generados"
+
 else
     log_skip "Mapeo NIST 800-53"
 fi
@@ -1022,7 +1137,9 @@ echo "calcula puntuacion, compara con ejecuciones anteriores"
 echo "y muestra tendencia."
 echo ""
 
-if ask "¿Instalar motor de puntuacion CIS?"; then
+if check_executable /usr/local/bin/cis-scoring.sh; then
+    log_already "Motor de puntuacion CIS (cis-scoring.sh existe)"
+elif ask "¿Instalar motor de puntuacion CIS?"; then
 
     cat > /usr/local/bin/cis-scoring.sh << 'EOFSCORING'
 #!/bin/bash
@@ -1543,6 +1660,53 @@ EOFROLLBACK_HEADER
     echo "" >> "$rollback_file"
     echo "echo 'Rollback completado.'" >> "$rollback_file"
 
+    # ── S9b: Remediaciones CIS adicionales (R6-R8) ──
+    log_info "Aplicando remediaciones CIS adicionales..."
+
+    # R6: SSH CIS hardening
+    SSH_CONF="/etc/ssh/sshd_config.d/99-cis-hardening.conf"
+    if [[ ! -f "$SSH_CONF" ]]; then
+        mkdir -p /etc/ssh/sshd_config.d
+        cat > "$SSH_CONF" << 'EOFSSH'
+# CIS SSH Hardening - generado por cumplimiento-cis.sh
+# CIS 5.2.x recommendations
+Protocol 2
+LogLevel VERBOSE
+MaxAuthTries 4
+IgnoreRhosts yes
+HostbasedAuthentication no
+PermitEmptyPasswords no
+MaxStartups 10:30:60
+MaxSessions 10
+LoginGraceTime 60
+ClientAliveInterval 300
+ClientAliveCountMax 3
+EOFSSH
+        chmod 644 "$SSH_CONF"
+        log_change "Creado" "$SSH_CONF"
+        echo "cp /dev/null $SSH_CONF  # Rollback R6" >> "$rollback_file"
+        remediation_count=$((remediation_count + 1))
+    fi
+
+    # R7: cron.allow
+    if [[ ! -f /etc/cron.allow ]]; then
+        echo "root" > /etc/cron.allow
+        chmod 600 /etc/cron.allow
+        log_change "Creado" "/etc/cron.allow (solo root)"
+        echo "rm -f /etc/cron.allow  # Rollback R7" >> "$rollback_file"
+        remediation_count=$((remediation_count + 1))
+    fi
+
+    # R8: Core dump restriction
+    LIMITS_CORE="/etc/security/limits.d/99-cis-coredump.conf"
+    if [[ ! -f "$LIMITS_CORE" ]]; then
+        echo "* hard core 0" > "$LIMITS_CORE"
+        chmod 644 "$LIMITS_CORE"
+        log_change "Creado" "$LIMITS_CORE"
+        echo "rm -f $LIMITS_CORE  # Rollback R8" >> "$rollback_file"
+        remediation_count=$((remediation_count + 1))
+    fi
+
     log_info "Remediacion completada: $remediation_count correcciones aplicadas"
     log_info "Script de rollback: $rollback_file"
 
@@ -1564,7 +1728,9 @@ echo "  - Veredicto: CUMPLE / CUMPLE PARCIALMENTE / NO CUMPLE"
 echo "  - Cron mensual automatico"
 echo ""
 
-if ask "¿Instalar generador de informe de cumplimiento CIS?"; then
+if check_executable /usr/local/bin/reporte-cumplimiento-cis.sh; then
+    log_already "Generador de informe CIS (reporte-cumplimiento-cis.sh existe)"
+elif ask "¿Instalar generador de informe de cumplimiento CIS?"; then
 
     cat > /usr/local/bin/reporte-cumplimiento-cis.sh << 'EOFREPORTE'
 #!/bin/bash
@@ -1789,5 +1955,76 @@ echo "  /var/lib/securizar/cis-reports/      - Informes generados"
 echo "  /var/lib/securizar/nist-mapping.json - Mapeo NIST 800-53"
 echo "  /etc/securizar/cis-rollback-*.sh     - Scripts de rollback"
 echo ""
+
+# ── S10b: Compliance drift monitor ──
+log_info "Configurando monitor de drift de cumplimiento..."
+
+if [[ ! -x /usr/local/bin/cis-drift-monitor.sh ]]; then
+    cat > /usr/local/bin/cis-drift-monitor.sh << 'EOFDRIFT'
+#!/bin/bash
+# Monitor de drift de cumplimiento CIS
+# Compara score actual contra última evaluación
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+SCORES_DIR="/var/lib/securizar/cis-scores"
+mkdir -p "$SCORES_DIR"
+
+echo -e "${BOLD}=== MONITOR DE DRIFT CIS ===${NC}"
+echo "Fecha: $(date -Iseconds)"
+echo ""
+
+# Obtener score actual ejecutando cis-scoring.sh
+CURRENT_SCORE=0
+if [[ -x /usr/local/bin/cis-scoring.sh ]]; then
+    RESULT=$(/usr/local/bin/cis-scoring.sh 2>/dev/null | grep -oP 'Score.*?(\d+)%' | grep -oP '\d+' | tail -1 || echo 0)
+    CURRENT_SCORE="${RESULT:-0}"
+fi
+
+# Guardar score actual
+echo "$(date +%Y-%m-%d),$CURRENT_SCORE" >> "$SCORES_DIR/drift-history.csv"
+
+# Comparar con último score
+if [[ -f "$SCORES_DIR/drift-history.csv" ]]; then
+    PREV_LINE=$(tail -2 "$SCORES_DIR/drift-history.csv" | head -1)
+    PREV_SCORE=$(echo "$PREV_LINE" | cut -d, -f2)
+    PREV_DATE=$(echo "$PREV_LINE" | cut -d, -f1)
+
+    if [[ -n "$PREV_SCORE" ]] && [[ "$PREV_SCORE" != "$CURRENT_SCORE" ]]; then
+        DIFF=$((CURRENT_SCORE - PREV_SCORE))
+        if [[ $DIFF -lt 0 ]]; then
+            echo -e "${RED}DRIFT DETECTADO: Score bajó de $PREV_SCORE% a $CURRENT_SCORE% (${DIFF}%)${NC}"
+            echo -e "${DIM}Último score: $PREV_DATE${NC}"
+            logger -t securizar-cis "CIS DRIFT: score dropped from $PREV_SCORE% to $CURRENT_SCORE%"
+        else
+            echo -e "${GREEN}Score mejoró: $PREV_SCORE% → $CURRENT_SCORE% (+${DIFF}%)${NC}"
+        fi
+    else
+        echo -e "${GREEN}Sin drift: score estable en $CURRENT_SCORE%${NC}"
+    fi
+fi
+
+# Histórico reciente
+echo ""
+echo -e "${BOLD}Histórico (últimas 10 evaluaciones):${NC}"
+tail -10 "$SCORES_DIR/drift-history.csv" 2>/dev/null | while IFS=, read -r date score; do
+    printf "  %s  %s%%\n" "$date" "$score"
+done
+EOFDRIFT
+
+    chmod 755 /usr/local/bin/cis-drift-monitor.sh
+    log_change "Creado" "/usr/local/bin/cis-drift-monitor.sh"
+
+    # Cron diario de drift
+    cat > /etc/cron.daily/cis-drift-check << 'EOFCRON'
+#!/bin/bash
+/usr/local/bin/cis-drift-monitor.sh > /dev/null 2>&1
+EOFCRON
+    chmod 700 /etc/cron.daily/cis-drift-check
+    log_change "Creado" "/etc/cron.daily/cis-drift-check"
+    log_info "Monitor de drift CIS instalado (cron diario)"
+fi
 
 show_changes_summary

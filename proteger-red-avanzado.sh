@@ -3,11 +3,16 @@
 # PROTECCIÓN DE RED AVANZADA - Linux Multi-Distro
 # ============================================================
 # Secciones:
-#   S1 - Suricata IDS (detección de intrusiones)
-#   S2 - Cron semanal suricata-update
-#   S3 - DNS over TLS (systemd-resolved)
-#   S4 - WireGuard (plantilla, NO activar)
-#   S5 - arpwatch + sysctl ARP
+#   S1  - Suricata IDS (detección de intrusiones)
+#   S2  - Cron semanal suricata-update
+#   S3  - DNS over TLS (systemd-resolved)
+#   S4  - WireGuard (plantilla, NO activar)
+#   S5  - arpwatch + sysctl ARP
+#   S6  - Forense de red (tcpdump ring buffer)
+#   S7  - Zeek/Suricata avanzado (custom rules)
+#   S8  - DNS sinkhole (abuse.ch, PhishTank)
+#   S9  - Baseline de tráfico de red
+#   S10 - Auditoría de red avanzada
 # ============================================================
 
 
@@ -19,6 +24,21 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "proteger-red-avanzado"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_service_enabled suricata'
+_pc 'check_file_exists /etc/cron.weekly/suricata-update'
+_pc 'check_file_exists /etc/systemd/resolved.conf.d/dns-over-tls.conf'
+_pc 'check_file_exists /etc/wireguard/wg0.conf'
+_pc 'check_file_exists /etc/sysctl.d/99-arp-protection.conf'
+_pc 'check_executable /usr/local/bin/captura-forense-red.sh'
+_pc 'check_executable /usr/local/bin/configurar-ids-avanzado.sh'
+_pc 'check_executable /usr/local/bin/dns-sinkhole.sh'
+_pc 'check_executable /usr/local/bin/baseline-red.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-avanzada.sh'
+_precheck_result
+
 log_section "S1: SURICATA IDS (DETECCIÓN DE INTRUSIONES)"
 
 echo "Suricata es un motor IDS/IPS de alto rendimiento."
@@ -26,7 +46,9 @@ echo "Se configurará en modo IDS (solo detección, sin bloqueo)."
 echo "Logs en formato EVE JSON para análisis."
 echo ""
 
-if ask "¿Instalar y configurar Suricata IDS?"; then
+if check_service_enabled suricata; then
+    log_already "Suricata IDS (servicio habilitado)"
+elif ask "¿Instalar y configurar Suricata IDS?"; then
     # Instalar suricata
     if ! command -v suricata &>/dev/null; then
         log_info "Instalando Suricata..."
@@ -174,7 +196,9 @@ fi
 log_section "S2: ACTUALIZACIÓN SEMANAL DE REGLAS SURICATA"
 
 if command -v suricata-update &>/dev/null || command -v suricata &>/dev/null; then
-    if ask "¿Crear cron semanal para actualizar reglas de Suricata?"; then
+    if check_file_exists /etc/cron.weekly/suricata-update; then
+        log_already "Cron semanal suricata-update (ya existe)"
+    elif ask "¿Crear cron semanal para actualizar reglas de Suricata?"; then
         cat > /etc/cron.weekly/suricata-update << 'EOFSUPDATE'
 #!/bin/bash
 # Actualización semanal de reglas Suricata
@@ -222,7 +246,9 @@ echo "  - Cloudflare: 1.1.1.1#cloudflare-dns.com, 1.0.0.1#cloudflare-dns.com"
 echo "  - Quad9:      9.9.9.9#dns.quad9.net, 149.112.112.112#dns.quad9.net"
 echo ""
 
-if ask "¿Configurar DNS over TLS con systemd-resolved?"; then
+if check_file_exists /etc/systemd/resolved.conf.d/dns-over-tls.conf; then
+    log_already "DNS over TLS (configuración ya existe)"
+elif ask "¿Configurar DNS over TLS con systemd-resolved?"; then
     # Backup configuración actual
     cp /etc/systemd/resolved.conf "$BACKUP_DIR/" 2>/dev/null || true
     log_change "Backup" "/etc/systemd/resolved.conf"
@@ -287,7 +313,9 @@ echo "Se instalará y generará una plantilla de configuración."
 echo -e "${YELLOW}NO se activará la VPN automáticamente.${NC}"
 echo ""
 
-if ask "¿Instalar WireGuard y generar plantilla?"; then
+if check_file_exists /etc/wireguard/wg0.conf; then
+    log_already "WireGuard plantilla (wg0.conf ya existe)"
+elif ask "¿Instalar WireGuard y generar plantilla?"; then
     # Instalar wireguard-tools
     if ! command -v wg &>/dev/null; then
         log_info "Instalando wireguard-tools..."
@@ -372,7 +400,9 @@ echo "arpwatch monitoriza cambios en tablas ARP (detección de ARP spoofing)."
 echo "Se configurarán también parámetros sysctl de protección ARP."
 echo ""
 
-if ask "¿Instalar arpwatch y configurar protección ARP?"; then
+if check_file_exists /etc/sysctl.d/99-arp-protection.conf; then
+    log_already "Protección ARP (sysctl ya configurado)"
+elif ask "¿Instalar arpwatch y configurar protección ARP?"; then
     # Instalar arpwatch
     if ! command -v arpwatch &>/dev/null; then
         log_info "Instalando arpwatch..."
@@ -504,6 +534,674 @@ EOFARP
     log_info "Script creado: /usr/local/bin/verificar-arp.sh"
 else
     log_skip "Instalar arpwatch y configurar protección ARP"
+fi
+
+echo ""
+
+# ============================================================
+# S6: FORENSE DE RED (TCPDUMP RING BUFFER)
+# ============================================================
+log_section "S6: FORENSE DE RED (CAPTURA CONTINUA)"
+
+echo "Captura continua de tráfico con tcpdump en ring buffer."
+echo "Mantiene las últimas 24 capturas de 100MB para análisis forense."
+echo ""
+
+if check_executable /usr/local/bin/captura-forense-red.sh; then
+    log_already "Captura forense de red"
+elif ask "¿Configurar captura forense de red con ring buffer?"; then
+
+    mkdir -p /var/lib/securizar/network-forensics
+    chmod 700 /var/lib/securizar/network-forensics
+    log_change "Creado" "/var/lib/securizar/network-forensics/"
+
+    cat > /usr/local/bin/captura-forense-red.sh << 'EOFCAPTURE'
+#!/bin/bash
+# ============================================================
+# CAPTURA FORENSE DE RED - Ring Buffer
+# Mantiene últimas 24 capturas de 100MB rotativas
+# Uso: captura-forense-red.sh [start|stop|status]
+# ============================================================
+
+CAPTURE_DIR="/var/lib/securizar/network-forensics"
+PIDFILE="/var/run/securizar-netcapture.pid"
+MAX_FILES=24
+MAX_SIZE_MB=100
+
+case "${1:-status}" in
+    start)
+        if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            echo "Captura ya activa (PID $(cat "$PIDFILE"))"
+            exit 0
+        fi
+
+        IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+        if [[ -z "$IFACE" ]]; then
+            echo "No se detectó interfaz de red"
+            exit 1
+        fi
+
+        echo "Iniciando captura en $IFACE (ring: ${MAX_FILES}x${MAX_SIZE_MB}MB)"
+        tcpdump -i "$IFACE" \
+            -w "$CAPTURE_DIR/capture-%Y%m%d-%H%M%S.pcap" \
+            -W "$MAX_FILES" -C "$MAX_SIZE_MB" \
+            -G 3600 -Z root \
+            -n -s 0 \
+            'not port 22' \
+            &>/dev/null &
+        echo $! > "$PIDFILE"
+        chmod 600 "$PIDFILE"
+        echo "Captura iniciada (PID $!)"
+        logger -t securizar-netcapture "Ring buffer capture started on $IFACE"
+        ;;
+    stop)
+        if [[ -f "$PIDFILE" ]]; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "Captura detenida"
+            logger -t securizar-netcapture "Ring buffer capture stopped"
+        else
+            echo "No hay captura activa"
+        fi
+        ;;
+    status)
+        if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            echo "Estado: ACTIVO (PID $(cat "$PIDFILE"))"
+        else
+            echo "Estado: INACTIVO"
+        fi
+        PCAP_COUNT=$(find "$CAPTURE_DIR" -name "*.pcap" 2>/dev/null | wc -l)
+        PCAP_SIZE=$(du -sh "$CAPTURE_DIR" 2>/dev/null | awk '{print $1}')
+        echo "Capturas: $PCAP_COUNT archivos ($PCAP_SIZE)"
+        ls -lt "$CAPTURE_DIR"/*.pcap 2>/dev/null | head -5
+        ;;
+    *)
+        echo "Uso: $0 {start|stop|status}"
+        ;;
+esac
+EOFCAPTURE
+
+    chmod 755 /usr/local/bin/captura-forense-red.sh
+    log_change "Creado" "/usr/local/bin/captura-forense-red.sh"
+
+    # Servicio systemd para arranque automático
+    cat > /etc/systemd/system/securizar-netcapture.service << 'EOFSVC'
+[Unit]
+Description=Securizar Network Forensic Capture
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/captura-forense-red.sh start
+ExecStop=/usr/local/bin/captura-forense-red.sh stop
+PIDFile=/var/run/securizar-netcapture.pid
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOFSVC
+
+    systemctl daemon-reload
+    log_change "Creado" "/etc/systemd/system/securizar-netcapture.service"
+    log_info "Captura forense de red configurada (no activada por defecto)"
+    echo -e "${DIM}Activar: systemctl enable --now securizar-netcapture${NC}"
+
+else
+    log_skip "Captura forense de red"
+fi
+
+# ============================================================
+# S7: ZEEK/SURICATA AVANZADO (CUSTOM RULES)
+# ============================================================
+log_section "S7: ZEEK/SURICATA AVANZADO (CUSTOM RULES)"
+
+echo "Reglas personalizadas de Suricata para detección avanzada:"
+echo "  - IMDS SSRF detection (cloud)"
+echo "  - DNS tunneling"
+echo "  - TLS anomalías"
+echo "  - Correlación con community-id"
+echo ""
+
+if check_executable /usr/local/bin/configurar-ids-avanzado.sh; then
+    log_already "IDS avanzado configurado"
+elif ask "¿Crear reglas personalizadas de Suricata/Zeek?"; then
+
+    cat > /usr/local/bin/configurar-ids-avanzado.sh << 'EOFIDS'
+#!/bin/bash
+# ============================================================
+# CONFIGURACIÓN IDS AVANZADA
+# Reglas custom de Suricata + local.zeek (si disponible)
+# ============================================================
+
+set -euo pipefail
+
+SURICATA_RULES="/var/lib/suricata/rules"
+ZEEK_SITE="/opt/zeek/share/zeek/site"
+
+echo "╔════════════════════════════════════════════╗"
+echo "║   CONFIGURACIÓN IDS AVANZADA               ║"
+echo "╚════════════════════════════════════════════╝"
+echo ""
+
+# --- Suricata custom rules ---
+if command -v suricata &>/dev/null; then
+    echo "Instalando reglas Suricata personalizadas..."
+    mkdir -p "$SURICATA_RULES"
+
+    cat > "$SURICATA_RULES/securizar-custom.rules" << 'EOFRULES'
+# ============================================================
+# REGLAS SECURIZAR - Detección avanzada
+# ============================================================
+
+# IMDS SSRF Detection (AWS/Azure/GCP metadata)
+alert http any any -> 169.254.169.254 any (msg:"SECURIZAR IMDS Access Attempt"; flow:to_server,established; content:"169.254.169.254"; http_host; classtype:attempted-recon; sid:9000001; rev:1;)
+alert http any any -> [fd00:ec2::254] any (msg:"SECURIZAR IMDS IPv6 Access"; flow:to_server,established; classtype:attempted-recon; sid:9000002; rev:1;)
+
+# DNS Tunneling Detection
+alert dns any any -> any any (msg:"SECURIZAR DNS Tunnel - Long Query"; dns.query; content:"."; pcre:"/^[a-zA-Z0-9]{50,}\./"; classtype:policy-violation; sid:9000010; rev:1;)
+alert dns any any -> any any (msg:"SECURIZAR DNS Tunnel - TXT Record Exfil"; dns.query; dns_query; content:"|00 10|"; classtype:policy-violation; sid:9000011; rev:1;)
+
+# TLS Anomalies
+alert tls any any -> any any (msg:"SECURIZAR Self-signed cert to external"; flow:to_server,established; tls.cert_subject; content:"CN=localhost"; classtype:policy-violation; sid:9000020; rev:1;)
+
+# Reverse Shell Detection
+alert tcp any any -> any any (msg:"SECURIZAR Potential Reverse Shell - bash"; flow:established; content:"/bin/bash"; content:"-i"; classtype:trojan-activity; sid:9000030; rev:1;)
+alert tcp any any -> any any (msg:"SECURIZAR Potential Reverse Shell - python"; flow:established; content:"import socket"; content:"subprocess"; classtype:trojan-activity; sid:9000031; rev:1;)
+
+# Crypto Mining
+alert tls any any -> any any (msg:"SECURIZAR Crypto Mining Pool TLS"; flow:to_server,established; tls.sni; content:"pool."; classtype:policy-violation; sid:9000040; rev:1;)
+alert tcp any any -> any any (msg:"SECURIZAR Stratum Mining Protocol"; flow:established; content:"mining.subscribe"; classtype:policy-violation; sid:9000041; rev:1;)
+
+# C2 Beaconing patterns
+alert http any any -> any any (msg:"SECURIZAR Potential C2 User-Agent"; flow:to_server,established; http.user_agent; content:"Mozilla/4.0"; pcre:"/^Mozilla\/4\.0$/"; classtype:trojan-activity; sid:9000050; rev:1;)
+EOFRULES
+
+    # Añadir reglas custom al yaml si no están
+    SURICATA_YAML="/etc/suricata/suricata.yaml"
+    if [[ -f "$SURICATA_YAML" ]]; then
+        if ! grep -q "securizar-custom.rules" "$SURICATA_YAML" 2>/dev/null; then
+            echo "  - securizar-custom.rules" >> "$SURICATA_YAML"
+            echo "Reglas añadidas a suricata.yaml"
+        fi
+    fi
+
+    echo "[+] Reglas Suricata custom instaladas: $SURICATA_RULES/securizar-custom.rules"
+    systemctl reload suricata 2>/dev/null || systemctl restart suricata 2>/dev/null || true
+fi
+
+# --- Zeek local.zeek ---
+if command -v zeek &>/dev/null || [[ -d "$ZEEK_SITE" ]]; then
+    echo ""
+    echo "Configurando Zeek..."
+    mkdir -p "$ZEEK_SITE"
+
+    cat > "$ZEEK_SITE/securizar-detect.zeek" << 'EOFZEEK'
+# Securizar - Detección custom Zeek
+@load base/protocols/dns
+@load base/protocols/http
+@load base/protocols/ssl
+
+# Alertar en DNS queries sospechosamente largas (tunneling)
+event dns_request(c: connection, msg: dns_msg, query: string, qtype: count, qclass: count)
+    {
+    if ( |query| > 60 )
+        {
+        NOTICE([$note=DNS::External_Name,
+                $msg=fmt("Long DNS query (possible tunnel): %s", query),
+                $conn=c,
+                $identifier=cat(c$id$orig_h)]);
+        }
+    }
+
+# Alertar en conexiones a IPs de metadata cloud
+event new_connection(c: connection)
+    {
+    if ( c$id$resp_h == 169.254.169.254 )
+        {
+        NOTICE([$note=Conn::Content_Gap,
+                $msg=fmt("IMDS access from %s", c$id$orig_h),
+                $conn=c]);
+        }
+    }
+EOFZEEK
+
+    echo "[+] Zeek scripts custom instalados: $ZEEK_SITE/securizar-detect.zeek"
+fi
+
+echo ""
+echo "Configuración IDS avanzada completada."
+EOFIDS
+
+    chmod 755 /usr/local/bin/configurar-ids-avanzado.sh
+    log_change "Creado" "/usr/local/bin/configurar-ids-avanzado.sh"
+    log_info "Script IDS avanzado instalado"
+
+else
+    log_skip "IDS avanzado"
+fi
+
+# ============================================================
+# S8: DNS SINKHOLE
+# ============================================================
+log_section "S8: DNS SINKHOLE"
+
+echo "Bloqueo de dominios maliciosos mediante DNS sinkhole."
+echo "Fuentes: abuse.ch URLhaus, PhishTank, threat feeds."
+echo "Ref: módulo 63 (DNS avanzado) para RPZ completo."
+echo ""
+
+if check_executable /usr/local/bin/dns-sinkhole.sh; then
+    log_already "DNS sinkhole"
+elif ask "¿Configurar DNS sinkhole con listas de bloqueo?"; then
+
+    cat > /usr/local/bin/dns-sinkhole.sh << 'EOFSINKHOLE'
+#!/bin/bash
+# ============================================================
+# DNS SINKHOLE - Bloqueo de dominios maliciosos
+# Fuentes: abuse.ch, PhishTank, securizar threat feeds
+# Uso: dns-sinkhole.sh [update|status|add DOMAIN|remove DOMAIN]
+# ============================================================
+
+set -euo pipefail
+
+SINKHOLE_DIR="/etc/securizar/dns-sinkhole"
+HOSTS_BLOCK="/etc/securizar/dns-sinkhole/blocked-domains.conf"
+CUSTOM_BLOCK="$SINKHOLE_DIR/custom-blocked.conf"
+LOG="/var/log/securizar/dns-sinkhole.log"
+
+mkdir -p "$SINKHOLE_DIR" "$(dirname "$LOG")"
+
+case "${1:-status}" in
+    update)
+        echo "=== Actualizando listas DNS sinkhole ===" | tee -a "$LOG"
+        echo "Fecha: $(date -Iseconds)" | tee -a "$LOG"
+
+        TEMP_LIST=$(mktemp)
+
+        # Abuse.ch URLhaus domains
+        echo "Descargando abuse.ch URLhaus..." | tee -a "$LOG"
+        curl -sS --max-time 30 "https://urlhaus.abuse.ch/downloads/hostfile/" 2>/dev/null | \
+            grep "^127.0.0.1" | awk '{print $2}' >> "$TEMP_LIST" 2>/dev/null || true
+
+        # Abuse.ch SSL blacklist
+        echo "Descargando abuse.ch SSL blacklist..." | tee -a "$LOG"
+        curl -sS --max-time 30 "https://sslbl.abuse.ch/blacklist/sslblacklist.csv" 2>/dev/null | \
+            grep -v "^#" | cut -d',' -f2 | grep -v "^$" >> "$TEMP_LIST" 2>/dev/null || true
+
+        # Disconnect.me malware
+        echo "Descargando Disconnect.me malware..." | tee -a "$LOG"
+        curl -sS --max-time 30 "https://s3.amazonaws.com/lists.disconnect.me/simple_malware.txt" 2>/dev/null | \
+            grep -v "^#" >> "$TEMP_LIST" 2>/dev/null || true
+
+        # Deduplicar y formatear
+        sort -u "$TEMP_LIST" | grep -v "^$" | grep -v "^#" > "$HOSTS_BLOCK"
+        DOMAIN_COUNT=$(wc -l < "$HOSTS_BLOCK")
+        echo "Dominios bloqueados: $DOMAIN_COUNT" | tee -a "$LOG"
+
+        # Añadir custom blocks
+        if [[ -f "$CUSTOM_BLOCK" ]]; then
+            cat "$CUSTOM_BLOCK" >> "$HOSTS_BLOCK"
+            CUSTOM_COUNT=$(wc -l < "$CUSTOM_BLOCK")
+            echo "Dominios custom: $CUSTOM_COUNT" | tee -a "$LOG"
+        fi
+
+        rm -f "$TEMP_LIST"
+
+        # Aplicar a /etc/hosts (opción ligera)
+        HOSTS_MARKER="# === SECURIZAR DNS SINKHOLE ==="
+        if grep -q "$HOSTS_MARKER" /etc/hosts 2>/dev/null; then
+            # Limpiar entradas anteriores
+            sed -i "/$HOSTS_MARKER/,/# === END SINKHOLE ===/d" /etc/hosts
+        fi
+
+        echo "$HOSTS_MARKER" >> /etc/hosts
+        while IFS= read -r domain; do
+            [[ -z "$domain" ]] && continue
+            echo "0.0.0.0 $domain" >> /etc/hosts
+        done < "$HOSTS_BLOCK"
+        echo "# === END SINKHOLE ===" >> /etc/hosts
+
+        # Aplicar a Unbound si disponible
+        if command -v unbound-control &>/dev/null && systemctl is-active unbound &>/dev/null; then
+            echo "Aplicando a Unbound RPZ..." | tee -a "$LOG"
+            RPZ_FILE="/etc/unbound/local.d/sinkhole.conf"
+            echo "server:" > "$RPZ_FILE"
+            while IFS= read -r domain; do
+                [[ -z "$domain" ]] && continue
+                echo "    local-zone: \"$domain\" always_nxdomain" >> "$RPZ_FILE"
+            done < <(head -5000 "$HOSTS_BLOCK")
+            unbound-control reload 2>/dev/null || true
+        fi
+
+        logger -t securizar-sinkhole "DNS sinkhole updated: $DOMAIN_COUNT domains"
+        echo "Actualización completada." | tee -a "$LOG"
+        ;;
+
+    status)
+        echo "╔════════════════════════════════════╗"
+        echo "║   DNS SINKHOLE - Estado            ║"
+        echo "╚════════════════════════════════════╝"
+        if [[ -f "$HOSTS_BLOCK" ]]; then
+            echo "  Dominios bloqueados: $(wc -l < "$HOSTS_BLOCK")"
+            echo "  Última actualización: $(stat -c %y "$HOSTS_BLOCK" 2>/dev/null | cut -d. -f1)"
+        else
+            echo "  No configurado. Ejecuta: $0 update"
+        fi
+        if [[ -f "$CUSTOM_BLOCK" ]]; then
+            echo "  Dominios custom: $(wc -l < "$CUSTOM_BLOCK")"
+        fi
+        ;;
+
+    add)
+        DOMAIN="${2:-}"
+        if [[ -z "$DOMAIN" ]]; then
+            echo "Uso: $0 add <dominio>"
+            exit 1
+        fi
+        echo "$DOMAIN" >> "$CUSTOM_BLOCK"
+        echo "0.0.0.0 $DOMAIN" >> /etc/hosts
+        echo "Dominio añadido: $DOMAIN"
+        logger -t securizar-sinkhole "Domain added: $DOMAIN"
+        ;;
+
+    remove)
+        DOMAIN="${2:-}"
+        if [[ -z "$DOMAIN" ]]; then
+            echo "Uso: $0 remove <dominio>"
+            exit 1
+        fi
+        sed -i "/^${DOMAIN}$/d" "$CUSTOM_BLOCK" 2>/dev/null
+        sed -i "/0.0.0.0 ${DOMAIN}$/d" /etc/hosts 2>/dev/null
+        echo "Dominio eliminado: $DOMAIN"
+        logger -t securizar-sinkhole "Domain removed: $DOMAIN"
+        ;;
+
+    *)
+        echo "Uso: $0 {update|status|add DOMAIN|remove DOMAIN}"
+        ;;
+esac
+EOFSINKHOLE
+
+    chmod 755 /usr/local/bin/dns-sinkhole.sh
+    log_change "Creado" "/usr/local/bin/dns-sinkhole.sh"
+    log_info "DNS sinkhole instalado: dns-sinkhole.sh"
+    echo -e "${DIM}Inicializar: dns-sinkhole.sh update${NC}"
+
+else
+    log_skip "DNS sinkhole"
+fi
+
+# ============================================================
+# S9: BASELINE DE TRÁFICO DE RED
+# ============================================================
+log_section "S9: BASELINE DE TRÁFICO DE RED"
+
+echo "Aprende patrones normales de tráfico y alerta en anomalías:"
+echo "  - IPs destino habituales vs nuevas"
+echo "  - Puertos en escucha esperados vs nuevos"
+echo "  - Volumen de tráfico por interfaz (alerta en 3x)"
+echo ""
+
+if check_executable /usr/local/bin/baseline-red.sh; then
+    log_already "Baseline de red"
+elif ask "¿Configurar baseline de tráfico de red?"; then
+
+    cat > /usr/local/bin/baseline-red.sh << 'EOFBASELINE'
+#!/bin/bash
+# ============================================================
+# BASELINE DE TRÁFICO DE RED
+# Aprende patrones normales y detecta anomalías
+# Uso: baseline-red.sh [learn|check|status]
+# ============================================================
+
+set -euo pipefail
+
+BASELINE_DIR="/var/lib/securizar/network-baseline"
+mkdir -p "$BASELINE_DIR"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+case "${1:-status}" in
+    learn)
+        echo -e "${BOLD}=== Aprendiendo baseline de red ===${NC}"
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+        # 1. Puertos en escucha
+        ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | sort -u > "$BASELINE_DIR/listeners.baseline"
+        echo "  Puertos en escucha: $(wc -l < "$BASELINE_DIR/listeners.baseline")"
+
+        # 2. IPs destino habituales (conexiones establecidas)
+        ss -tn state established 2>/dev/null | awk 'NR>1 {print $5}' | cut -d: -f1 | sort -u > "$BASELINE_DIR/destinations.baseline"
+        echo "  IPs destino: $(wc -l < "$BASELINE_DIR/destinations.baseline")"
+
+        # 3. Volumen de tráfico por interfaz
+        cat /proc/net/dev 2>/dev/null | awk 'NR>2 {gsub(/:/, "", $1); print $1, $2, $10}' > "$BASELINE_DIR/traffic-volume.baseline"
+        echo "  Interfaces capturadas: $(wc -l < "$BASELINE_DIR/traffic-volume.baseline")"
+
+        # 4. Servicios DNS activos
+        cat /etc/resolv.conf 2>/dev/null | grep "^nameserver" | awk '{print $2}' > "$BASELINE_DIR/dns-servers.baseline"
+
+        echo ""
+        echo -e "${GREEN}Baseline capturada: $TIMESTAMP${NC}"
+        echo "$TIMESTAMP" > "$BASELINE_DIR/last-learn"
+        logger -t securizar-baseline "Network baseline learned"
+        ;;
+
+    check)
+        if [[ ! -f "$BASELINE_DIR/listeners.baseline" ]]; then
+            echo -e "${YELLOW}No hay baseline. Ejecuta: $0 learn${NC}"
+            exit 1
+        fi
+
+        ALERTS=0
+        echo -e "${BOLD}=== Verificando contra baseline ===${NC}"
+        echo ""
+
+        # 1. Nuevos puertos en escucha
+        echo -e "${CYAN}Puertos en escucha:${NC}"
+        CURRENT_LISTENERS=$(mktemp)
+        ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | sort -u > "$CURRENT_LISTENERS"
+        NEW_LISTENERS=$(comm -13 "$BASELINE_DIR/listeners.baseline" "$CURRENT_LISTENERS")
+        if [[ -n "$NEW_LISTENERS" ]]; then
+            echo -e "  ${RED}ALERTA: Nuevos puertos en escucha:${NC}"
+            echo "$NEW_LISTENERS" | while read -r port; do
+                PROC=$(ss -tlnp | grep "$port" | grep -oP 'users:\(\("\K[^"]+' || echo "?")
+                echo -e "    ${RED}$port${NC} ($PROC)"
+            done
+            ALERTS=$((ALERTS + 1))
+        else
+            echo -e "  ${GREEN}OK${NC} Sin nuevos puertos"
+        fi
+        rm -f "$CURRENT_LISTENERS"
+
+        # 2. Nuevas IPs destino
+        echo ""
+        echo -e "${CYAN}IPs destino:${NC}"
+        CURRENT_DEST=$(mktemp)
+        ss -tn state established 2>/dev/null | awk 'NR>1 {print $5}' | cut -d: -f1 | sort -u > "$CURRENT_DEST"
+        NEW_DEST=$(comm -13 "$BASELINE_DIR/destinations.baseline" "$CURRENT_DEST" | head -20)
+        if [[ -n "$NEW_DEST" ]]; then
+            NEW_COUNT=$(echo "$NEW_DEST" | wc -l)
+            echo -e "  ${YELLOW}$NEW_COUNT nuevas IPs destino:${NC}"
+            echo "$NEW_DEST" | head -10 | while read -r ip; do
+                echo -e "    ${YELLOW}$ip${NC}"
+            done
+            if [[ "$NEW_COUNT" -gt 10 ]]; then
+                echo -e "    ${DIM}...y $((NEW_COUNT - 10)) más${NC}"
+            fi
+        else
+            echo -e "  ${GREEN}OK${NC} Sin nuevos destinos"
+        fi
+        rm -f "$CURRENT_DEST"
+
+        # 3. Volumen de tráfico (alertar si 3x baseline)
+        echo ""
+        echo -e "${CYAN}Volumen de tráfico:${NC}"
+        while read -r iface rx_base tx_base; do
+            CURRENT_RX=$(awk -v i="$iface:" '$1==i {print $2}' /proc/net/dev 2>/dev/null || echo 0)
+            if [[ "$rx_base" -gt 0 ]] && [[ "$CURRENT_RX" -gt $((rx_base * 3)) ]]; then
+                echo -e "  ${RED}ALERTA: $iface RX triplicado (baseline: $rx_base, actual: $CURRENT_RX)${NC}"
+                ALERTS=$((ALERTS + 1))
+            else
+                echo -e "  ${GREEN}OK${NC} $iface dentro de rango normal"
+            fi
+        done < "$BASELINE_DIR/traffic-volume.baseline"
+
+        echo ""
+        if [[ "$ALERTS" -gt 0 ]]; then
+            echo -e "${RED}$ALERTS alertas detectadas${NC}"
+            logger -t securizar-baseline "Network anomalies detected: $ALERTS alerts"
+        else
+            echo -e "${GREEN}Sin anomalías detectadas${NC}"
+        fi
+        ;;
+
+    status)
+        echo -e "${BOLD}=== Estado de Baseline de Red ===${NC}"
+        if [[ -f "$BASELINE_DIR/last-learn" ]]; then
+            echo "  Último aprendizaje: $(cat "$BASELINE_DIR/last-learn")"
+            echo "  Puertos baseline: $(wc -l < "$BASELINE_DIR/listeners.baseline" 2>/dev/null || echo 0)"
+            echo "  IPs destino baseline: $(wc -l < "$BASELINE_DIR/destinations.baseline" 2>/dev/null || echo 0)"
+        else
+            echo "  No hay baseline. Ejecuta: $0 learn"
+        fi
+        ;;
+
+    *)
+        echo "Uso: $0 {learn|check|status}"
+        ;;
+esac
+EOFBASELINE
+
+    chmod 755 /usr/local/bin/baseline-red.sh
+    log_change "Creado" "/usr/local/bin/baseline-red.sh"
+    log_info "Baseline de red instalado: baseline-red.sh"
+    echo -e "${DIM}Aprender baseline: baseline-red.sh learn${NC}"
+    echo -e "${DIM}Verificar anomalías: baseline-red.sh check${NC}"
+
+else
+    log_skip "Baseline de red"
+fi
+
+# ============================================================
+# S10: AUDITORÍA DE RED AVANZADA
+# ============================================================
+log_section "S10: AUDITORÍA DE RED AVANZADA"
+
+echo "Auditoría automatizada de todos los controles de red avanzada."
+echo "Scoring de 30 puntos con verificación de cada componente."
+echo ""
+
+if check_executable /usr/local/bin/auditoria-red-avanzada.sh; then
+    log_already "Auditoría de red avanzada"
+elif ask "¿Crear auditoría de red avanzada?"; then
+
+    cat > /usr/local/bin/auditoria-red-avanzada.sh << 'EOFAUDIT'
+#!/bin/bash
+# ============================================================
+# AUDITORÍA DE RED AVANZADA
+# Scoring de controles de red (30 puntos máximo)
+# ============================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+SCORE=0
+MAX_SCORE=0
+REPORT="/var/log/securizar/auditoria-red-avanzada-$(date +%Y%m%d).txt"
+mkdir -p "$(dirname "$REPORT")"
+
+check_item() {
+    local desc="$1"
+    local cmd="$2"
+    local points="${3:-1}"
+    MAX_SCORE=$((MAX_SCORE + points))
+
+    if eval "$cmd" &>/dev/null; then
+        echo -e "  ${GREEN}[+$points]${NC}  $desc" | tee -a "$REPORT"
+        SCORE=$((SCORE + points))
+    else
+        echo -e "  ${RED}[ 0]${NC}  $desc" | tee -a "$REPORT"
+    fi
+}
+
+echo -e "${BOLD}╔════════════════════════════════════════════╗${NC}" | tee "$REPORT"
+echo -e "${BOLD}║   AUDITORÍA DE RED AVANZADA                ║${NC}" | tee -a "$REPORT"
+echo -e "${BOLD}╚════════════════════════════════════════════╝${NC}" | tee -a "$REPORT"
+echo "" | tee -a "$REPORT"
+echo "Fecha: $(date -Iseconds)" | tee -a "$REPORT"
+echo "" | tee -a "$REPORT"
+
+echo -e "${CYAN}── IDS/IPS ──${NC}" | tee -a "$REPORT"
+check_item "Suricata instalado" "command -v suricata" 3
+check_item "Suricata activo" "systemctl is-active suricata" 3
+check_item "Reglas custom securizar" "test -f /var/lib/suricata/rules/securizar-custom.rules" 2
+check_item "Suricata-update cron" "test -f /etc/cron.weekly/suricata-update" 1
+
+echo "" | tee -a "$REPORT"
+echo -e "${CYAN}── DNS Seguro ──${NC}" | tee -a "$REPORT"
+check_item "DNS over TLS configurado" "test -f /etc/systemd/resolved.conf.d/dns-over-tls.conf" 2
+check_item "DNS sinkhole activo" "test -f /etc/securizar/dns-sinkhole/blocked-domains.conf" 2
+
+echo "" | tee -a "$REPORT"
+echo -e "${CYAN}── Monitorización ──${NC}" | tee -a "$REPORT"
+check_item "arpwatch activo" "systemctl is-active arpwatch" 2
+check_item "Protección ARP sysctl" "test -f /etc/sysctl.d/99-arp-protection.conf" 1
+check_item "Captura forense configurada" "test -x /usr/local/bin/captura-forense-red.sh" 2
+check_item "Baseline de red aprendida" "test -f /var/lib/securizar/network-baseline/listeners.baseline" 2
+
+echo "" | tee -a "$REPORT"
+echo -e "${CYAN}── VPN ──${NC}" | tee -a "$REPORT"
+check_item "WireGuard configurado" "test -f /etc/wireguard/wg0.conf" 2
+
+echo "" | tee -a "$REPORT"
+echo -e "${BOLD}═══════════════════════════════════════${NC}" | tee -a "$REPORT"
+PERCENT=0
+if [[ $MAX_SCORE -gt 0 ]]; then
+    PERCENT=$((SCORE * 100 / MAX_SCORE))
+fi
+echo -e "${BOLD}  Score: $SCORE/$MAX_SCORE ($PERCENT%)${NC}" | tee -a "$REPORT"
+
+if [[ $PERCENT -ge 80 ]]; then
+    echo -e "  ${GREEN}Nivel: EXCELENTE${NC}" | tee -a "$REPORT"
+elif [[ $PERCENT -ge 60 ]]; then
+    echo -e "  ${GREEN}Nivel: BUENO${NC}" | tee -a "$REPORT"
+elif [[ $PERCENT -ge 40 ]]; then
+    echo -e "  ${YELLOW}Nivel: PARCIAL${NC}" | tee -a "$REPORT"
+else
+    echo -e "  ${RED}Nivel: BAJO${NC}" | tee -a "$REPORT"
+fi
+
+echo "" | tee -a "$REPORT"
+echo -e "${DIM}Reporte: $REPORT${NC}"
+logger -t securizar-audit "Network audit: $SCORE/$MAX_SCORE ($PERCENT%)"
+EOFAUDIT
+
+    chmod 755 /usr/local/bin/auditoria-red-avanzada.sh
+    log_change "Creado" "/usr/local/bin/auditoria-red-avanzada.sh"
+
+    # Cron semanal
+    cat > /etc/cron.weekly/auditoria-red-avanzada << 'EOFCRON'
+#!/bin/bash
+/usr/local/bin/auditoria-red-avanzada.sh > /dev/null 2>&1
+EOFCRON
+    chmod 700 /etc/cron.weekly/auditoria-red-avanzada
+    log_change "Creado" "/etc/cron.weekly/auditoria-red-avanzada"
+    log_info "Auditoría de red avanzada instalada"
+
+else
+    log_skip "Auditoría de red avanzada"
 fi
 
 echo ""

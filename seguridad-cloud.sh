@@ -23,6 +23,21 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /etc/securizar/cloud-provider.conf'
+_pc 'check_executable /usr/local/bin/verificar-imds.sh'
+_pc 'check_executable /usr/local/bin/auditar-cloud-iam.sh'
+_pc 'check_executable /usr/local/bin/auditar-security-groups.sh'
+_pc 'check_executable /usr/local/bin/auditar-cifrado-cloud.sh'
+_pc 'check_executable /usr/local/bin/verificar-cloud-logging.sh'
+_pc 'check_executable /usr/local/bin/evaluar-postura-cloud.sh'
+_pc 'check_executable /usr/local/bin/detectar-exfiltracion-cloud.sh'
+_pc 'check_executable /usr/local/bin/auditar-contenedores-cloud.sh'
+_pc 'check_executable /usr/local/bin/auditoria-seguridad-cloud.sh'
+_precheck_result
+
 init_backup "cloud-security"
 
 echo ""
@@ -101,7 +116,9 @@ echo "  - ID de instancia, region, tipo de instancia"
 echo "  - Almacena configuracion en /etc/securizar/cloud-provider.conf"
 echo ""
 
-if ask "¿Detectar entorno cloud y recopilar informacion?"; then
+if check_file_exists /etc/securizar/cloud-provider.conf; then
+    log_already "Deteccion de entorno cloud (configuracion ya existe)"
+elif ask "¿Detectar entorno cloud y recopilar informacion?"; then
 
     log_info "Iniciando deteccion de entorno cloud..."
 
@@ -435,6 +452,97 @@ else
     fi
 fi
 
+
+# ── S1b: Cloud-init hardening ──
+log_info "S1b: Verificando seguridad de cloud-init..."
+
+if [[ -d /etc/cloud ]]; then
+    if check_executable /usr/local/bin/auditar-cloud-init.sh; then
+        log_already "Auditoría cloud-init"
+    elif ask "¿Auditar y securizar cloud-init?"; then
+
+        cat > /usr/local/bin/auditar-cloud-init.sh << 'EOFCLOUDINIT'
+#!/bin/bash
+# Auditoría de seguridad cloud-init
+set -euo pipefail
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+echo -e "${BOLD}=== AUDITORÍA CLOUD-INIT ===${NC}"
+ISSUES=0
+
+# Verificar que no hay datos sensibles en user-data
+if [[ -f /var/lib/cloud/instance/user-data.txt ]]; then
+    if grep -qiE 'password|secret|key|token' /var/lib/cloud/instance/user-data.txt 2>/dev/null; then
+        echo -e "  ${RED}ALERTA:${NC} user-data contiene posibles credenciales"
+        ((ISSUES++))
+    else
+        echo -e "  ${GREEN}OK${NC} user-data sin credenciales visibles"
+    fi
+fi
+
+# Verificar permisos de /var/lib/cloud
+PERM=$(stat -c %a /var/lib/cloud 2>/dev/null || echo "?")
+if [[ "$PERM" != "755" ]] && [[ "$PERM" != "700" ]]; then
+    echo -e "  ${YELLOW}!!${NC} /var/lib/cloud permisos: $PERM (recomendado: 755)"
+else
+    echo -e "  ${GREEN}OK${NC} /var/lib/cloud permisos: $PERM"
+fi
+
+# Verificar módulos peligrosos deshabilitados
+for mod in phone_home rightscale_userdata chef puppet salt_minion; do
+    if grep -rq "^ *- *$mod" /etc/cloud/cloud.cfg /etc/cloud/cloud.cfg.d/ 2>/dev/null; then
+        echo -e "  ${YELLOW}!!${NC} Módulo cloud-init activo: $mod"
+        ((ISSUES++))
+    fi
+done
+
+# Verificar que logs no exponen datos
+if [[ -f /var/log/cloud-init.log ]]; then
+    PERM_LOG=$(stat -c %a /var/log/cloud-init.log 2>/dev/null || echo "?")
+    if [[ "$PERM_LOG" != "600" ]] && [[ "$PERM_LOG" != "640" ]]; then
+        echo -e "  ${YELLOW}!!${NC} /var/log/cloud-init.log permisos: $PERM_LOG (recomendado: 640)"
+    else
+        echo -e "  ${GREEN}OK${NC} cloud-init.log permisos: $PERM_LOG"
+    fi
+fi
+
+echo ""
+echo -e "${BOLD}Issues: $ISSUES${NC}"
+EOFCLOUDINIT
+
+        chmod 755 /usr/local/bin/auditar-cloud-init.sh
+        log_change "Creado" "/usr/local/bin/auditar-cloud-init.sh"
+
+        # Config segura de cloud-init
+        mkdir -p /etc/cloud/cloud.cfg.d
+        cat > /etc/cloud/cloud.cfg.d/99-securizar-cloudinit.cfg << 'EOFCFG'
+# Securizar: hardening de cloud-init
+# Deshabilitar módulos potencialmente peligrosos
+cloud_final_modules:
+  - scripts-vendor
+  - scripts-per-once
+  - scripts-per-boot
+  - scripts-per-instance
+  - scripts-user
+  - phone-home
+
+# Restringir acceso a datos de instancia
+datasource:
+  Ec2:
+    strict_id: true
+EOFCFG
+
+        log_change "Creado" "/etc/cloud/cloud.cfg.d/99-securizar-cloudinit.cfg"
+        log_info "Cloud-init securizado"
+
+    else
+        log_skip "Auditoría cloud-init"
+    fi
+else
+    log_info "cloud-init no detectado en este sistema"
+fi
+
 # ============================================================
 # S2: SEGURIDAD DEL SERVICIO DE METADATOS (IMDS)
 # ============================================================
@@ -448,7 +556,9 @@ echo "  - Azure/GCP: Restriccion de acceso IMDS"
 echo "  - Script: /usr/local/bin/verificar-imds.sh"
 echo ""
 
-if ask "¿Aplicar proteccion del servicio de metadatos?"; then
+if check_executable /usr/local/bin/verificar-imds.sh; then
+    log_already "Proteccion IMDS (script verificar-imds.sh ya existe)"
+elif ask "¿Aplicar proteccion del servicio de metadatos?"; then
 
     METADATA_IP="169.254.169.254"
 
@@ -722,6 +832,49 @@ EOFIMDS
     log_change "Permisos" "/usr/local/bin/verificar-imds.sh -> +x"
     log_info "Ejecuta: verificar-imds.sh"
 
+    # ── S2b: IMDS deep protection con nftables ──
+    if command -v nft &>/dev/null; then
+        log_info "Configurando protección IMDS avanzada con nftables..."
+        mkdir -p /etc/nftables.d
+        cat > /etc/nftables.d/imds-protection.nft << 'EOFNFT'
+# Securizar: IMDS protection via nftables
+# Bloquear acceso no-root al endpoint de metadatos
+table inet securizar_imds {
+    chain output {
+        type filter hook output priority 0; policy accept;
+        # Solo root puede acceder a metadata
+        ip daddr 169.254.169.254 meta skuid != 0 log prefix "SECURIZAR-IMDS-BLOCK: " drop
+        ip6 daddr fd00:ec2::254 meta skuid != 0 log prefix "SECURIZAR-IMDS6-BLOCK: " drop
+    }
+}
+EOFNFT
+        chmod 644 /etc/nftables.d/imds-protection.nft
+        log_change "Creado" "/etc/nftables.d/imds-protection.nft"
+
+        cat > /usr/local/bin/enforcar-imds-hoplimit.sh << 'EOFHOP'
+#!/bin/bash
+# Enforce hop-limit=1 para IMDS (previene SSRF cross-container)
+set -euo pipefail
+echo "Verificando hop-limit para IMDS..."
+if command -v nft &>/dev/null; then
+    nft list ruleset 2>/dev/null | grep -q "securizar_imds" && \
+        echo "[OK] nftables IMDS protection activa" || \
+        echo "[!!] nftables IMDS protection no cargada - ejecuta: nft -f /etc/nftables.d/imds-protection.nft"
+fi
+# Verificar que IMDS en AWS usa hop-limit=1 (IMDSv2)
+if curl -s --max-time 2 http://169.254.169.254/latest/api/token -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 30" &>/dev/null; then
+    echo "[OK] IMDSv2 accesible (token-based)"
+elif curl -s --max-time 2 http://169.254.169.254/latest/meta-data/ &>/dev/null; then
+    echo "[!!] IMDSv1 accesible - RIESGO: configurar IMDSv2 obligatorio"
+else
+    echo "[--] IMDS no accesible (no cloud o ya bloqueado)"
+fi
+EOFHOP
+        chmod 755 /usr/local/bin/enforcar-imds-hoplimit.sh
+        log_change "Creado" "/usr/local/bin/enforcar-imds-hoplimit.sh"
+        log_info "Protección IMDS avanzada con nftables configurada"
+    fi
+
 else
     log_skip "Seguridad del servicio de metadatos (IMDS)"
 fi
@@ -738,7 +891,9 @@ echo "  - GCP: Cuenta de servicio, scopes, bindings IAM"
 echo "  - Script: /usr/local/bin/auditar-cloud-iam.sh"
 echo ""
 
-if ask "¿Crear script de auditoria IAM cloud?"; then
+if check_executable /usr/local/bin/auditar-cloud-iam.sh; then
+    log_already "Auditoria IAM cloud (script ya instalado)"
+elif ask "¿Crear script de auditoria IAM cloud?"; then
 
     log_info "Creando script de auditoria IAM cloud..."
 
@@ -993,6 +1148,56 @@ EOFIAM
 
     log_info "Ejecuta: auditar-cloud-iam.sh"
 
+    # ── S3b: Auditoría de rotación de credenciales cloud ──
+    log_info "Verificando rotación de credenciales cloud..."
+    cat > /usr/local/bin/auditar-credenciales-cloud.sh << 'EOFCRED'
+#!/bin/bash
+# Auditoría de credenciales cloud - rotación y exposición
+set -euo pipefail
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+echo -e "${BOLD}=== AUDITORÍA DE CREDENCIALES CLOUD ===${NC}"
+ISSUES=0
+
+# Buscar credenciales hardcodeadas en archivos comunes
+echo -e "\n${BOLD}Credenciales expuestas:${NC}"
+for dir in /home /root /etc /opt /var/lib; do
+    while IFS= read -r f; do
+        echo -e "  ${RED}ALERTA:${NC} Posible credencial en: $f"
+        ((ISSUES++))
+    done < <(grep -rlE 'AKIA[0-9A-Z]{16}|AWS_SECRET|AZURE_CLIENT_SECRET|GOOGLE_APPLICATION_CREDENTIALS' "$dir" 2>/dev/null | head -20)
+done
+
+# Verificar edad de credenciales AWS
+echo -e "\n${BOLD}Edad de credenciales:${NC}"
+if [[ -f ~/.aws/credentials ]]; then
+    AGE_DAYS=$(( ( $(date +%s) - $(stat -c %Y ~/.aws/credentials) ) / 86400 ))
+    if [[ "$AGE_DAYS" -gt 90 ]]; then
+        echo -e "  ${RED}!!${NC} ~/.aws/credentials tiene $AGE_DAYS días (>90)"
+        ((ISSUES++))
+    else
+        echo -e "  ${GREEN}OK${NC} ~/.aws/credentials: $AGE_DAYS días"
+    fi
+fi
+
+# Verificar variables de entorno con secretos
+echo -e "\n${BOLD}Variables de entorno:${NC}"
+for var in AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AZURE_CLIENT_SECRET GOOGLE_CREDENTIALS; do
+    if printenv "$var" &>/dev/null; then
+        echo -e "  ${YELLOW}!!${NC} Variable expuesta: $var"
+        ((ISSUES++))
+    fi
+done
+
+echo -e "\n${BOLD}Issues: $ISSUES${NC}"
+[[ $ISSUES -eq 0 ]] && echo -e "${GREEN}Sin problemas de credenciales detectados${NC}"
+EOFCRED
+
+    chmod 755 /usr/local/bin/auditar-credenciales-cloud.sh
+    log_change "Creado" "/usr/local/bin/auditar-credenciales-cloud.sh"
+    log_info "Auditoría de credenciales cloud instalada"
+
 else
     log_skip "Auditoria IAM y permisos cloud"
 fi
@@ -1010,7 +1215,9 @@ echo "  - VPC Flow Logs habilitados"
 echo "  - Script: /usr/local/bin/auditar-security-groups.sh"
 echo ""
 
-if ask "¿Crear script de auditoria de seguridad de red cloud?"; then
+if check_executable /usr/local/bin/auditar-security-groups.sh; then
+    log_already "Auditoria de red cloud (script ya instalado)"
+elif ask "¿Crear script de auditoria de seguridad de red cloud?"; then
 
     log_info "Creando script de auditoria de security groups..."
 
@@ -1210,7 +1417,9 @@ echo "  - Snapshots/backups sin cifrar"
 echo "  - Script: /usr/local/bin/auditar-cifrado-cloud.sh"
 echo ""
 
-if ask "¿Crear script de auditoria de cifrado cloud?"; then
+if check_executable /usr/local/bin/auditar-cifrado-cloud.sh; then
+    log_already "Auditoria de cifrado cloud (script ya instalado)"
+elif ask "¿Crear script de auditoria de cifrado cloud?"; then
 
     log_info "Creando script de auditoria de cifrado cloud..."
 
@@ -1465,7 +1674,9 @@ echo "  - Retencion de logs"
 echo "  - Script: /usr/local/bin/verificar-cloud-logging.sh"
 echo ""
 
-if ask "¿Crear script de verificacion de logging cloud?"; then
+if check_executable /usr/local/bin/verificar-cloud-logging.sh; then
+    log_already "Verificacion de logging cloud (script ya instalado)"
+elif ask "¿Crear script de verificacion de logging cloud?"; then
 
     log_info "Creando script de verificacion de logging cloud..."
 
@@ -1726,7 +1937,9 @@ echo "  - Prowler (AWS), ScoutSuite (multi-cloud)"
 echo "  - Script: /usr/local/bin/evaluar-postura-cloud.sh"
 echo ""
 
-if ask "¿Crear script de evaluacion de postura cloud?"; then
+if check_executable /usr/local/bin/evaluar-postura-cloud.sh; then
+    log_already "Evaluacion de postura cloud (script ya instalado)"
+elif ask "¿Crear script de evaluacion de postura cloud?"; then
 
     log_info "Creando script de evaluacion de postura cloud..."
 
@@ -1977,7 +2190,9 @@ echo "  - Alertas de movimiento anomalo de datos"
 echo "  - Script: /usr/local/bin/detectar-exfiltracion-cloud.sh"
 echo ""
 
-if ask "¿Crear script de deteccion de exfiltracion cloud?"; then
+if check_executable /usr/local/bin/detectar-exfiltracion-cloud.sh; then
+    log_already "Deteccion de exfiltracion cloud (script ya instalado)"
+elif ask "¿Crear script de deteccion de exfiltracion cloud?"; then
 
     log_info "Creando script de deteccion de exfiltracion cloud..."
 
@@ -2181,6 +2396,91 @@ EOFEXFIL
 
     log_info "Ejecuta: detectar-exfiltracion-cloud.sh"
 
+
+    # ── S8b: Filtrado de egress cloud ──
+    if ask "¿Configurar filtrado de egress cloud?"; then
+        mkdir -p /etc/securizar
+        cat > /etc/securizar/cloud-egress-whitelist.conf << 'EOFWHITELIST'
+# Whitelist de destinos de egress permitidos
+# Formato: IP/CIDR o dominio por línea
+# Generado por seguridad-cloud.sh
+
+# AWS endpoints (ajustar región)
+# 52.94.0.0/16
+# 54.239.0.0/16
+
+# Azure endpoints
+# 13.64.0.0/11
+
+# GCP endpoints
+# 35.190.0.0/16
+
+# Servicios esenciales
+# updates.example.com
+# api.example.com
+EOFWHITELIST
+
+        log_change "Creado" "/etc/securizar/cloud-egress-whitelist.conf"
+
+        cat > /usr/local/bin/filtrado-egress-cloud.sh << 'EOFEGRESS'
+#!/bin/bash
+# Filtrado de egress cloud - limitar tráfico saliente
+set -euo pipefail
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+WHITELIST="/etc/securizar/cloud-egress-whitelist.conf"
+
+echo -e "${BOLD}=== FILTRADO DE EGRESS CLOUD ===${NC}"
+
+case "${1:-status}" in
+    status)
+        echo -e "\n${BOLD}Conexiones salientes actuales:${NC}"
+        ss -tn state established 2>/dev/null | awk 'NR>1 {print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | head -20
+        echo -e "\n${BOLD}Whitelist configurada:${NC}"
+        if [[ -f "$WHITELIST" ]]; then
+            grep -v "^#" "$WHITELIST" | grep -v "^$" | while read -r entry; do
+                echo "  $entry"
+            done
+        else
+            echo "  No configurada"
+        fi
+        ;;
+    check)
+        echo -e "\n${BOLD}Verificando conexiones vs whitelist...${NC}"
+        VIOLATIONS=0
+        while read -r dest; do
+            [[ -z "$dest" ]] && continue
+            ALLOWED=false
+            while IFS= read -r entry; do
+                [[ -z "$entry" ]] && continue
+                [[ "$entry" == "#"* ]] && continue
+                if [[ "$dest" == "$entry"* ]]; then
+                    ALLOWED=true
+                    break
+                fi
+            done < "$WHITELIST"
+            if [[ "$ALLOWED" == "false" ]]; then
+                PROC=$(ss -tnp | grep "$dest" | grep -oP 'users:\(\("\K[^"]+' | head -1 || echo "?")
+                echo -e "  ${YELLOW}!!${NC} Destino no whitelisted: $dest ($PROC)"
+                ((VIOLATIONS++))
+            fi
+        done < <(ss -tn state established 2>/dev/null | awk 'NR>1 {print $5}' | cut -d: -f1 | sort -u)
+        echo -e "\n${BOLD}Violaciones: $VIOLATIONS${NC}"
+        ;;
+    *)
+        echo "Uso: $0 {status|check}"
+        ;;
+esac
+EOFEGRESS
+
+        chmod 755 /usr/local/bin/filtrado-egress-cloud.sh
+        log_change "Creado" "/usr/local/bin/filtrado-egress-cloud.sh"
+        log_info "Filtrado de egress cloud configurado"
+    else
+        log_skip "Filtrado de egress cloud"
+    fi
+
 else
     log_skip "Proteccion contra exfiltracion cloud"
 fi
@@ -2199,7 +2499,9 @@ echo "  - Contenedores privilegiados"
 echo "  - Script: /usr/local/bin/auditar-contenedores-cloud.sh"
 echo ""
 
-if ask "¿Crear script de auditoria de contenedores cloud?"; then
+if check_executable /usr/local/bin/auditar-contenedores-cloud.sh; then
+    log_already "Auditoria de contenedores cloud (script ya instalado)"
+elif ask "¿Crear script de auditoria de contenedores cloud?"; then
 
     log_info "Creando script de auditoria de contenedores cloud..."
 
@@ -2446,7 +2748,9 @@ echo "  - Cron semanal: /etc/cron.weekly/auditoria-cloud"
 echo "  - Script: /usr/local/bin/auditoria-seguridad-cloud.sh"
 echo ""
 
-if ask "¿Crear script de auditoria integral de seguridad cloud?"; then
+if check_executable /usr/local/bin/auditoria-seguridad-cloud.sh; then
+    log_already "Auditoria integral de seguridad cloud (script ya instalado)"
+elif ask "¿Crear script de auditoria integral de seguridad cloud?"; then
 
     log_info "Creando script de auditoria integral de seguridad cloud..."
 
