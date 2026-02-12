@@ -20,7 +20,7 @@ Suite completa de hardening y securizacion para Linux, con 67 modulos interactiv
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
 - **Verificacion proactiva** de 76 categorias de controles
-- **Operaciones SOC**: monitoreo continuo, SOAR, threat hunting, purple team
+- **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
 - **Anti-ransomware**: canary files, LVM snapshots, whitelisting, YARA, containment
@@ -170,7 +170,9 @@ securizar/
 ├── auditoria-red-wireshark.sh     # Modulo 64: Auditoria de red con Wireshark
 ├── auditoria-red-infraestructura.sh # Modulo 65: Auditoria de infraestructura de red
 ├── seguridad-runtime-kernel.sh    # Modulo 66: Proteccion runtime del kernel
-└── hardening-memoria-procesos.sh  # Modulo 67: Hardening de memoria y procesos
+├── hardening-memoria-procesos.sh  # Modulo 67: Hardening de memoria y procesos
+│
+└── respuesta-incidentes.sh        # Standalone: Respuesta a incidentes (IR, forense, playbooks)
 ```
 
 ---
