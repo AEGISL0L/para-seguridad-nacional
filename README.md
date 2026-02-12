@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 66 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS y auditoria de red con Wireshark. Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 65 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark y auditoria de infraestructura de red (nmap, TLS/SSL, SNMP, baseline/drift). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,14 +13,14 @@ Suite completa de hardening y securizacion para Linux, con 66 modulos interactiv
 
 ## Caracteristicas principales
 
-- **66 modulos** organizados en 6 categorias con menu interactivo
+- **65 modulos** organizados en 6 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
 - **Verificacion proactiva** de 74 categorias de controles
-- **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
+- **Operaciones SOC**: monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
 - **Anti-ransomware**: canary files, LVM snapshots, whitelisting, YARA, containment
@@ -29,6 +29,7 @@ Suite completa de hardening y securizacion para Linux, con 66 modulos interactiv
 - **IoT**: MQTT hardening, device inventory, firmware integrity, segmentacion
 - **DNS avanzado**: DNSSEC, DoT/DoH, RPZ sinkhole, tunneling detection
 - **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias, correlacion IDS
+- **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift
 
 ---
 
@@ -61,25 +62,24 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-66):
+El menu principal muestra 6 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-65):
 
 ```
-  b  Hardening Base          (modulos 1-10)   ●●●○○○○○○○
-  p  Securizacion Proactiva  (modulos 11-18)  ○○○○○○○○
-  m  Mitigaciones MITRE      (modulos 19-30)  ○○○○○○○○○○○○
-  o  Operaciones de Seguridad(modulos 31-36)  ○○○○○○
-  i  Inteligencia            (modulos 37-38)  ○○
-  x  Avanzado                (modulos 39-66)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○
+  b  Hardening Base          (modulos 1-9)   ●●●○○○○○○○
+  p  Securizacion Proactiva  (modulos 10-17)  ○○○○○○○○
+  m  Mitigaciones MITRE      (modulos 18-29)  ○○○○○○○○○○○○
+  o  Operaciones de Seguridad(modulos 30-34)  ○○○○○
+  i  Inteligencia            (modulos 35-36)  ○○
+  x  Avanzado                (modulos 37-65)  ○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
 
-  a  Aplicar todos    v  Verificacion    1-66 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-65 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
 
 ```bash
 sudo bash hardening-opensuse.sh      # Modulo 1
-sudo bash mitigar-acceso-inicial.sh  # Modulo 19
-sudo bash respuesta-incidentes.sh    # Modulo 31
+sudo bash mitigar-acceso-inicial.sh  # Modulo 18
 ```
 
 ---
@@ -88,7 +88,7 @@ sudo bash respuesta-incidentes.sh    # Modulo 31
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (66 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (65 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -100,72 +100,71 @@ securizar/
 │   ├── securizar-msf.sh           # Integracion con Metasploit Framework
 │   └── ciberint-lib.sh            # Biblioteca de ciberinteligencia
 │
-├── hardening-opensuse.sh          # Modulo  1: Hardening base del sistema
-├── hardening-seguro.sh            # Modulo  2: Nivel seguro de hardening
-├── hardening-final.sh             # Modulo  3: Hardening final consolidado
-├── hardening-externo.sh           # Modulo  4: Hardening de servicios externos
-├── hardening-extremo.sh           # Modulo  5: Nivel extremo (via menu = seguro)
-├── hardening-paranoico.sh         # Modulo  6: Nivel paranoico (via menu = seguro)
-├── contramedidas-mesh.sh          # Modulo  7: Contramedidas de red mesh
-├── contramedidas-avanzadas.sh     # Modulo  8: Contramedidas vigilancia avanzada
-├── proteger-privacidad.sh         # Modulo  9: Proteccion de privacidad
-├── aplicar-banner-total.sh        # Modulo 10: Banners de seguridad
-├── hardening-kernel-boot.sh       # Modulo 11: Kernel boot y Secure Boot
-├── hardening-servicios-systemd.sh # Modulo 12: Sandboxing de servicios systemd
-├── hardening-cuentas.sh           # Modulo 13: Seguridad de cuentas
-├── proteger-red-avanzado.sh       # Modulo 14: Red avanzada (IDS, VPN, DoT)
-├── automatizar-seguridad.sh       # Modulo 15: Automatizacion de seguridad
-├── sandbox-aplicaciones.sh        # Modulo 16: Sandboxing de aplicaciones
-├── auditoria-externa.sh           # Modulo 17: Auditoria de reconocimiento
-├── inteligencia-amenazas.sh       # Modulo 18: Inteligencia de amenazas IoC
-├── mitigar-acceso-inicial.sh      # Modulo 19: MITRE TA0001
-├── mitigar-ejecucion.sh           # Modulo 20: MITRE TA0002
-├── mitigar-persistencia.sh        # Modulo 21: MITRE TA0003
-├── mitigar-escalada.sh            # Modulo 22: MITRE TA0004
-├── mitigar-impacto.sh             # Modulo 23: MITRE TA0040
-├── mitigar-evasion.sh             # Modulo 24: MITRE TA0005
-├── mitigar-credenciales.sh        # Modulo 25: MITRE TA0006
-├── mitigar-descubrimiento.sh      # Modulo 26: MITRE TA0007
-├── mitigar-movimiento-lateral.sh  # Modulo 27: MITRE TA0008
-├── mitigar-recoleccion.sh         # Modulo 28: MITRE TA0009
-├── mitigar-exfiltracion.sh        # Modulo 29: MITRE TA0010
-├── mitigar-comando-control.sh     # Modulo 30: MITRE TA0011
-├── respuesta-incidentes.sh        # Modulo 31: Respuesta a incidentes
-├── monitorizar-continuo.sh        # Modulo 32: Monitorizacion continua
-├── reportar-seguridad.sh          # Modulo 33: Reportes de seguridad
-├── cazar-amenazas.sh              # Modulo 34: Caza de amenazas (UEBA)
-├── automatizar-respuesta.sh       # Modulo 35: Automatizacion SOAR
-├── validar-controles.sh           # Modulo 36: Validacion Purple Team
-├── ciberinteligencia.sh           # Modulo 37: Ciberinteligencia proactiva
-├── proteger-contra-isp.sh         # Modulo 38: Proteccion contra espionaje ISP
-├── hardening-criptografico.sh     # Modulo 39: Hardening criptografico
-├── seguridad-contenedores.sh      # Modulo 40: Seguridad de contenedores
-├── cumplimiento-cis.sh            # Modulo 41: Cumplimiento CIS Benchmarks
-├── seguridad-email.sh             # Modulo 42: Seguridad de email
-├── logging-centralizado.sh        # Modulo 43: Logging centralizado y SIEM
-├── seguridad-cadena-suministro.sh # Modulo 44: Cadena de suministro
-├── segmentacion-red-zt.sh         # Modulo 45: Segmentacion de red y Zero Trust
-├── forense-avanzado.sh            # Modulo 46: Forense avanzado
-├── kernel-livepatch.sh            # Modulo 47: Kernel live patching
-├── seguridad-bases-datos.sh       # Modulo 48: Seguridad de bases de datos
-├── backup-recuperacion.sh         # Modulo 49: Backup y recuperacion
-├── seguridad-web.sh               # Modulo 50: Seguridad web
-├── seguridad-secrets.sh           # Modulo 51: Gestion de secretos
-├── seguridad-cloud.sh             # Modulo 52: Seguridad cloud
-├── seguridad-ldap-ad.sh           # Modulo 53: LDAP y Active Directory
-├── cumplimiento-normativo.sh      # Modulo 54: Cumplimiento normativo
-├── tecnologia-engano.sh           # Modulo 55: Tecnologia de engano
-├── seguridad-wireless.sh          # Modulo 56: Seguridad wireless
-├── seguridad-virtualizacion.sh    # Modulo 57: Seguridad de virtualizacion
-├── seguridad-fisica.sh            # Modulo 58: Seguridad fisica avanzada
-├── zero-trust-identity.sh         # Modulo 59: Zero Trust Identity
-├── proteger-ransomware.sh         # Modulo 60: Proteccion anti-ransomware
-├── gestion-parches.sh             # Modulo 61: Gestion de parches
-├── devsecops-hardening.sh         # Modulo 62: DevSecOps hardening
-├── seguridad-api.sh               # Modulo 63: Seguridad de APIs
-├── seguridad-iot.sh               # Modulo 64: Seguridad IoT
-├── seguridad-dns-avanzada.sh      # Modulo 65: DNS avanzado
-└── auditoria-red-wireshark.sh     # Modulo 66: Auditoria de red con Wireshark
+├── hardening-opensuse.sh          # Modulo   1: Hardening base del sistema
+├── hardening-seguro.sh            # Modulo   2: Nivel seguro de hardening
+├── hardening-final.sh             # Modulo   3: Hardening final consolidado
+├── hardening-externo.sh           # Modulo   4: Hardening de servicios externos
+├── hardening-extremo.sh           # Modulo   5: Nivel extremo (via menu = seguro)
+├── hardening-paranoico.sh         # Modulo   6: Nivel paranoico (via menu = seguro)
+├── contramedidas-mesh.sh          # Modulo   7: Contramedidas de red mesh
+├── proteger-privacidad.sh         # Modulo   8: Proteccion de privacidad
+├── aplicar-banner-total.sh        # Modulo  9: Banners de seguridad
+├── hardening-kernel-boot.sh       # Modulo 10: Kernel boot y Secure Boot
+├── hardening-servicios-systemd.sh # Modulo 11: Sandboxing de servicios systemd
+├── hardening-cuentas.sh           # Modulo 12: Seguridad de cuentas
+├── proteger-red-avanzado.sh       # Modulo 13: Red avanzada (IDS, VPN, DoT)
+├── automatizar-seguridad.sh       # Modulo 14: Automatizacion de seguridad
+├── sandbox-aplicaciones.sh        # Modulo 15: Sandboxing de aplicaciones
+├── auditoria-externa.sh           # Modulo 16: Auditoria de reconocimiento
+├── inteligencia-amenazas.sh       # Modulo 17: Inteligencia de amenazas IoC
+├── mitigar-acceso-inicial.sh      # Modulo 18: MITRE TA0001
+├── mitigar-ejecucion.sh           # Modulo 19: MITRE TA0002
+├── mitigar-persistencia.sh        # Modulo 20: MITRE TA0003
+├── mitigar-escalada.sh            # Modulo 21: MITRE TA0004
+├── mitigar-impacto.sh             # Modulo 22: MITRE TA0040
+├── mitigar-evasion.sh             # Modulo 23: MITRE TA0005
+├── mitigar-credenciales.sh        # Modulo 24: MITRE TA0006
+├── mitigar-descubrimiento.sh      # Modulo 25: MITRE TA0007
+├── mitigar-movimiento-lateral.sh  # Modulo 26: MITRE TA0008
+├── mitigar-recoleccion.sh         # Modulo 27: MITRE TA0009
+├── mitigar-exfiltracion.sh        # Modulo 28: MITRE TA0010
+├── mitigar-comando-control.sh     # Modulo 29: MITRE TA0011
+├── monitorizar-continuo.sh        # Modulo 30: Monitorizacion continua
+├── reportar-seguridad.sh          # Modulo 31: Reportes de seguridad
+├── cazar-amenazas.sh              # Modulo 32: Caza de amenazas (UEBA)
+├── automatizar-respuesta.sh       # Modulo 33: Automatizacion SOAR
+├── validar-controles.sh           # Modulo 34: Validacion Purple Team
+├── ciberinteligencia.sh           # Modulo 35: Ciberinteligencia proactiva
+├── proteger-contra-isp.sh         # Modulo 36: Proteccion contra espionaje ISP
+├── hardening-criptografico.sh     # Modulo 37: Hardening criptografico
+├── seguridad-contenedores.sh      # Modulo 38: Seguridad de contenedores
+├── cumplimiento-cis.sh            # Modulo 39: Cumplimiento CIS Benchmarks
+├── seguridad-email.sh             # Modulo 40: Seguridad de email
+├── logging-centralizado.sh        # Modulo 41: Logging centralizado y SIEM
+├── seguridad-cadena-suministro.sh # Modulo 42: Cadena de suministro
+├── segmentacion-red-zt.sh         # Modulo 43: Segmentacion de red y Zero Trust
+├── forense-avanzado.sh            # Modulo 44: Forense avanzado
+├── kernel-livepatch.sh            # Modulo 45: Kernel live patching
+├── seguridad-bases-datos.sh       # Modulo 46: Seguridad de bases de datos
+├── backup-recuperacion.sh         # Modulo 47: Backup y recuperacion
+├── seguridad-web.sh               # Modulo 48: Seguridad web
+├── seguridad-secrets.sh           # Modulo 49: Gestion de secretos
+├── seguridad-cloud.sh             # Modulo 50: Seguridad cloud
+├── seguridad-ldap-ad.sh           # Modulo 51: LDAP y Active Directory
+├── cumplimiento-normativo.sh      # Modulo 52: Cumplimiento normativo
+├── tecnologia-engano.sh           # Modulo 53: Tecnologia de engano
+├── seguridad-wireless.sh          # Modulo 54: Seguridad wireless
+├── seguridad-virtualizacion.sh    # Modulo 55: Seguridad de virtualizacion
+├── seguridad-fisica.sh            # Modulo 56: Seguridad fisica avanzada
+├── zero-trust-identity.sh         # Modulo 57: Zero Trust Identity
+├── proteger-ransomware.sh         # Modulo 58: Proteccion anti-ransomware
+├── gestion-parches.sh             # Modulo 59: Gestion de parches
+├── devsecops-hardening.sh         # Modulo 60: DevSecOps hardening
+├── seguridad-api.sh               # Modulo 61: Seguridad de APIs
+├── seguridad-iot.sh               # Modulo 62: Seguridad IoT
+├── seguridad-dns-avanzada.sh      # Modulo 63: DNS avanzado
+├── auditoria-red-wireshark.sh     # Modulo 64: Auditoria de red con Wireshark
+└── auditoria-red-infraestructura.sh # Modulo 65: Auditoria de infraestructura de red
 ```
 
 ---
@@ -346,7 +345,7 @@ SECURIZAR_MSF_TARGETS="127.0.0.1"
 
 ## Catalogo de modulos
 
-### Categoria 1: Hardening Base (modulos 1-10)
+### Categoria 1: Hardening Base (modulos 1-9)
 
 Modulos fundamentales de securizacion del sistema.
 
@@ -359,98 +358,97 @@ Modulos fundamentales de securizacion del sistema.
 | 5 | **Hardening extremo** | *(inline en menu)* | USB, kernel, red. **SEGURO**: el menu reimplementa este modulo eliminando las secciones que causan lockout (deshabilitacion de sshd, firewall DROP, chattr +i) |
 | 6 | **Hardening paranoico** | *(inline en menu)* | Core dumps, GRUB, auditoria avanzada. **SEGURO**: el menu reimplementa eliminando TMOUT readonly y modificacion de PAM |
 | 7 | **Contramedidas mesh** | `contramedidas-mesh.sh` | Proteccion de redes WiFi, Bluetooth e IoT mesh |
-| 8 | **Contramedidas avanzadas** | `contramedidas-avanzadas.sh` | TEMPEST, canales acusticos, side-channel attacks |
-| 9 | **Proteger privacidad** | `proteger-privacidad.sh` | VNC seguro, camara, prevencion DNS leaks, integracion Tor |
-| 10 | **Aplicar banners** | `aplicar-banner-total.sh` | MOTD, /etc/issue, banner SSH, GDM, Firefox |
+| 8 | **Proteger privacidad** | `proteger-privacidad.sh` | VNC seguro, camara, prevencion DNS leaks, integracion Tor |
+| 9 | **Aplicar banners** | `aplicar-banner-total.sh` | MOTD, /etc/issue, banner SSH, GDM, Firefox |
 
-### Categoria 2: Securizacion Proactiva (modulos 11-18)
+### Categoria 2: Securizacion Proactiva (modulos 10-17)
 
 Modulos avanzados de proteccion preventiva.
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
-| 11 | **Kernel boot y Secure Boot** | `hardening-kernel-boot.sh` | Parametros GRUB cmdline, verificacion Secure Boot, modulos firmados, proteccion GRUB con contrasena, lockdown del kernel |
-| 12 | **Sandboxing de servicios** | `hardening-servicios-systemd.sh` | Drop-ins systemd para sshd, fail2ban, firewalld, NetworkManager, security-monitor con ProtectSystem, ProtectHome, NoNewPrivileges |
-| 13 | **Seguridad de cuentas** | `hardening-cuentas.sh` | Politicas de contrasenas en login.defs, faillock, deteccion de cuentas sin contrasena, verificacion UID=0 extra, shells de sistema, cuentas inactivas |
-| 14 | **Red avanzada** | `proteger-red-avanzado.sh` | Suricata IDS con reglas ET Open, DNS over TLS (systemd-resolved), plantilla WireGuard VPN, arpwatch y proteccion ARP |
-| 15 | **Automatizacion** | `automatizar-seguridad.sh` | Cron jobs para AIDE, parches de seguridad, lynis, rkhunter, logrotate, digest diario; timer systemd de notificaciones |
-| 16 | **Sandboxing de aplicaciones** | `sandbox-aplicaciones.sh` | Firejail (perfiles para Firefox, Thunderbird, LibreOffice, Dolphin, firecfg), bubblewrap |
-| 17 | **Auditoria externa** | `auditoria-externa.sh` | Reconocimiento MITRE TA0043: puertos expuestos, banners, fingerprinting OS, DNS, cabeceras HTTP, SNMP, consulta Shodan/Censys, metadatos web, certificados SSL/TLS, defensas anti-escaneo |
-| 18 | **Inteligencia de amenazas** | `inteligencia-amenazas.sh` | MITRE M1019/TA0042: feeds de IoC (Blocklist.de, Feodo Tracker, ET, Spamhaus DROP/EDROP, Tor Exit Nodes, CI Army, SSLBL, URLhaus), integracion firewall/ipset, reglas Suricata, herramienta `ioc-lookup.sh`, actualizacion diaria |
+| 10 | **Kernel boot y Secure Boot** | `hardening-kernel-boot.sh` | Parametros GRUB cmdline, verificacion Secure Boot, modulos firmados, proteccion GRUB con contrasena, lockdown del kernel |
+| 11 | **Sandboxing de servicios** | `hardening-servicios-systemd.sh` | Drop-ins systemd para sshd, fail2ban, firewalld, NetworkManager, security-monitor con ProtectSystem, ProtectHome, NoNewPrivileges |
+| 12 | **Seguridad de cuentas** | `hardening-cuentas.sh` | Politicas de contrasenas en login.defs, faillock, deteccion de cuentas sin contrasena, verificacion UID=0 extra, shells de sistema, cuentas inactivas |
+| 13 | **Red avanzada** | `proteger-red-avanzado.sh` | Suricata IDS con reglas ET Open, DNS over TLS (systemd-resolved), plantilla WireGuard VPN, arpwatch y proteccion ARP |
+| 14 | **Automatizacion** | `automatizar-seguridad.sh` | Cron jobs para AIDE, parches de seguridad, lynis, rkhunter, logrotate, digest diario; timer systemd de notificaciones |
+| 15 | **Sandboxing de aplicaciones** | `sandbox-aplicaciones.sh` | Firejail (perfiles para Firefox, Thunderbird, LibreOffice, Dolphin, firecfg), bubblewrap |
+| 16 | **Auditoria externa** | `auditoria-externa.sh` | Reconocimiento MITRE TA0043: puertos expuestos, banners, fingerprinting OS, DNS, cabeceras HTTP, SNMP, consulta Shodan/Censys, metadatos web, certificados SSL/TLS, defensas anti-escaneo |
+| 17 | **Inteligencia de amenazas** | `inteligencia-amenazas.sh` | MITRE M1019/TA0042: feeds de IoC (Blocklist.de, Feodo Tracker, ET, Spamhaus DROP/EDROP, Tor Exit Nodes, CI Army, SSLBL, URLhaus), integracion firewall/ipset, reglas Suricata, herramienta `ioc-lookup.sh`, actualizacion diaria |
 
-### Categoria 3: Mitigaciones MITRE ATT&CK (modulos 19-30)
+### Categoria 3: Mitigaciones MITRE ATT&CK (modulos 18-29)
 
 Defensas especificas contra cada tactica del framework MITRE ATT&CK.
 
 | # | Modulo | Script | Tactica | Tecnicas principales |
 |---|--------|--------|---------|---------------------|
-| 19 | **Acceso inicial** | `mitigar-acceso-inicial.sh` | TA0001 | T1133 (SSH), T1190 (exploits web), T1078 (cuentas validas), T1566 (phishing), T1189 (drive-by), T1195 (supply chain GPG), T1200 (USBGuard/DMA) |
-| 20 | **Ejecucion** | `mitigar-ejecucion.sh` | TA0002 | T1059 (AppArmor, bash restringido, interpretes), T1204 (noexec /tmp), T1129 (restriccion LD_PRELOAD), monitor de ejecucion |
-| 21 | **Persistencia** | `mitigar-persistencia.sh` | TA0003 | T1053 (cron/timers), T1543 (servicios systemd), T1547/T1037 (autostart), T1136 (cuentas), T1556 (autenticacion), T1574 (PATH hijack) |
-| 22 | **Escalada de privilegios** | `mitigar-escalada.sh` | TA0004 | T1548 (SUID/SGID), T1134 (capabilities), T1078 (sudo), T1068 (kernel sysctl), T1055 (anti-ptrace), T1053 (cron privesc) |
-| 23 | **Impacto** | `mitigar-impacto.sh` | TA0040 | T1486/T1561 (backups offsite rsync), T1486 (ClamAV anti-ransomware con YARA), T1490 (proteccion snapshots/checksums), T1485 (monitoreo auditd) |
-| 24 | **Evasion de defensas** | `mitigar-evasion.sh` | TA0005 | T1070 (logs append-only), T1036 (masquerading), T1562 (watchdog servicios), T1014 (rootkits rkhunter), T1218 (LOLBins), T1564 (artefactos ocultos), T1027 (ofuscacion) |
-| 25 | **Acceso a credenciales** | `mitigar-credenciales.sh` | TA0006 | T1003 (credential dumping), T1110 (fuerza bruta faillock), T1557 (MITM arpwatch), T1552 (credenciales expuestas), T1040 (modo promiscuo), T1056 (keyloggers) |
-| 26 | **Descubrimiento** | `mitigar-descubrimiento.sh` | TA0007 | T1046 (portscan rate-limit), T1057 (hidepid procesos), T1082 (info sistema), T1016/T1049 (red), T1087/T1069 (cuentas), T1518 (software) |
-| 27 | **Movimiento lateral** | `mitigar-movimiento-lateral.sh` | TA0008 | T1021 (SSH anti-forwarding), T1021.001/005 (RDP/VNC desactivado), T1021.002 (Samba firma obligatoria), T1563 (SSH agent), T1080 (contenido compartido noexec), M1030 (segmentacion) |
-| 28 | **Recoleccion** | `mitigar-recoleccion.sh` | TA0009 | T1005 (datos locales), T1039 (shares), T1025 (medios extraibles USBGuard), T1074 (data staging), T1113/T1125/T1123 (captura), T1119 (automatizada), T1560 (compresion) |
-| 29 | **Exfiltracion** | `mitigar-exfiltracion.sh` | TA0010 | T1041 (trafico saliente), T1048 (DNS tunneling), T1567 (cloud), T1052 (USB), T1030 (ancho de banda tc), monitoreo de transferencias |
-| 30 | **Comando y control** | `mitigar-comando-control.sh` | TA0011 | T1571 (puertos C2), T1071 (Cobalt Strike/Meterpreter/Sliver Suricata), T1105 (tool transfer), T1090/T1572 (proxies/tuneles), T1568 (DGA heuristicas) |
+| 18 | **Acceso inicial** | `mitigar-acceso-inicial.sh` | TA0001 | T1133 (SSH), T1190 (exploits web), T1078 (cuentas validas), T1566 (phishing), T1189 (drive-by), T1195 (supply chain GPG), T1200 (USBGuard/DMA) |
+| 19 | **Ejecucion** | `mitigar-ejecucion.sh` | TA0002 | T1059 (AppArmor, bash restringido, interpretes), T1204 (noexec /tmp), T1129 (restriccion LD_PRELOAD), monitor de ejecucion |
+| 20 | **Persistencia** | `mitigar-persistencia.sh` | TA0003 | T1053 (cron/timers), T1543 (servicios systemd), T1547/T1037 (autostart), T1136 (cuentas), T1556 (autenticacion), T1574 (PATH hijack) |
+| 21 | **Escalada de privilegios** | `mitigar-escalada.sh` | TA0004 | T1548 (SUID/SGID), T1134 (capabilities), T1078 (sudo), T1068 (kernel sysctl), T1055 (anti-ptrace), T1053 (cron privesc) |
+| 22 | **Impacto** | `mitigar-impacto.sh` | TA0040 | T1486/T1561 (backups offsite rsync), T1486 (ClamAV anti-ransomware con YARA), T1490 (proteccion snapshots/checksums), T1485 (monitoreo auditd) |
+| 23 | **Evasion de defensas** | `mitigar-evasion.sh` | TA0005 | T1070 (logs append-only), T1036 (masquerading), T1562 (watchdog servicios), T1014 (rootkits rkhunter), T1218 (LOLBins), T1564 (artefactos ocultos), T1027 (ofuscacion) |
+| 24 | **Acceso a credenciales** | `mitigar-credenciales.sh` | TA0006 | T1003 (credential dumping), T1110 (fuerza bruta faillock), T1557 (MITM arpwatch), T1552 (credenciales expuestas), T1040 (modo promiscuo), T1056 (keyloggers) |
+| 25 | **Descubrimiento** | `mitigar-descubrimiento.sh` | TA0007 | T1046 (portscan rate-limit), T1057 (hidepid procesos), T1082 (info sistema), T1016/T1049 (red), T1087/T1069 (cuentas), T1518 (software) |
+| 26 | **Movimiento lateral** | `mitigar-movimiento-lateral.sh` | TA0008 | T1021 (SSH anti-forwarding), T1021.001/005 (RDP/VNC desactivado), T1021.002 (Samba firma obligatoria), T1563 (SSH agent), T1080 (contenido compartido noexec), M1030 (segmentacion) |
+| 27 | **Recoleccion** | `mitigar-recoleccion.sh` | TA0009 | T1005 (datos locales), T1039 (shares), T1025 (medios extraibles USBGuard), T1074 (data staging), T1113/T1125/T1123 (captura), T1119 (automatizada), T1560 (compresion) |
+| 28 | **Exfiltracion** | `mitigar-exfiltracion.sh` | TA0010 | T1041 (trafico saliente), T1048 (DNS tunneling), T1567 (cloud), T1052 (USB), T1030 (ancho de banda tc), monitoreo de transferencias |
+| 29 | **Comando y control** | `mitigar-comando-control.sh` | TA0011 | T1571 (puertos C2), T1071 (Cobalt Strike/Meterpreter/Sliver Suricata), T1105 (tool transfer), T1090/T1572 (proxies/tuneles), T1568 (DGA heuristicas) |
 
 Cada modulo MITRE instala scripts de deteccion en `/usr/local/bin/`, reglas auditd en `/etc/audit/rules.d/` y cron jobs/timers systemd para monitoreo continuo.
 
-### Categoria 4: Operaciones de Seguridad (modulos 31-36)
+### Categoria 4: Operaciones de Seguridad (modulos 30-34)
 
 Herramientas para un SOC (Security Operations Center) funcional.
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
-| 31 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Toolkit forense (`ir-recolectar-forense.sh` con 15 categorias y cadena de custodia), playbooks de contencion (cuenta comprometida, malware, C2, movimiento lateral), timeline de ataque con mapeo MITRE, aislamiento/restauracion de red, guia de recuperacion |
-| 32 | **Monitorizacion continua** | `monitorizar-continuo.sh` | Dashboard de estado (`security-dashboard.sh`), correlacion de alertas multi-fuente (5 patrones de ataque), baseline de comportamiento del sistema, health check de controles (cron diario), digest periodico (timer 06:00) |
-| 33 | **Reportes de seguridad** | `reportar-seguridad.sh` | Reporte de cobertura MITRE ATT&CK, exportacion ATT&CK Navigator JSON layer, reporte de cumplimiento por categoria, inventario de activos de seguridad, resumen ejecutivo con score de postura |
-| 34 | **Caza de amenazas** | `cazar-amenazas.sh` | UEBA (baseline de usuarios + deteccion de anomalias), 5 playbooks de hunting (persistencia oculta, LOLBins, lateral silencioso, exfil lenta, C2 encubierto), deteccion persistencia avanzada T1098 (timer 15min), busqueda retrospectiva en logs, anomalias de red (beaconing, asimetrico, C2) |
-| 35 | **Automatizacion de respuesta** | `automatizar-respuesta.sh` | SOAR ligero: motor de respuesta automatica (6 tipos de eventos), bloqueo IP/cuenta, preservacion de evidencia, gestion de bloqueos (listar/whitelist/limpiar), notificaciones por severidad, reglas configurables en `/etc/security/soar-rules.conf` |
-| 36 | **Validacion de controles** | `validar-controles.sh` | Purple team: validador de autenticacion (15 tests), red (15 tests), endpoint (21 tests), simulador seguro de 12 tecnicas ATT&CK, reporte consolidado con scoring global (60% controles + 40% deteccion), validacion semanal automatica |
+| 30 | **Monitorizacion continua** | `monitorizar-continuo.sh` | Dashboard de estado (`security-dashboard.sh`), correlacion de alertas multi-fuente (5 patrones de ataque), baseline de comportamiento del sistema, health check de controles (cron diario), digest periodico (timer 06:00) |
+| 31 | **Reportes de seguridad** | `reportar-seguridad.sh` | Reporte de cobertura MITRE ATT&CK, exportacion ATT&CK Navigator JSON layer, reporte de cumplimiento por categoria, inventario de activos de seguridad, resumen ejecutivo con score de postura |
+| 32 | **Caza de amenazas** | `cazar-amenazas.sh` | UEBA (baseline de usuarios + deteccion de anomalias), 5 playbooks de hunting (persistencia oculta, LOLBins, lateral silencioso, exfil lenta, C2 encubierto), deteccion persistencia avanzada T1098 (timer 15min), busqueda retrospectiva en logs, anomalias de red (beaconing, asimetrico, C2) |
+| 33 | **Automatizacion de respuesta** | `automatizar-respuesta.sh` | SOAR ligero: motor de respuesta automatica (6 tipos de eventos), bloqueo IP/cuenta, preservacion de evidencia, gestion de bloqueos (listar/whitelist/limpiar), notificaciones por severidad, reglas configurables en `/etc/security/soar-rules.conf` |
+| 34 | **Validacion de controles** | `validar-controles.sh` | Purple team: validador de autenticacion (15 tests), red (15 tests), endpoint (21 tests), simulador seguro de 12 tecnicas ATT&CK, reporte consolidado con scoring global (60% controles + 40% deteccion), validacion semanal automatica |
 
-### Categoria 5: Inteligencia (modulos 37-38)
-
-| # | Modulo | Script | Descripcion |
-|---|--------|--------|-------------|
-| 37 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
-| 38 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
-
-### Categoria 6: Avanzado (modulos 39-66)
+### Categoria 5: Inteligencia (modulos 35-36)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
-| 39 | **Hardening criptografico** | `hardening-criptografico.sh` | Algoritmos SSH, TLS system-wide, certificados, entropia, GPG, LUKS, kernel crypto |
-| 40 | **Seguridad de contenedores** | `seguridad-contenedores.sh` | Docker/Podman daemon, seccomp, AppArmor, imagenes, registry, rootless, K8s, CIS |
-| 41 | **Cumplimiento CIS** | `cumplimiento-cis.sh` | CIS Benchmark L1/L2, NIST 800-53, scoring, remediacion, informes |
-| 42 | **Seguridad de email** | `seguridad-email.sh` | Postfix, SPF, DKIM 2048-bit, DMARC, TLS/DANE, anti-relay, SpamAssassin |
-| 43 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog TLS, CEF/JSON, hash chain SHA-256, correlacion 8 patrones, SIEM, forense |
-| 44 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | GPG, SBOM CycloneDX, CVEs, repositorios, integridad binarios, troyanizados |
-| 45 | **Segmentacion de red** | `segmentacion-red-zt.sh` | Zonas nftables, microsegmentacion, contenedores, postura ZT, identidad |
-| 46 | **Forense avanzado** | `forense-avanzado.sh` | RAM (LiME), disco forense, volatiles RFC 3227, YARA, custodia digital, timeline |
-| 47 | **Kernel live patching** | `kernel-livepatch.sh` | KASLR/SMEP/KPTI, kpatch/kGraft, sysctl 25+ params, modulos, CVEs, rollback |
-| 48 | **Seguridad de BBDD** | `seguridad-bases-datos.sh` | PostgreSQL, MySQL, Redis, MongoDB, cifrado, pgaudit, SQLi detection |
-| 49 | **Backup y DR** | `backup-recuperacion.sh` | 3-2-1, Borg, Restic, WORM inmutable, bare metal, RTO/RPO, offsite |
-| 50 | **Seguridad web** | `seguridad-web.sh` | nginx/Apache, CSP/HSTS, ModSecurity WAF OWASP CRS, TLS, DDoS, logs |
-| 51 | **Gestion de secretos** | `seguridad-secrets.sh` | Vault, rotacion credenciales, escaneo secretos, SSH keys, pass/gopass/SOPS |
-| 52 | **Seguridad cloud** | `seguridad-cloud.sh` | AWS/Azure/GCP, IMDS hardening, IAM audit, postura cloud, exfiltracion |
-| 53 | **LDAP y Active Directory** | `seguridad-ldap-ad.sh` | OpenLDAP TLS, SSSD, Kerberos, FreeIPA, Samba/Winbind, replicacion |
-| 54 | **Cumplimiento normativo** | `cumplimiento-normativo.sh` | PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001, evidencias, remediacion |
-| 55 | **Tecnologia de engano** | `tecnologia-engano.sh` | Honeypots de red, honeytokens, honey files/users/dirs, DNS, alertas. **Submenu interactivo** con 10 secciones individuales y dashboard en vivo |
-| 56 | **Seguridad wireless** | `seguridad-wireless.sh` | WPA3 Enterprise, FreeRADIUS 802.1X, rogue AP, Bluetooth, monitoring |
-| 57 | **Seguridad virtualizacion** | `seguridad-virtualizacion.sh` | KVM/QEMU, libvirt hardening, VM aislamiento, escape protection |
-| 58 | **Seguridad fisica** | `seguridad-fisica.sh` | USBGuard, BIOS/UEFI, GRUB, TPM, Thunderbolt DMA, screen lock |
-| 59 | **Zero Trust Identity** | `zero-trust-identity.sh` | CISA ZT maturity, continuous auth, device trust, IAP, microseg |
-| 60 | **Anti-ransomware** | `proteger-ransomware.sh` | Canary files, LVM snapshots, exec whitelisting, YARA, SMB, containment |
-| 61 | **Gestion de parches** | `gestion-parches.sh` | Auto-patch, CVE scan, SBOM, staging/rollback, advisories, compliance |
-| 62 | **DevSecOps** | `devsecops-hardening.sh` | Git security, CI/CD, Trivy, SAST, secrets detection, code signing |
-| 63 | **Seguridad de APIs** | `seguridad-api.sh` | Rate limiting, JWT/OAuth2, CORS, mTLS, GraphQL, webhooks, audit |
-| 64 | **Seguridad IoT** | `seguridad-iot.sh` | Inventario IoT, MQTT TLS, CoAP, firmware, credenciales, Zigbee/BLE |
-| 65 | **DNS avanzado** | `seguridad-dns-avanzada.sh` | DNSSEC, DoT/DoH, Unbound, RPZ sinkhole, tunneling, cache poisoning |
-| 66 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, anomalias, correlacion IDS |
+| 35 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
+| 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
+
+### Categoria 6: Avanzado (modulos 37-65)
+
+| # | Modulo | Script | Descripcion |
+|---|--------|--------|-------------|
+| 37 | **Hardening criptografico** | `hardening-criptografico.sh` | Algoritmos SSH, TLS system-wide, certificados, entropia, GPG, LUKS, kernel crypto |
+| 38 | **Seguridad de contenedores** | `seguridad-contenedores.sh` | Docker/Podman daemon, seccomp, AppArmor, imagenes, registry, rootless, K8s, CIS |
+| 39 | **Cumplimiento CIS** | `cumplimiento-cis.sh` | CIS Benchmark L1/L2, NIST 800-53, scoring, remediacion, informes |
+| 40 | **Seguridad de email** | `seguridad-email.sh` | Postfix, SPF, DKIM 2048-bit, DMARC, TLS/DANE, anti-relay, SpamAssassin |
+| 41 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog TLS, CEF/JSON, hash chain SHA-256, correlacion 8 patrones, SIEM, forense |
+| 42 | **Cadena de suministro** | `seguridad-cadena-suministro.sh` | GPG, SBOM CycloneDX, CVEs, repositorios, integridad binarios, troyanizados |
+| 43 | **Segmentacion de red** | `segmentacion-red-zt.sh` | Zonas nftables, microsegmentacion, contenedores, postura ZT, identidad |
+| 44 | **Forense avanzado** | `forense-avanzado.sh` | RAM (LiME), disco forense, volatiles RFC 3227, YARA, custodia digital, timeline |
+| 45 | **Kernel live patching** | `kernel-livepatch.sh` | KASLR/SMEP/KPTI, kpatch/kGraft, sysctl 25+ params, modulos, CVEs, rollback |
+| 46 | **Seguridad de BBDD** | `seguridad-bases-datos.sh` | PostgreSQL, MySQL, Redis, MongoDB, cifrado, pgaudit, SQLi detection |
+| 47 | **Backup y DR** | `backup-recuperacion.sh` | 3-2-1, Borg, Restic, WORM inmutable, bare metal, RTO/RPO, offsite |
+| 48 | **Seguridad web** | `seguridad-web.sh` | nginx/Apache, CSP/HSTS, ModSecurity WAF OWASP CRS, TLS, DDoS, logs |
+| 49 | **Gestion de secretos** | `seguridad-secrets.sh` | Vault, rotacion credenciales, escaneo secretos, SSH keys, pass/gopass/SOPS |
+| 50 | **Seguridad cloud** | `seguridad-cloud.sh` | AWS/Azure/GCP, IMDS hardening, IAM audit, postura cloud, exfiltracion |
+| 51 | **LDAP y Active Directory** | `seguridad-ldap-ad.sh` | OpenLDAP TLS, SSSD, Kerberos, FreeIPA, Samba/Winbind, replicacion |
+| 52 | **Cumplimiento normativo** | `cumplimiento-normativo.sh` | PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001, evidencias, remediacion |
+| 53 | **Tecnologia de engano** | `tecnologia-engano.sh` | Honeypots de red, honeytokens, honey files/users/dirs, DNS, alertas. **Submenu interactivo** con 10 secciones individuales y dashboard en vivo |
+| 54 | **Seguridad wireless** | `seguridad-wireless.sh` | WPA3 Enterprise, FreeRADIUS 802.1X, rogue AP, Bluetooth, monitoring |
+| 55 | **Seguridad virtualizacion** | `seguridad-virtualizacion.sh` | KVM/QEMU, libvirt hardening, VM aislamiento, escape protection |
+| 56 | **Seguridad fisica** | `seguridad-fisica.sh` | USBGuard, BIOS/UEFI, GRUB, TPM, Thunderbolt DMA, screen lock |
+| 57 | **Zero Trust Identity** | `zero-trust-identity.sh` | CISA ZT maturity, continuous auth, device trust, IAP, microseg |
+| 58 | **Anti-ransomware** | `proteger-ransomware.sh` | Canary files, LVM snapshots, exec whitelisting, YARA, SMB, containment |
+| 59 | **Gestion de parches** | `gestion-parches.sh` | Auto-patch, CVE scan, SBOM, staging/rollback, advisories, compliance |
+| 60 | **DevSecOps** | `devsecops-hardening.sh` | Git security, CI/CD, Trivy, SAST, secrets detection, code signing |
+| 61 | **Seguridad de APIs** | `seguridad-api.sh` | Rate limiting, JWT/OAuth2, CORS, mTLS, GraphQL, webhooks, audit |
+| 62 | **Seguridad IoT** | `seguridad-iot.sh` | Inventario IoT, MQTT TLS, CoAP, firmware, credenciales, Zigbee/BLE |
+| 63 | **DNS avanzado** | `seguridad-dns-avanzada.sh` | DNSSEC, DoT/DoH, Unbound, RPZ sinkhole, tunneling, cache poisoning |
+| 64 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, anomalias, correlacion IDS |
+| 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap, TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes |
 
 ---
 
@@ -462,15 +460,15 @@ El menu orquestador es el punto de entrada principal de la suite. Proporciona:
 
 ```
 Menu principal
-├── b  Hardening Base (1-10)
-├── p  Securizacion Proactiva (11-18)
-├── m  Mitigaciones MITRE ATT&CK (19-30)
-├── o  Operaciones de Seguridad (31-36)
-├── i  Inteligencia (37-38)
-├── x  Avanzado (39-66)
-├── a  Aplicar todos los 66 modulos
+├── b  Hardening Base (1-9)
+├── p  Securizacion Proactiva (10-17)
+├── m  Mitigaciones MITRE ATT&CK (18-29)
+├── o  Operaciones de Seguridad (30-34)
+├── i  Inteligencia (35-36)
+├── x  Avanzado (37-65)
+├── a  Aplicar todos los 65 modulos
 ├── v  Verificacion proactiva (74 checks)
-├── 1-66  Acceso directo por numero
+├── 1-65  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -540,6 +538,7 @@ La opcion `v` ejecuta 74 verificaciones agrupadas por categoria:
 - Anti-ransomware, gestion de parches, DevSecOps
 - Seguridad de APIs, IoT, DNS avanzado
 - Auditoria de red (Wireshark/tshark)
+- Auditoria de infraestructura de red (nmap, TLS, SNMP, baseline)
 
 ### Session tracking
 
@@ -955,6 +954,21 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `auditoria-red-correlacion.sh` | Correlacion de capturas con alertas Suricata IDS |
 | `auditoria-red-rotacion.sh` | Rotacion y retencion de capturas (politica configurable) |
 
+### Auditoria de infraestructura de red
+
+| Herramienta | Funcion |
+|-------------|---------|
+| `auditoria-red-descubrimiento.sh` | Descubrimiento y mapeado de red (ARP, nmap, OS fingerprint, NetBIOS, inventario) |
+| `auditoria-red-puertos.sh` | Auditoria de puertos TCP/UDP con politica de puertos autorizados/prohibidos |
+| `auditoria-red-tls.sh` | Auditoria TLS/SSL (certificados, protocolos, cipher suites, testssl.sh, scoring A-F, batch) |
+| `auditoria-red-snmp.sh` | Auditoria SNMP (community strings por defecto, SNMPv1/v2c vs v3, OIDs expuestos) |
+| `auditoria-red-config.sh` | Auditoria de configuracion de red (interfaces, rutas, ARP, sysctl, DNS, firewall, conexiones) |
+| `auditoria-red-inventario.sh` | Inventario de servicios con deteccion de version, comparacion con aprobados, shadow IT |
+| `auditoria-red-baseline.sh` | Gestion de baseline de red y deteccion de drift (capture/compare/history) |
+| `auditoria-red-programada.sh` | Orquestador de auditorias periodicas (diaria/semanal/mensual/trimestral/completa) |
+| `auditoria-red-reporte-global.sh` | Reporte consolidado con puntuacion 0-100, grado A-D, exportacion JSON para SIEM |
+| `auditoria-red-limpieza.sh` | Limpieza de reportes y scans antiguos segun politica de retencion |
+
 ---
 
 ## Directorios de datos
@@ -1017,6 +1031,16 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/var/lib/securizar/sbom/` | Inventarios SBOM generados |
 | `/var/lib/securizar/iot-inventory.json` | Inventario de dispositivos IoT |
 | `/var/lib/securizar/patch-staging/` | Area de staging de parches |
+| `/var/lib/securizar/auditoria-red/` | Datos de auditoria de infraestructura de red |
+| `/var/lib/securizar/auditoria-red/scans/` | Resultados de escaneos nmap (XML, gnmap, txt) |
+| `/var/lib/securizar/auditoria-red/reportes/` | Reportes de auditoria (texto, JSON) |
+| `/var/lib/securizar/auditoria-red/baseline/` | Snapshots de baseline de red |
+| `/var/lib/securizar/auditoria-red/baseline/history/` | Historial de drifts detectados |
+| `/etc/securizar/auditoria-red/` | Configuracion de auditorias de infraestructura |
+| `/etc/securizar/auditoria-red/puertos-autorizados.conf` | Politica de puertos autorizados/prohibidos |
+| `/etc/securizar/auditoria-red/politica-tls.conf` | Politica de seguridad TLS/SSL |
+| `/etc/securizar/auditoria-red/servicios-aprobados.conf` | Inventario de servicios aprobados |
+| `/etc/securizar/auditoria-red/auditoria-programada.conf` | Configuracion de auditorias periodicas |
 
 ---
 
@@ -1109,7 +1133,7 @@ sudo bash hardening-opensuse.sh
 
 ```bash
 sudo bash securizar-menu.sh
-# Dentro del menu: pulsar 'a' para aplicar los 66 modulos secuencialmente
+# Dentro del menu: pulsar 'a' para aplicar los 65 modulos secuencialmente
 ```
 
 ### Verificar controles sin aplicar cambios
@@ -1142,6 +1166,20 @@ sudo /usr/local/bin/reporte-cumplimiento.sh   # Cumplimiento por categoria
 # Despues de instalar modulo 32
 sudo /usr/local/bin/security-dashboard.sh     # Estado en tiempo real
 sudo /usr/local/bin/correlacionar-alertas.sh  # Correlacion de alertas
+```
+
+### Auditar infraestructura de red
+
+```bash
+# Despues de instalar modulo 65
+sudo /usr/local/bin/auditoria-red-descubrimiento.sh 192.168.1.0/24     # Mapeado de red
+sudo /usr/local/bin/auditoria-red-puertos.sh localhost --full           # Auditoria de puertos
+sudo /usr/local/bin/auditoria-red-tls.sh example.com                    # Auditoria TLS/SSL
+sudo /usr/local/bin/auditoria-red-snmp.sh 192.168.1.0/24               # Auditoria SNMP
+sudo /usr/local/bin/auditoria-red-config.sh                             # Configuracion de red
+sudo /usr/local/bin/auditoria-red-baseline.sh --capture                 # Capturar baseline
+sudo /usr/local/bin/auditoria-red-baseline.sh --compare                 # Detectar drift
+sudo /usr/local/bin/auditoria-red-reporte-global.sh --json              # Reporte consolidado
 ```
 
 ### Responder a un incidente
