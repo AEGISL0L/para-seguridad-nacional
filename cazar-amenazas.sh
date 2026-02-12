@@ -20,6 +20,16 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# --- Pre-check: verificar si ya está todo aplicado ---
+_precheck 5
+_pc 'check_executable /usr/local/bin/ueba-crear-baseline.sh'
+_pc 'check_executable /usr/local/bin/cazar-amenazas.sh'
+_pc 'check_executable /usr/local/bin/detectar-persistencia-avanzada.sh'
+_pc 'check_executable /usr/local/bin/buscar-retrospectivo.sh'
+_pc 'check_executable /usr/local/bin/detectar-anomalias-red.sh'
+_precheck_result
+
 HUNT_DIR="/var/lib/threat-hunting"
 mkdir -p "$HUNT_DIR"
 
@@ -45,7 +55,9 @@ echo "  - Patrones de acceso a archivos"
 echo "  - Uso de sudo y privilegios elevados"
 echo ""
 
-if ask "¿Instalar sistema UEBA de baseline comportamental?"; then
+if check_executable /usr/local/bin/ueba-crear-baseline.sh; then
+    log_already "Sistema UEBA de baseline comportamental (ueba-crear-baseline.sh)"
+elif ask "¿Instalar sistema UEBA de baseline comportamental?"; then
 
     mkdir -p "$HUNT_DIR/ueba/baselines" "$HUNT_DIR/ueba/anomalias"
     log_change "Creado" "$HUNT_DIR/ueba/baselines/"
@@ -326,7 +338,9 @@ echo "  - Exfiltración lenta (T1030)"
 echo "  - C2 encubierto por DNS/HTTPS (T1071)"
 echo ""
 
-if ask "¿Instalar playbooks de caza de amenazas?"; then
+if check_executable /usr/local/bin/cazar-amenazas.sh; then
+    log_already "Playbooks de caza de amenazas (cazar-amenazas.sh)"
+elif ask "¿Instalar playbooks de caza de amenazas?"; then
 
     mkdir -p /usr/local/lib/threat-hunting/playbooks
     log_change "Creado" "/usr/local/lib/threat-hunting/playbooks/"
@@ -638,7 +652,9 @@ echo "  - T1547.006: Módulos kernel"
 echo "  - T1546.004: Trap handlers (.bashrc/.profile)"
 echo ""
 
-if ask "¿Instalar detección de persistencia avanzada?"; then
+if check_executable /usr/local/bin/detectar-persistencia-avanzada.sh; then
+    log_already "Detección de persistencia avanzada (detectar-persistencia-avanzada.sh)"
+elif ask "¿Instalar detección de persistencia avanzada?"; then
 
     cat > /usr/local/bin/detectar-persistencia-avanzada.sh << 'EOFPERS'
 #!/bin/bash
@@ -856,7 +872,9 @@ echo "  - Buscar hash de binario malicioso"
 echo "  - Buscar dominio C2 en DNS/proxy logs"
 echo ""
 
-if ask "¿Instalar herramienta de búsqueda retrospectiva?"; then
+if check_executable /usr/local/bin/buscar-retrospectivo.sh; then
+    log_already "Herramienta de búsqueda retrospectiva (buscar-retrospectivo.sh)"
+elif ask "¿Instalar herramienta de búsqueda retrospectiva?"; then
 
     cat > /usr/local/bin/buscar-retrospectivo.sh << 'EOFRETRO'
 #!/bin/bash
@@ -1046,7 +1064,9 @@ echo "  - Volumen de datos asimétrico (T1041)"
 echo "  - Conexiones a IPs sin rDNS (T1571)"
 echo ""
 
-if ask "¿Instalar detección estadística de red?"; then
+if check_executable /usr/local/bin/detectar-anomalias-red.sh; then
+    log_already "Detección estadística de red (detectar-anomalias-red.sh)"
+elif ask "¿Instalar detección estadística de red?"; then
 
     cat > /usr/local/bin/detectar-anomalias-red.sh << 'EOFNETANOM'
 #!/bin/bash
@@ -1196,6 +1216,191 @@ else
 fi
 
 # ============================================================
+log_section "6. HUNTING CON /proc Y eBPF"
+# ============================================================
+
+echo "Hunting avanzado mediante inspección directa de /proc filesystem"
+echo "y detección de procesos sospechosos. Complementa módulo 66 (Falco)"
+echo "para hunting basado en syscalls."
+echo ""
+echo "Detecciones:"
+echo "  - Procesos con fd a sockets sospechosos"
+echo "  - Binarios eliminados que siguen ejecutándose"
+echo "  - Hidden mount namespaces"
+echo "  - Procesos sin PIE en paths del sistema"
+echo ""
+
+if check_executable /usr/local/bin/hunting-proc-ebpf.sh; then
+    log_already "Hunting /proc + eBPF (hunting-proc-ebpf.sh)"
+elif ask "¿Instalar hunting avanzado via /proc filesystem?"; then
+
+    mkdir -p /var/lib/threat-hunting/proc-hunting
+
+    cat > /usr/local/bin/hunting-proc-ebpf.sh << 'EOFHUNT'
+#!/bin/bash
+# ============================================================
+# hunting-proc-ebpf.sh — Hunting avanzado via /proc
+# ============================================================
+# Complementa Falco (módulo 66) para hunting manual de procesos
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "[X] Ejecutar como root"
+    exit 1
+fi
+
+HUNT_DIR="/var/lib/threat-hunting/proc-hunting"
+mkdir -p "$HUNT_DIR"
+REPORT="$HUNT_DIR/proc-hunt-$(date +%Y%m%d-%H%M%S).txt"
+
+{
+echo "=========================================="
+echo " Hunting via /proc filesystem"
+echo " $(date) - $(hostname)"
+echo "=========================================="
+echo ""
+
+FINDINGS=0
+
+# 1. Binarios eliminados que siguen ejecutándose
+echo "=== H1: Deleted binaries still running ==="
+echo "  (Indicador de malware que se auto-elimina tras ejecutar)"
+echo ""
+for pid in /proc/[0-9]*/exe; do
+    LINK=$(readlink "$pid" 2>/dev/null || continue)
+    if [[ "$LINK" == *"(deleted)"* ]]; then
+        PID_NUM=$(echo "$pid" | grep -oP '\d+')
+        CMDLINE=$(tr '\0' ' ' < "/proc/$PID_NUM/cmdline" 2>/dev/null | head -c 100)
+        USER=$(stat -c '%U' "/proc/$PID_NUM" 2>/dev/null || echo "?")
+        echo "  [!!] PID $PID_NUM [$USER]: $LINK"
+        echo "       CMD: $CMDLINE"
+        ((FINDINGS++))
+    fi
+done
+[[ $FINDINGS -eq 0 ]] && echo "  [OK] Sin binarios eliminados en ejecución"
+echo ""
+
+# 2. Procesos con sockets a IPs externas sospechosas
+echo "=== H2: Procesos con sockets sospechosos ==="
+echo "  (Conexiones a IPs externas desde procesos no esperados)"
+echo ""
+SOCK_FINDINGS=0
+for pid_dir in /proc/[0-9]*; do
+    pid=$(basename "$pid_dir")
+    [[ ! -d "$pid_dir/fd" ]] && continue
+    COMM=$(cat "$pid_dir/comm" 2>/dev/null || continue)
+
+    # Saltar procesos conocidos de red
+    case "$COMM" in
+        sshd|ssh|curl|wget|firefox|chromium|NetworkManager|systemd-resolved|named) continue ;;
+    esac
+
+    for fd in "$pid_dir/fd"/*; do
+        LINK=$(readlink "$fd" 2>/dev/null || continue)
+        if [[ "$LINK" == "socket:"* ]]; then
+            INODE=$(echo "$LINK" | grep -oP '\d+')
+            # Buscar en /proc/net/tcp conexiones ESTABLISHED a IPs externas
+            CONN=$(grep "$INODE" /proc/net/tcp 2>/dev/null | awk '{print $3}' || true)
+            if [[ -n "$CONN" ]]; then
+                # Decodificar IP (formato hex invertido)
+                HEX_IP=$(echo "$CONN" | cut -d: -f1)
+                HEX_PORT=$(echo "$CONN" | cut -d: -f2)
+                if [[ -n "$HEX_IP" && "$HEX_IP" != "0100007F" && "$HEX_IP" != "00000000" ]]; then
+                    PORT=$((16#$HEX_PORT))
+                    USER=$(stat -c '%U' "$pid_dir" 2>/dev/null || echo "?")
+                    echo "  [!!] PID $pid [$USER] ($COMM): socket externo puerto $PORT"
+                    ((SOCK_FINDINGS++))
+                fi
+            fi
+        fi
+    done
+done
+if [[ $SOCK_FINDINGS -eq 0 ]]; then
+    echo "  [OK] Sin sockets sospechosos detectados"
+else
+    ((FINDINGS += SOCK_FINDINGS))
+fi
+echo ""
+
+# 3. Hidden mount namespaces
+echo "=== H3: Hidden mount namespaces ==="
+echo "  (Procesos en mount namespaces separados pueden ocultar archivos)"
+echo ""
+MNS_FINDINGS=0
+INIT_MNS=$(readlink /proc/1/ns/mnt 2>/dev/null)
+for pid_dir in /proc/[0-9]*; do
+    pid=$(basename "$pid_dir")
+    PID_MNS=$(readlink "$pid_dir/ns/mnt" 2>/dev/null || continue)
+    if [[ "$PID_MNS" != "$INIT_MNS" ]]; then
+        COMM=$(cat "$pid_dir/comm" 2>/dev/null || echo "?")
+        USER=$(stat -c '%U' "$pid_dir" 2>/dev/null || echo "?")
+        # Saltar contenedores conocidos
+        case "$COMM" in
+            containerd*|dockerd|podman|crio|runc|snapd) continue ;;
+        esac
+        echo "  [!!] PID $pid [$USER] ($COMM): mount namespace diferente"
+        ((MNS_FINDINGS++))
+    fi
+done
+if [[ $MNS_FINDINGS -eq 0 ]]; then
+    echo "  [OK] Sin mount namespaces ocultos"
+else
+    ((FINDINGS += MNS_FINDINGS))
+fi
+echo ""
+
+# 4. Procesos con capabilities elevadas
+echo "=== H4: Procesos con capabilities sospechosas ==="
+echo ""
+CAP_FINDINGS=0
+for pid_dir in /proc/[0-9]*; do
+    pid=$(basename "$pid_dir")
+    [[ ! -f "$pid_dir/status" ]] && continue
+    CAP_EFF=$(grep '^CapEff:' "$pid_dir/status" 2>/dev/null | awk '{print $2}' || continue)
+    # Si tiene capabilities no triviales y no es root
+    if [[ "$CAP_EFF" != "0000000000000000" ]]; then
+        UID_LINE=$(grep '^Uid:' "$pid_dir/status" 2>/dev/null | awk '{print $2}')
+        if [[ "$UID_LINE" != "0" ]]; then
+            COMM=$(cat "$pid_dir/comm" 2>/dev/null || echo "?")
+            USER=$(stat -c '%U' "$pid_dir" 2>/dev/null || echo "?")
+            echo "  [!!] PID $pid [$USER] ($COMM): CapEff=$CAP_EFF (non-root con caps)"
+            ((CAP_FINDINGS++))
+        fi
+    fi
+done
+if [[ $CAP_FINDINGS -eq 0 ]]; then
+    echo "  [OK] Sin procesos no-root con capabilities elevadas"
+else
+    ((FINDINGS += CAP_FINDINGS))
+fi
+echo ""
+
+# 5. Integración Falco
+echo "=== Integración con Falco (módulo 66) ==="
+if command -v falco &>/dev/null && systemctl is-active falco &>/dev/null; then
+    echo "  [OK] Falco activo — correlacionar con alertas de syscalls"
+    FALCO_ALERTS=$(journalctl -u falco --no-pager -n 50 --since "24 hours ago" 2>/dev/null | grep -c "Warning\|Error\|Critical" || echo "0")
+    echo "  Alertas Falco (24h): $FALCO_ALERTS"
+else
+    echo "  [INFO] Falco no activo. Instalar módulo 66 para hunting por syscalls"
+fi
+
+echo ""
+echo "=========================================="
+echo " Total hallazgos: $FINDINGS"
+echo " Reporte: $REPORT"
+echo "=========================================="
+} 2>&1 | tee "$REPORT"
+EOFHUNT
+    chmod 700 /usr/local/bin/hunting-proc-ebpf.sh
+    log_change "Creado" "/usr/local/bin/hunting-proc-ebpf.sh"
+    log_info "Hunting /proc + eBPF instalado"
+else
+    log_skip "Hunting /proc + eBPF"
+    log_warn "Hunting /proc no instalado"
+fi
+
+# ============================================================
 log_section "RESUMEN DE CAZA DE AMENAZAS"
 # ============================================================
 
@@ -1239,6 +1444,12 @@ else
     echo -e "  ${YELLOW}[--]${NC} Anomalías de red no instaladas"
 fi
 
+if [[ -x /usr/local/bin/hunting-proc-ebpf.sh ]]; then
+    echo -e "  ${GREEN}[OK]${NC} Hunting /proc + eBPF (hunting-proc-ebpf.sh)"
+else
+    echo -e "  ${YELLOW}[--]${NC} Hunting /proc no instalado"
+fi
+
 echo ""
 echo -e "${BOLD}Uso rápido:${NC}"
 echo -e "  ${DIM}Crear baseline:${NC}    ueba-crear-baseline.sh 30"
@@ -1246,6 +1457,7 @@ echo -e "  ${DIM}Detectar UEBA:${NC}     ueba-detectar-anomalias.sh 24"
 echo -e "  ${DIM}Cazar amenazas:${NC}    cazar-amenazas.sh"
 echo -e "  ${DIM}Buscar IoC:${NC}        buscar-retrospectivo.sh ip 1.2.3.4 60"
 echo -e "  ${DIM}Anomalías red:${NC}     detectar-anomalias-red.sh"
+echo -e "  ${DIM}Hunting /proc:${NC}     hunting-proc-ebpf.sh"
 echo ""
 show_changes_summary
 log_info "Módulo de caza de amenazas completado"

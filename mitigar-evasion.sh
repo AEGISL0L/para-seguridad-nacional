@@ -28,6 +28,18 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-evasion"
 securizar_setup_traps
+
+_precheck 8
+_pc 'check_file_exists /etc/audit/rules.d/60-log-protection.rules'
+_pc 'check_file_exists /etc/profile.d/history-protection.sh'
+_pc 'check_executable /usr/local/bin/detectar-masquerading.sh'
+_pc 'check_file_exists /etc/systemd/system/watchdog-seguridad.timer'
+_pc 'check_executable /usr/local/bin/detectar-rootkits.sh'
+_pc 'check_file_exists /etc/audit/rules.d/61-defense-evasion.rules'
+_pc 'check_executable /usr/local/bin/detectar-ocultos.sh'
+_pc 'check_executable /usr/local/bin/detectar-ofuscados.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE EVASIÓN DE DEFENSAS - TA0005              ║"
@@ -49,7 +61,9 @@ echo "  - Reenvío remoto de logs con journald"
 echo "  - Auditoría de acceso a archivos de log"
 echo ""
 
-if ask "¿Proteger logs del sistema contra manipulación?"; then
+if check_file_exists /etc/audit/rules.d/60-log-protection.rules; then
+    log_already "Protección de logs (60-log-protection.rules)"
+elif ask "¿Proteger logs del sistema contra manipulación?"; then
 
     # 1a. Configurar atributos append-only en logs críticos
     echo ""
@@ -166,7 +180,9 @@ echo "Prevenir que atacantes borren el historial de comandos de bash."
 echo "Esto dificulta ocultar la actividad post-explotación."
 echo ""
 
-if ask "¿Proteger historial de comandos contra eliminación?"; then
+if check_file_exists /etc/profile.d/history-protection.sh; then
+    log_already "Protección de historial de comandos (history-protection.sh)"
+elif ask "¿Proteger historial de comandos contra eliminación?"; then
 
     # Crear configuración global de bash history
     cat > /etc/profile.d/history-protection.sh << 'EOFHIST'
@@ -239,7 +255,9 @@ echo "Detectar binarios que se hacen pasar por procesos legítimos."
 echo "Atacantes renombran malware para parecer procesos del sistema."
 echo ""
 
-if ask "¿Configurar detección de binarios masquerading?"; then
+if check_executable /usr/local/bin/detectar-masquerading.sh; then
+    log_already "Detección de masquerading (detectar-masquerading.sh)"
+elif ask "¿Configurar detección de binarios masquerading?"; then
 
     cat > /usr/local/bin/detectar-masquerading.sh << 'EOFMASQ'
 #!/bin/bash
@@ -362,7 +380,9 @@ echo "  - T1562.001: Desactivar o modificar herramientas (AV, IDS)"
 echo "  - T1562.004: Desactivar o modificar firewall"
 echo ""
 
-if ask "¿Proteger herramientas de seguridad contra desactivación?"; then
+if check_file_exists /etc/systemd/system/watchdog-seguridad.timer; then
+    log_already "Watchdog de herramientas de seguridad (watchdog-seguridad.timer)"
+elif ask "¿Proteger herramientas de seguridad contra desactivación?"; then
 
     # 4a. Monitorear parada de servicios de seguridad
     echo ""
@@ -525,7 +545,9 @@ fi
 
 echo ""
 
-if ask "¿Instalar/configurar detección de rootkits?"; then
+if check_executable /usr/local/bin/detectar-rootkits.sh; then
+    log_already "Detección de rootkits (detectar-rootkits.sh)"
+elif ask "¿Instalar/configurar detección de rootkits?"; then
 
     # Instalar rkhunter si no está
     if [[ "$RKHUNTER_INSTALLED" == "false" ]]; then
@@ -645,6 +667,166 @@ else
     log_warn "Detección de rootkits no configurada"
 fi
 
+# ── YARA scanning integration (extensión T1014) ──
+echo ""
+echo "Integrar YARA para detección avanzada de malware y webshells."
+echo ""
+
+if check_executable /usr/local/bin/securizar-yara-scan.sh; then
+    log_already "YARA scanning (securizar-yara-scan.sh)"
+elif ask "¿Instalar YARA scanning con reglas base para webshells, cryptominers y backdoors?"; then
+
+    mkdir -p /etc/securizar/yara-rules /var/log/securizar/yara
+
+    # Reglas YARA base
+    cat > /etc/securizar/yara-rules/securizar-base.yar << 'EOFYARA'
+rule webshell_php_generic {
+    meta:
+        description = "Detect generic PHP webshells"
+        author = "Securizar"
+        severity = "high"
+    strings:
+        $eval = "eval(" ascii nocase
+        $base64 = "base64_decode(" ascii nocase
+        $system = "system(" ascii nocase
+        $exec = "exec(" ascii nocase
+        $passthru = "passthru(" ascii nocase
+        $shell_exec = "shell_exec(" ascii nocase
+        $assert = "assert(" ascii nocase
+        $preg = "preg_replace" ascii nocase
+        $php_tag = "<?php" ascii nocase
+    condition:
+        $php_tag and (2 of ($eval, $base64, $system, $exec, $passthru, $shell_exec, $assert, $preg))
+}
+
+rule cryptominer_generic {
+    meta:
+        description = "Detect cryptominer indicators"
+        author = "Securizar"
+        severity = "high"
+    strings:
+        $stratum = "stratum+tcp://" ascii nocase
+        $xmrig = "xmrig" ascii nocase
+        $monero = "monero" ascii nocase
+        $pool = "pool.minexmr" ascii
+        $wallet = /[48][0-9A-Za-z]{94}/ ascii
+        $cpu_mining = "cpu-priority" ascii
+        $hashrate = "hashrate" ascii
+    condition:
+        2 of them
+}
+
+rule backdoor_reverse_shell {
+    meta:
+        description = "Detect reverse shell scripts"
+        author = "Securizar"
+        severity = "critical"
+    strings:
+        $bash_i = "bash -i >& /dev/tcp/" ascii
+        $nc_e = /nc\s+-[el]+\s+-p\s+\d+/ ascii
+        $python_socket = "socket.socket" ascii
+        $python_connect = ".connect((" ascii
+        $perl_socket = "use Socket" ascii
+        $devtcp = "/dev/tcp/" ascii
+        $mkfifo = "mkfifo" ascii
+    condition:
+        any of them
+}
+
+rule suspicious_elf_packed {
+    meta:
+        description = "Detect packed/suspicious ELF binaries"
+        author = "Securizar"
+        severity = "medium"
+    strings:
+        $elf = { 7F 45 4C 46 }
+        $upx = "UPX!" ascii
+        $no_section = ".shstrtab" ascii
+    condition:
+        $elf at 0 and ($upx or not $no_section)
+}
+EOFYARA
+
+    # Script de escaneo YARA
+    cat > /usr/local/bin/securizar-yara-scan.sh << 'EOFYSCAN'
+#!/bin/bash
+# ============================================================
+# securizar-yara-scan.sh — Escaneo YARA programado
+# ============================================================
+set -euo pipefail
+
+LOG_DIR="/var/log/securizar/yara"
+RULES_DIR="/etc/securizar/yara-rules"
+mkdir -p "$LOG_DIR"
+REPORT="$LOG_DIR/yara-scan-$(date +%Y%m%d).txt"
+ACTION="${1:-scan}"
+TARGET="${2:-/tmp /var/tmp /dev/shm /var/www /home}"
+
+case "$ACTION" in
+    scan)
+        {
+        echo "=========================================="
+        echo " YARA Scan — $(date)"
+        echo " $(hostname)"
+        echo "=========================================="
+        echo ""
+
+        if ! command -v yara &>/dev/null; then
+            echo "[ERROR] YARA no instalado"
+            echo "  openSUSE: zypper install yara"
+            exit 1
+        fi
+
+        FINDINGS=0
+        for rules_file in "$RULES_DIR"/*.yar; do
+            [[ -f "$rules_file" ]] || continue
+            echo "=== Reglas: $(basename "$rules_file") ==="
+            for dir in $TARGET; do
+                [[ -d "$dir" ]] || continue
+                echo "  Escaneando: $dir"
+                MATCHES=$(yara -r -s -w "$rules_file" "$dir" 2>/dev/null || true)
+                if [[ -n "$MATCHES" ]]; then
+                    echo "$MATCHES"
+                    FINDINGS=$((FINDINGS + $(echo "$MATCHES" | wc -l)))
+                fi
+            done
+            echo ""
+        done
+
+        echo "=========================================="
+        echo " Total hallazgos: $FINDINGS"
+        echo "=========================================="
+        } 2>&1 | tee "$REPORT"
+        ;;
+
+    update)
+        echo "Para actualizar reglas YARA:"
+        echo "  1. Descargar reglas de https://github.com/Yara-Rules/rules"
+        echo "  2. Copiar a $RULES_DIR/"
+        echo "  3. Ejecutar: $0 scan"
+        ;;
+
+    *)
+        echo "Uso: $0 {scan [dirs]|update}"
+        ;;
+esac
+EOFYSCAN
+    chmod 700 /usr/local/bin/securizar-yara-scan.sh
+
+    # Cron semanal
+    cat > /etc/cron.weekly/securizar-yara-scan << 'EOFCRON'
+#!/bin/bash
+/usr/local/bin/securizar-yara-scan.sh scan 2>&1 | logger -t securizar-yara
+EOFCRON
+    chmod 700 /etc/cron.weekly/securizar-yara-scan
+
+    log_change "Creado" "/usr/local/bin/securizar-yara-scan.sh"
+    log_change "Creado" "/etc/securizar/yara-rules/securizar-base.yar (4 reglas)"
+    log_info "YARA scanning semanal configurado"
+else
+    log_skip "YARA scanning"
+fi
+
 # ============================================================
 log_section "6. CONTROL DE PROXY EXECUTION (T1218)"
 # ============================================================
@@ -657,7 +839,9 @@ echo "  - certutil, xdg-open, env, script, strace, ltrace"
 echo "  - python, perl, ruby (si no son necesarios)"
 echo ""
 
-if ask "¿Restringir binarios de proxy execution?"; then
+if check_file_exists /etc/audit/rules.d/61-defense-evasion.rules; then
+    log_already "Control de proxy execution (61-defense-evasion.rules)"
+elif ask "¿Restringir binarios de proxy execution?"; then
 
     # Lista de binarios que pueden usarse como proxy
     LOLBINS=(
@@ -728,7 +912,9 @@ echo "Atacantes usan archivos ocultos, ADS, y directorios con nombres"
 echo "engañosos para esconder herramientas y datos."
 echo ""
 
-if ask "¿Configurar detección de artefactos ocultos?"; then
+if check_executable /usr/local/bin/detectar-ocultos.sh; then
+    log_already "Detección de artefactos ocultos (detectar-ocultos.sh)"
+elif ask "¿Configurar detección de artefactos ocultos?"; then
 
     cat > /usr/local/bin/detectar-ocultos.sh << 'EOFOCULTOS'
 #!/bin/bash
@@ -835,6 +1021,175 @@ else
     log_warn "Detección de artefactos ocultos no configurada"
 fi
 
+# ── Sigma rules integration (extensión T1564) ──
+echo ""
+echo "Integrar reglas Sigma para correlación de eventos de evasión."
+echo ""
+
+if check_executable /usr/local/bin/securizar-sigma-detect.sh; then
+    log_already "Sigma detection (securizar-sigma-detect.sh)"
+elif ask "¿Instalar detección basada en reglas Sigma para evasión?"; then
+
+    mkdir -p /etc/securizar/sigma-rules /var/log/securizar/sigma
+
+    # Reglas Sigma en formato YAML
+    cat > /etc/securizar/sigma-rules/securizar-evasion.yml << 'EOFSIGMA'
+# Securizar — Reglas Sigma para detección de evasión
+# Convertir con sigma-cli o usar directamente con el script
+
+title: Securizar - Log Tampering Detection
+id: sec-001
+status: stable
+description: Detectar intentos de manipulación de logs
+logsource:
+    product: linux
+    service: auditd
+detection:
+    selection_truncate:
+        type: SYSCALL
+        syscall:
+            - truncate
+            - ftruncate
+        exe|endswith:
+            - /var/log/
+    condition: selection_truncate
+level: high
+tags:
+    - attack.defense_evasion
+    - attack.t1070.002
+
+---
+title: Securizar - Timestomping Detection
+id: sec-002
+status: stable
+description: Detectar modificación de timestamps
+logsource:
+    product: linux
+    service: auditd
+detection:
+    selection:
+        type: SYSCALL
+        syscall:
+            - utimensat
+            - futimesat
+        exe|re: '/tmp/.*|/dev/shm/.*|/var/tmp/.*'
+    condition: selection
+level: medium
+tags:
+    - attack.defense_evasion
+    - attack.t1070.006
+
+---
+title: Securizar - Process Masquerading
+id: sec-003
+status: stable
+description: Detectar procesos con nombres engañosos
+logsource:
+    product: linux
+    service: sysmon
+detection:
+    selection:
+        EventID: 1
+        Image|re: '.*\s+$|.*[\x00-\x1f].*'
+    condition: selection
+level: high
+tags:
+    - attack.defense_evasion
+    - attack.t1036
+EOFSIGMA
+
+    # Script de detección Sigma
+    cat > /usr/local/bin/securizar-sigma-detect.sh << 'EOFSIGMASH'
+#!/bin/bash
+# ============================================================
+# securizar-sigma-detect.sh — Detección basada en reglas Sigma
+# ============================================================
+set -euo pipefail
+
+LOG_DIR="/var/log/securizar/sigma"
+RULES_DIR="/etc/securizar/sigma-rules"
+mkdir -p "$LOG_DIR"
+REPORT="$LOG_DIR/sigma-detect-$(date +%Y%m%d).txt"
+
+{
+echo "=========================================="
+echo " Sigma Detection — $(date)"
+echo " $(hostname)"
+echo "=========================================="
+echo ""
+
+FINDINGS=0
+
+# Check 1: Log tampering (truncate/unlink on log files)
+echo "=== SEC-001: Log Tampering ==="
+TAMPERING=$(ausearch -k audit-logs -ts recent 2>/dev/null | grep -E "truncate|unlink" | head -10 || true)
+if [[ -n "$TAMPERING" ]]; then
+    echo "[!!] Posible manipulación de logs detectada:"
+    echo "$TAMPERING"
+    ((FINDINGS++))
+else
+    echo "[OK] Sin indicadores de log tampering"
+fi
+
+echo ""
+echo "=== SEC-002: Timestomping ==="
+TIMESTOMP=$(ausearch -sc utimensat -ts recent 2>/dev/null | grep -E '/tmp/|/dev/shm/|/var/tmp/' | head -10 || true)
+if [[ -n "$TIMESTOMP" ]]; then
+    echo "[!!] Posible timestomping detectado:"
+    echo "$TIMESTOMP"
+    ((FINDINGS++))
+else
+    echo "[OK] Sin indicadores de timestomping"
+fi
+
+echo ""
+echo "=== SEC-003: Process Masquerading ==="
+# Buscar procesos con espacios finales o caracteres de control en nombre
+MASQ=0
+for pid in /proc/[0-9]*/comm; do
+    COMM=$(cat "$pid" 2>/dev/null || continue)
+    if [[ "$COMM" =~ [[:space:]]$ ]] || [[ "$COMM" =~ [[:cntrl:]] ]]; then
+        PPID_DIR=$(dirname "$pid")
+        CMDLINE=$(tr '\0' ' ' < "$PPID_DIR/cmdline" 2>/dev/null | head -c 80)
+        echo "[!!] Proceso sospechoso: PID=$(basename "$(dirname "$pid")") comm='$COMM' cmd='$CMDLINE'"
+        ((MASQ++))
+    fi
+done
+if [[ $MASQ -eq 0 ]]; then
+    echo "[OK] Sin procesos con nombres masquerading"
+else
+    ((FINDINGS++))
+fi
+
+echo ""
+echo "=== Reglas disponibles ==="
+if ls "$RULES_DIR"/*.yml &>/dev/null; then
+    RULE_COUNT=$(grep -c '^title:' "$RULES_DIR"/*.yml 2>/dev/null || echo "0")
+    echo "  Reglas Sigma: $RULE_COUNT"
+fi
+
+echo ""
+echo "=========================================="
+echo " Total hallazgos: $FINDINGS"
+echo "=========================================="
+} 2>&1 | tee "$REPORT"
+EOFSIGMASH
+    chmod 700 /usr/local/bin/securizar-sigma-detect.sh
+
+    # Cron diario
+    cat > /etc/cron.daily/securizar-sigma-detect << 'EOFCRON'
+#!/bin/bash
+/usr/local/bin/securizar-sigma-detect.sh 2>&1 | logger -t securizar-sigma
+EOFCRON
+    chmod 700 /etc/cron.daily/securizar-sigma-detect
+
+    log_change "Creado" "/usr/local/bin/securizar-sigma-detect.sh"
+    log_change "Creado" "/etc/securizar/sigma-rules/securizar-evasion.yml (3 reglas)"
+    log_info "Detección Sigma diaria configurada"
+else
+    log_skip "Sigma detection"
+fi
+
 # ============================================================
 log_section "8. DETECCIÓN DE SCRIPTS OFUSCADOS (T1027/T1140)"
 # ============================================================
@@ -843,7 +1198,9 @@ echo "Detectar archivos y scripts con contenido ofuscado o codificado."
 echo "Atacantes usan base64, hex encoding, y ofuscación para evadir."
 echo ""
 
-if ask "¿Configurar detección de scripts ofuscados?"; then
+if check_executable /usr/local/bin/detectar-ofuscados.sh; then
+    log_already "Detección de scripts ofuscados (detectar-ofuscados.sh)"
+elif ask "¿Configurar detección de scripts ofuscados?"; then
 
     cat > /usr/local/bin/detectar-ofuscados.sh << 'EOFOFUSC'
 #!/bin/bash

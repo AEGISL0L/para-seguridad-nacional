@@ -25,6 +25,20 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 securizar_setup_traps
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /etc/docker/daemon.json'
+_pc 'check_file_exists /etc/securizar/docker-seccomp-strict.json'
+_pc 'check_executable /usr/local/bin/escanear-imagenes.sh'
+_pc 'check_executable /usr/local/bin/auditar-red-contenedores.sh'
+_pc 'check_file_exists /etc/securizar/docker-mount-policy.conf'
+_pc 'check_executable /usr/local/bin/auditar-registros.sh'
+_pc 'check_executable /usr/local/bin/migrar-rootless.sh'
+_pc 'check_executable /usr/local/bin/monitorizar-contenedores.sh'
+_pc 'check_executable /usr/local/bin/auditar-kubernetes.sh'
+_pc 'check_executable /usr/local/bin/auditoria-contenedores.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   SEGURIDAD DE CONTENEDORES - Módulo 40                   ║"
@@ -63,7 +77,9 @@ echo "  - Logging seguro vía journald"
 echo "  - Driver overlay2 y ulimits restrictivos"
 echo ""
 
-if ask "¿Configurar hardening del daemon Docker/Podman?"; then
+if check_file_exists /etc/docker/daemon.json && check_file_contains /etc/docker/daemon.json '"icc".*false'; then
+    log_already "Hardening daemon Docker/Podman (daemon.json hardened)"
+elif ask "¿Configurar hardening del daemon Docker/Podman?"; then
     # --- Docker ---
     if [[ $HAS_DOCKER -eq 1 ]] || ask "¿Docker no detectado. Crear config igualmente?"; then
         mkdir -p /etc/docker
@@ -164,8 +180,14 @@ echo "  - Perfil seccomp estricto (bloquea syscalls peligrosas)"
 echo "  - Perfil AppArmor para contenedores"
 echo "  - Wrapper docker run con flags de seguridad"
 echo ""
+echo -e "${DIM}Ver también:${NC}"
+echo -e "  ${DIM}Módulo 66 (Runtime kernel) — Falco para monitorización runtime de containers${NC}"
+echo -e "  ${DIM}Módulo 67 (Memoria/procesos) — Seccomp-BPF avanzado y generación de perfiles${NC}"
+echo ""
 
-if ask "¿Crear perfiles de restricción de runtime?"; then
+if check_file_exists /etc/securizar/docker-seccomp-strict.json; then
+    log_already "Perfiles de restricción de runtime (seccomp ya existe)"
+elif ask "¿Crear perfiles de restricción de runtime?"; then
     mkdir -p /etc/securizar
 
     # --- Perfil seccomp estricto ---
@@ -422,7 +444,9 @@ echo "  - Política de registros permitidos"
 echo "  - Docker Content Trust (firmas de imágenes)"
 echo ""
 
-if ask "¿Configurar seguridad de imágenes?"; then
+if check_executable /usr/local/bin/escanear-imagenes.sh; then
+    log_already "Seguridad de imágenes (escáner ya instalado)"
+elif ask "¿Configurar seguridad de imágenes?"; then
     # --- Escáner de imágenes ---
     cat > /usr/local/bin/escanear-imagenes.sh << 'EOFSCAN'
 #!/bin/bash
@@ -570,7 +594,9 @@ echo "  - Reglas iptables para egress"
 echo "  - Script de auditoría de redes"
 echo ""
 
-if ask "¿Configurar aislamiento de red de contenedores?"; then
+if check_executable /usr/local/bin/auditar-red-contenedores.sh; then
+    log_already "Aislamiento de red (auditoría ya instalada)"
+elif ask "¿Configurar aislamiento de red de contenedores?"; then
     # --- Red interna ---
     if [[ $HAS_DOCKER -eq 1 ]]; then
         if ! docker network ls 2>/dev/null | grep -q "securizar-internal"; then
@@ -683,7 +709,9 @@ echo "  - Política de montajes prohibidos"
 echo "  - Propagación de montaje restrictiva"
 echo ""
 
-if ask "¿Configurar seguridad de almacenamiento?"; then
+if check_file_exists /etc/securizar/docker-mount-policy.conf; then
+    log_already "Seguridad de almacenamiento (política ya existe)"
+elif ask "¿Configurar seguridad de almacenamiento?"; then
     # --- Auditar montajes peligrosos actuales ---
     if [[ $HAS_DOCKER -eq 1 ]] && systemctl is-active docker &>/dev/null; then
         log_info "Auditando montajes de contenedores activos..."
@@ -751,7 +779,9 @@ echo "  - Estructura de certificados para registros privados"
 echo "  - Script de auditoría de registros"
 echo ""
 
-if ask "¿Configurar seguridad de registros?"; then
+if check_executable /usr/local/bin/auditar-registros.sh; then
+    log_already "Seguridad de registros (auditoría ya instalada)"
+elif ask "¿Configurar seguridad de registros?"; then
     # --- Estructura de certificados ---
     mkdir -p /etc/docker/certs.d
     log_change "Creado" "/etc/docker/certs.d/ (estructura para certificados)"
@@ -871,7 +901,9 @@ echo "  - loginctl enable-linger para usuarios de contenedores"
 echo "  - Guía de migración a rootless"
 echo ""
 
-if ask "¿Configurar contenedores rootless?"; then
+if check_executable /usr/local/bin/migrar-rootless.sh; then
+    log_already "Contenedores rootless (script migración ya instalado)"
+elif ask "¿Configurar contenedores rootless?"; then
     REAL_USER="${SUDO_USER:-$USER}"
 
     # --- subuid/subgid ---
@@ -1032,7 +1064,9 @@ echo "  - Contenedores obsoletos (>30 días)"
 echo "  - Timer systemd para verificación periódica"
 echo ""
 
-if ask "¿Instalar monitorización de contenedores?"; then
+if check_executable /usr/local/bin/monitorizar-contenedores.sh; then
+    log_already "Monitorización de contenedores (script ya instalado)"
+elif ask "¿Instalar monitorización de contenedores?"; then
     cat > /usr/local/bin/monitorizar-contenedores.sh << 'EOFMON'
 #!/bin/bash
 # ============================================================
@@ -1210,7 +1244,9 @@ else
     echo "  - Uso de ServiceAccount por defecto"
     echo ""
 
-    if ask "¿Crear script de auditoría de Kubernetes?"; then
+    if check_executable /usr/local/bin/auditar-kubernetes.sh; then
+        log_already "Auditoría Kubernetes (script ya instalado)"
+    elif ask "¿Crear script de auditoría de Kubernetes?"; then
         cat > /usr/local/bin/auditar-kubernetes.sh << 'EOFK8S'
 #!/bin/bash
 # ============================================================
@@ -1387,7 +1423,9 @@ echo "  - Puntuación: SEGURO / MEJORABLE / INSEGURO"
 echo "  - Cron semanal automático"
 echo ""
 
-if ask "¿Crear auditoría integral de contenedores?"; then
+if check_executable /usr/local/bin/auditoria-contenedores.sh; then
+    log_already "Auditoría integral de contenedores (script ya instalado)"
+elif ask "¿Crear auditoría integral de contenedores?"; then
     cat > /usr/local/bin/auditoria-contenedores.sh << 'EOFAUDIT'
 #!/bin/bash
 # ============================================================

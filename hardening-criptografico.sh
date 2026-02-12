@@ -25,6 +25,20 @@ require_root
 init_backup "hardening-criptografico"
 securizar_setup_traps
 
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 10
+_pc check_file_exists /etc/ssh/sshd_config.d/99-securizar-crypto.conf
+_pc check_file_exists /etc/ssl/openssl-securizar.cnf
+_pc check_executable /usr/local/bin/monitorizar-certificados.sh
+_pc check_executable /usr/local/bin/verificar-entropia.sh
+_pc check_file_exists /etc/skel/.gnupg/gpg.conf
+_pc check_executable /usr/local/bin/auditar-luks.sh
+_pc check_executable /usr/local/bin/escanear-tls-local.sh
+_pc true  # S8: auditoria hashing contrasenas (siempre re-evaluar)
+_pc check_file_exists /etc/modprobe.d/securizar-crypto-blacklist.conf
+_pc check_executable /usr/local/bin/auditoria-criptografica.sh
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 39 - HARDENING CRIPTOGRAFICO                    ║"
@@ -47,7 +61,9 @@ echo "  - HostKey: ed25519, rsa-sha2-512/256"
 echo "  - Elimina claves DSA/ECDSA, genera Ed25519 si falta"
 echo ""
 
-if ask "¿Aplicar hardening criptografico de SSH?"; then
+if check_file_exists /etc/ssh/sshd_config.d/99-securizar-crypto.conf; then
+    log_already "Hardening criptografico de SSH"
+elif ask "¿Aplicar hardening criptografico de SSH?"; then
 
     # Analizar configuracion actual
     log_info "Analizando configuracion SSH actual..."
@@ -203,7 +219,9 @@ echo "  - OpenSSL: MinProtocol TLSv1.2, sin MD5/3DES/RC4/DES"
 echo "  - Deshabilita TLS 1.0/1.1 en Apache/nginx si existen"
 echo ""
 
-if ask "¿Aplicar hardening TLS del sistema?"; then
+if check_file_exists /etc/ssl/openssl-securizar.cnf; then
+    log_already "Hardening TLS del sistema"
+elif ask "¿Aplicar hardening TLS del sistema?"; then
 
     # RHEL family: usar crypto-policies
     if [[ "$DISTRO_FAMILY" == "rhel" ]]; then
@@ -331,7 +349,9 @@ echo "  - Detecta: expirados, proximos a expirar, claves debiles, SHA-1"
 echo "  - Instala tarea cron semanal"
 echo ""
 
-if ask "¿Crear sistema de monitorizacion de certificados?"; then
+if check_executable /usr/local/bin/monitorizar-certificados.sh; then
+    log_already "Sistema de monitorizacion de certificados"
+elif ask "¿Crear sistema de monitorizacion de certificados?"; then
 
     cat > /usr/local/bin/monitorizar-certificados.sh << 'EOFCERT'
 #!/bin/bash
@@ -450,6 +470,152 @@ else
     log_skip "Monitorizacion de certificados"
 fi
 
+# ── Certificate Transparency monitoring (extensión S3) ──
+echo ""
+echo "Monitorizar Certificate Transparency logs para detectar certificados"
+echo "no autorizados emitidos para dominios del sistema."
+echo ""
+
+if check_executable /usr/local/bin/securizar-ct-monitor.sh; then
+    log_already "CT log monitoring (securizar-ct-monitor.sh)"
+elif ask "¿Configurar monitorización de Certificate Transparency?"; then
+
+    mkdir -p /etc/securizar/ct /var/log/securizar/ct
+
+    cat > /usr/local/bin/securizar-ct-monitor.sh << 'EOFCTMON'
+#!/bin/bash
+# ============================================================
+# securizar-ct-monitor.sh — Certificate Transparency monitoring
+# ============================================================
+set -euo pipefail
+
+LOG_DIR="/var/log/securizar/ct"
+CT_CONFIG="/etc/securizar/ct/domains.conf"
+mkdir -p "$LOG_DIR"
+REPORT="$LOG_DIR/ct-monitor-$(date +%Y%m%d).txt"
+
+{
+echo "=========================================="
+echo " Certificate Transparency Monitor"
+echo " $(date) - $(hostname)"
+echo "=========================================="
+echo ""
+
+# Obtener dominios a monitorizar
+DOMAINS=()
+if [[ -f "$CT_CONFIG" ]]; then
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        DOMAINS+=("$line")
+    done < "$CT_CONFIG"
+fi
+
+# Autodetectar dominios del sistema si no hay config
+if [[ ${#DOMAINS[@]} -eq 0 ]]; then
+    echo "[INFO] Sin dominios configurados. Autodetectando..."
+    # Desde certificados SSL locales
+    for cert in /etc/ssl/certs/localhost*.pem /etc/pki/tls/certs/localhost*.pem; do
+        [[ -f "$cert" ]] || continue
+        CN=$(openssl x509 -noout -subject -in "$cert" 2>/dev/null | grep -oP 'CN\s*=\s*\K[^/]+' || true)
+        [[ -n "$CN" && "$CN" != "localhost" ]] && DOMAINS+=("$CN")
+    done
+
+    # Desde hostname
+    FQDN=$(hostname -f 2>/dev/null || hostname)
+    if [[ "$FQDN" =~ \. && "$FQDN" != "localhost"* ]]; then
+        DOMAINS+=("$FQDN")
+        # Añadir dominio base
+        BASE_DOMAIN=$(echo "$FQDN" | rev | cut -d. -f1-2 | rev)
+        DOMAINS+=("$BASE_DOMAIN")
+    fi
+fi
+
+if [[ ${#DOMAINS[@]} -eq 0 ]]; then
+    echo "[WARN] No se detectaron dominios para monitorizar"
+    echo "  Crear: $CT_CONFIG (un dominio por línea)"
+    exit 0
+fi
+
+echo "Dominios monitorizados: ${DOMAINS[*]}"
+echo ""
+
+# Consultar crt.sh para cada dominio
+if ! command -v curl &>/dev/null; then
+    echo "[ERROR] curl requerido para consultas CT"
+    exit 1
+fi
+
+for domain in "${DOMAINS[@]}"; do
+    echo "=== $domain ==="
+    # Consultar crt.sh (Certificate Transparency aggregator)
+    RESPONSE=$(curl -s "https://crt.sh/?q=%25.${domain}&output=json" 2>/dev/null | head -c 50000 || true)
+
+    if [[ -z "$RESPONSE" || "$RESPONSE" == "[]" ]]; then
+        echo "  Sin certificados encontrados en CT logs"
+        continue
+    fi
+
+    # Contar certificados recientes (últimos 30 días)
+    RECENT=0
+    TOTAL=0
+    if command -v python3 &>/dev/null; then
+        CERT_INFO=$(echo "$RESPONSE" | python3 -c "
+import json, sys
+from datetime import datetime, timedelta
+try:
+    data = json.load(sys.stdin)
+    cutoff = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    total = len(data)
+    recent = sum(1 for c in data if c.get('not_before','') >= cutoff)
+    print(f'{total} {recent}')
+    # Mostrar los más recientes
+    for c in sorted(data, key=lambda x: x.get('not_before',''), reverse=True)[:5]:
+        issuer = c.get('issuer_name','unknown')[:60]
+        nb = c.get('not_before','?')
+        cn = c.get('common_name','?')
+        print(f'  {nb} | {cn} | {issuer}')
+except: print('0 0')
+" 2>/dev/null || echo "0 0")
+        TOTAL=$(echo "$CERT_INFO" | head -1 | cut -d' ' -f1)
+        RECENT=$(echo "$CERT_INFO" | head -1 | cut -d' ' -f2)
+        echo "  Total en CT: $TOTAL | Últimos 30 días: $RECENT"
+        echo "$CERT_INFO" | tail -n +2
+    else
+        echo "  [INFO] python3 requerido para análisis detallado"
+    fi
+    echo ""
+done
+
+echo "=========================================="
+echo " Completado: $(date)"
+echo "=========================================="
+} 2>&1 | tee "$REPORT"
+EOFCTMON
+    chmod +x /usr/local/bin/securizar-ct-monitor.sh
+
+    # Config ejemplo
+    cat > /etc/securizar/ct/domains.conf << 'EOF'
+# Securizar — Dominios a monitorizar en Certificate Transparency
+# Un dominio por línea (sin wildcard, el script busca subdominios)
+# Ejemplo:
+# example.com
+# mycompany.org
+EOF
+
+    # Cron semanal
+    cat > /etc/cron.weekly/securizar-ct-monitor << 'EOFCRON'
+#!/bin/bash
+/usr/local/bin/securizar-ct-monitor.sh 2>&1 | logger -t securizar-ct
+EOFCRON
+    chmod +x /etc/cron.weekly/securizar-ct-monitor
+
+    log_change "Creado" "/usr/local/bin/securizar-ct-monitor.sh"
+    log_change "Creado" "/etc/securizar/ct/domains.conf"
+    log_info "Monitorización CT semanal configurada"
+else
+    log_skip "CT monitoring"
+fi
+
 # ============================================================
 # S4: CALIDAD DE ENTROPIA Y NUMEROS ALEATORIOS
 # ============================================================
@@ -461,7 +627,9 @@ echo "  - Instala rng-tools o haveged si la entropia es baja"
 echo "  - Crea script de verificacion permanente"
 echo ""
 
-if ask "¿Verificar y mejorar la entropia del sistema?"; then
+if check_executable /usr/local/bin/verificar-entropia.sh; then
+    log_already "Verificacion de entropia del sistema"
+elif ask "¿Verificar y mejorar la entropia del sistema?"; then
 
     # Comprobar entropia actual
     if [[ -f /proc/sys/kernel/random/entropy_avail ]]; then
@@ -635,7 +803,9 @@ echo "  - s2k-cipher-algo AES256, s2k-digest-algo SHA512"
 echo "  - Aplica a /etc/skel y usuarios existentes"
 echo ""
 
-if ask "¿Aplicar hardening de GPG?"; then
+if check_file_exists /etc/skel/.gnupg/gpg.conf; then
+    log_already "Hardening de GPG"
+elif ask "¿Aplicar hardening de GPG?"; then
 
     if command -v gpg &>/dev/null; then
         log_info "GPG detectado: $(gpg --version 2>/dev/null | head -1)"
@@ -723,7 +893,9 @@ echo "  - Cifrado, tamano de clave, hash, key slots activos"
 echo "  - Alerta si usa aes-cbc, clave <256 bits, muchos key slots"
 echo ""
 
-if ask "¿Auditar cifrado de disco LUKS?"; then
+if check_executable /usr/local/bin/auditar-luks.sh; then
+    log_already "Auditoria de cifrado LUKS"
+elif ask "¿Auditar cifrado de disco LUKS?"; then
 
     if command -v cryptsetup &>/dev/null; then
         log_info "Buscando volumenes LUKS..."
@@ -868,7 +1040,9 @@ echo "  - Conecta con openssl s_client para inspeccionar TLS"
 echo "  - Reporta: protocolo, cifrado, certificado, intercambio de claves"
 echo ""
 
-if ask "¿Crear script de escaneo TLS de servicios locales?"; then
+if check_executable /usr/local/bin/escanear-tls-local.sh; then
+    log_already "Script de escaneo TLS de servicios locales"
+elif ask "¿Crear script de escaneo TLS de servicios locales?"; then
 
     cat > /usr/local/bin/escanear-tls-local.sh << 'EOFTLS'
 #!/bin/bash
@@ -1131,7 +1305,9 @@ echo "  - Verifica modo FIPS"
 echo "  - Lista modulos crypto cargados y detecta obsoletos"
 echo ""
 
-if ask "¿Aplicar hardening criptografico del kernel?"; then
+if check_file_exists /etc/modprobe.d/securizar-crypto-blacklist.conf; then
+    log_already "Hardening criptografico del kernel"
+elif ask "¿Aplicar hardening criptografico del kernel?"; then
 
     # Verificar modo FIPS
     if [[ -f /proc/sys/crypto/fips_enabled ]]; then
@@ -1232,6 +1408,131 @@ else
     log_skip "Hardening criptografico del kernel"
 fi
 
+# ── Post-Quantum Crypto readiness (extensión S9) ──
+echo ""
+echo "Evaluar preparación para criptografía post-cuántica."
+echo "Los estándares NIST PQC (ML-KEM/Kyber, ML-DSA/Dilithium) están"
+echo "siendo adoptados progresivamente."
+echo ""
+
+if check_executable /usr/local/bin/securizar-pq-readiness.sh; then
+    log_already "Post-quantum readiness (securizar-pq-readiness.sh)"
+elif ask "¿Evaluar preparación para criptografía post-cuántica?"; then
+
+    mkdir -p /var/log/securizar/crypto
+
+    cat > /usr/local/bin/securizar-pq-readiness.sh << 'EOFPQ'
+#!/bin/bash
+# ============================================================
+# securizar-pq-readiness.sh — Post-Quantum Crypto Readiness
+# ============================================================
+set -euo pipefail
+
+LOG_DIR="/var/log/securizar/crypto"
+mkdir -p "$LOG_DIR"
+REPORT="$LOG_DIR/pq-readiness-$(date +%Y%m%d).txt"
+
+{
+echo "=========================================="
+echo " Post-Quantum Cryptography Readiness"
+echo " $(date) - $(hostname)"
+echo "=========================================="
+echo ""
+
+echo "=== Estándares NIST Post-Quantum ==="
+echo "  ML-KEM (Kyber)      — Key Encapsulation Mechanism (FIPS 203)"
+echo "  ML-DSA (Dilithium)  — Digital Signature Algorithm (FIPS 204)"
+echo "  SLH-DSA (SPHINCS+)  — Stateless Hash-Based Signatures (FIPS 205)"
+echo ""
+
+echo "=== OpenSSL ==="
+if command -v openssl &>/dev/null; then
+    OSSL_VER=$(openssl version 2>/dev/null)
+    echo "  Versión: $OSSL_VER"
+
+    # OpenSSL 3.x+ tiene provider para PQ
+    if echo "$OSSL_VER" | grep -qP 'OpenSSL [3-9]\.'; then
+        echo "  [OK] OpenSSL 3.x — soporte PQ via providers"
+
+        # Verificar si oqs-provider está disponible
+        if openssl list -providers 2>/dev/null | grep -qi "oqs\|pq"; then
+            echo "  [OK] Provider PQ detectado"
+        else
+            echo "  [--] Provider OQS no instalado"
+            echo "       Instalar: https://github.com/open-quantum-safe/oqs-provider"
+        fi
+
+        # Listar algoritmos PQ disponibles
+        PQ_ALGS=$(openssl list -kem-algorithms 2>/dev/null | grep -i "kyber\|ml-kem\|frodo\|bike\|hqc" || true)
+        if [[ -n "$PQ_ALGS" ]]; then
+            echo "  [OK] Algoritmos PQ KEM disponibles:"
+            echo "$PQ_ALGS" | sed 's/^/       /'
+        fi
+
+        PQ_SIG=$(openssl list -signature-algorithms 2>/dev/null | grep -i "dilithium\|ml-dsa\|falcon\|sphincs" || true)
+        if [[ -n "$PQ_SIG" ]]; then
+            echo "  [OK] Algoritmos PQ firma disponibles:"
+            echo "$PQ_SIG" | sed 's/^/       /'
+        fi
+    else
+        echo "  [INFO] OpenSSL < 3.x — actualizar para soporte PQ"
+    fi
+else
+    echo "  [WARN] OpenSSL no encontrado"
+fi
+
+echo ""
+echo "=== SSH ==="
+if command -v ssh &>/dev/null; then
+    SSH_VER=$(ssh -V 2>&1 | head -1)
+    echo "  Versión: $SSH_VER"
+
+    # OpenSSH 9.0+ soporta hybrid KEM
+    if ssh -Q kex 2>/dev/null | grep -qi "sntrup\|mlkem\|kyber"; then
+        echo "  [OK] SSH soporta KEM post-quantum:"
+        ssh -Q kex 2>/dev/null | grep -i "sntrup\|mlkem\|kyber" | sed 's/^/       /'
+    else
+        echo "  [--] SSH sin soporte PQ KEM"
+        echo "       OpenSSH 9.0+ incluye sntrup761x25519-sha512"
+    fi
+fi
+
+echo ""
+echo "=== TLS en servicios ==="
+# Verificar si servicios usan TLS 1.3 (base para PQ híbrido)
+for svc_port in 443 22 993 465 587; do
+    LISTENER=$(ss -tlnp "sport = :$svc_port" 2>/dev/null | tail -1 || true)
+    if [[ -n "$LISTENER" && "$LISTENER" != *"State"* ]]; then
+        TLS_VER=$(echo | openssl s_client -connect "localhost:$svc_port" -tls1_3 2>/dev/null | grep "Protocol" || echo "N/A")
+        if echo "$TLS_VER" | grep -q "TLSv1.3"; then
+            echo "  [OK] Puerto $svc_port: TLS 1.3 (PQ-ready base)"
+        else
+            echo "  [--] Puerto $svc_port: TLS < 1.3 (actualizar para PQ híbrido)"
+        fi
+    fi
+done
+
+echo ""
+echo "=== Recomendaciones de transición PQ ==="
+echo "  1. Actualizar OpenSSL a 3.x+ con oqs-provider"
+echo "  2. Habilitar sntrup761x25519-sha512 en SSH (KexAlgorithms)"
+echo "  3. Planificar migración de certificados a híbridos (RSA+ML-DSA)"
+echo "  4. Inventariar datos con requisito de confidencialidad > 10 años"
+echo "     (vulnerables a 'harvest now, decrypt later')"
+echo "  5. Monitorizar estándares NIST FIPS 203/204/205"
+
+echo ""
+echo "Completado: $(date)"
+} 2>&1 | tee "$REPORT"
+EOFPQ
+    chmod +x /usr/local/bin/securizar-pq-readiness.sh
+
+    log_change "Creado" "/usr/local/bin/securizar-pq-readiness.sh"
+    log_info "Evaluación de preparación post-cuántica instalada"
+else
+    log_skip "Post-quantum readiness"
+fi
+
 # ============================================================
 # S10: AUDITORIA CRIPTOGRAFICA COMPLETA
 # ============================================================
@@ -1243,7 +1544,9 @@ echo "  - Puntuacion: FUERTE / ACEPTABLE / DEBIL"
 echo "  - Salida con colores e instalacion cron semanal"
 echo ""
 
-if ask "¿Crear sistema de auditoria criptografica completa?"; then
+if check_executable /usr/local/bin/auditoria-criptografica.sh; then
+    log_already "Sistema de auditoria criptografica completa"
+elif ask "¿Crear sistema de auditoria criptografica completa?"; then
 
     cat > /usr/local/bin/auditoria-criptografica.sh << 'EOFAUDIT'
 #!/bin/bash

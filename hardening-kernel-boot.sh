@@ -18,9 +18,20 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-kernel-boot"
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 4
+_pc check_file_contains /etc/default/grub "init_on_alloc=1"
+_pc true  # S2: verificar Secure Boot (informacional)
+_pc check_executable /usr/local/bin/verificar-modulos-firmados.sh
+_pc true  # S4: verificar protección GRUB (checks + acción condicional)
+_precheck_result
+
 log_section "S1: PARÁMETROS DE SEGURIDAD EN GRUB CMDLINE"
 
 echo "Parámetros de seguridad a añadir al kernel:"
+echo -e "${DIM}Ver también: Módulo 67 (Memoria/procesos) — Parámetros avanzados de memoria${NC}"
+echo ""
 echo "  init_on_alloc=1            - Inicializar memoria al asignar"
 echo "  init_on_free=1             - Limpiar memoria al liberar"
 echo "  slab_nomerge               - No fusionar slabs (previene heap exploits)"
@@ -30,16 +41,18 @@ echo "  vsyscall=none              - Deshabilitar vsyscall (legacy)"
 echo "  debugfs=off                - Deshabilitar debugfs"
 echo "  oops=panic                 - Panic en oops del kernel"
 echo "  randomize_kstack_offset=on - Aleatorizar offset del stack"
-echo "  lockdown=confidentiality   - Lockdown del kernel"
+echo "  (lockdown=confidentiality omitido: puede impedir boot sin Secure Boot)"
 echo ""
 
-if ask "¿Añadir parámetros de seguridad al cmdline del kernel?"; then
+if check_file_contains /etc/default/grub "init_on_alloc=1"; then
+    log_already "Parámetros de seguridad en cmdline del kernel"
+elif ask "¿Añadir parámetros de seguridad al cmdline del kernel?"; then
     if [[ -f /etc/default/grub ]]; then
         cp /etc/default/grub "$BACKUP_DIR/"
         log_change "Backup" "/etc/default/grub"
 
         # Parámetros a añadir
-        SECURITY_PARAMS="init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 pti=on vsyscall=none debugfs=off oops=panic randomize_kstack_offset=on lockdown=confidentiality"
+        SECURITY_PARAMS="init_on_alloc=1 init_on_free=1 slab_nomerge page_alloc.shuffle=1 pti=on vsyscall=none debugfs=off oops=panic randomize_kstack_offset=on"
 
         # Leer línea actual de GRUB_CMDLINE_LINUX_DEFAULT
         current_cmdline=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub | sed 's/GRUB_CMDLINE_LINUX_DEFAULT="//' | sed 's/"$//')
@@ -83,6 +96,8 @@ fi
 log_section "S2: VERIFICAR SECURE BOOT"
 
 log_info "Comprobando estado de Secure Boot..."
+echo -e "${DIM}Ver también: Módulo 66 (Runtime kernel) — LKRG, kernel lockdown, module signing${NC}"
+echo ""
 
 if command -v mokutil &>/dev/null; then
     sb_state=$(mokutil --sb-state 2>&1 || true)
@@ -121,7 +136,9 @@ fi
 # ============================================================
 log_section "S3: SCRIPT DE VERIFICACIÓN DE MÓDULOS"
 
-if ask "¿Crear /usr/local/bin/verificar-modulos-firmados.sh?"; then
+if check_executable /usr/local/bin/verificar-modulos-firmados.sh; then
+    log_already "Crear /usr/local/bin/verificar-modulos-firmados.sh"
+elif ask "¿Crear /usr/local/bin/verificar-modulos-firmados.sh?"; then
     cat > /usr/local/bin/verificar-modulos-firmados.sh << 'EOFMOD'
 #!/bin/bash
 # ============================================================
@@ -235,14 +252,14 @@ else
 fi
 
 # Verificar permisos de grub.cfg
-if [[ -f $GRUB_CFG ]]; then
-    grub_perm=$(stat -c "%a" $GRUB_CFG 2>/dev/null || echo "???")
+if [[ -f "$GRUB_CFG" ]]; then
+    grub_perm=$(stat -c "%a" "$GRUB_CFG" 2>/dev/null || echo "???")
     if [[ "$grub_perm" == "600" ]]; then
         log_info "$GRUB_CFG tiene permisos restrictivos ($grub_perm)"
     else
         log_warn "$GRUB_CFG tiene permisos: $grub_perm (recomendado: 600)"
         if ask "¿Aplicar permisos 600 a $GRUB_CFG?"; then
-            chmod 600 $GRUB_CFG
+            chmod 600 "$GRUB_CFG"
             log_change "Permisos" "$GRUB_CFG -> 600"
             log_info "$GRUB_CFG -> 600"
         else
