@@ -248,7 +248,11 @@ _show_help() {
     echo -e "    ${WHITE}m${NC}  ${DIM}Mitigaciones MITRE ATT&CK (12 módulos)${NC}"
     echo -e "    ${WHITE}o${NC}  ${DIM}Operaciones de Seguridad (5 módulos)${NC}"
     echo -e "    ${WHITE}i${NC}  ${DIM}Inteligencia (2 módulos)${NC}"
-    echo -e "    ${WHITE}x${NC}  ${DIM}Avanzado (34 módulos)${NC}"
+    echo -e "    ${WHITE}n${NC}  ${DIM}Infraestructura y Red (8 módulos)${NC}"
+    echo -e "    ${WHITE}s${NC}  ${DIM}Aplicaciones y Servicios (8 módulos)${NC}"
+    echo -e "    ${WHITE}r${NC}  ${DIM}Protección y Resiliencia (9 módulos)${NC}"
+    echo -e "    ${WHITE}d${NC}  ${DIM}Detección y Respuesta (7 módulos)${NC}"
+    echo -e "    ${WHITE}c${NC}  ${DIM}Cumplimiento (2 módulos)${NC}"
     echo -e "    ${WHITE}a${NC}  ${DIM}Aplicar todos los módulos${NC}"
     echo -e "    ${WHITE}v${NC}  ${DIM}Verificación proactiva (79 checks)${NC}"
     echo ""
@@ -2245,7 +2249,7 @@ submenu_deception() {
 
     while true; do
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} Avanzado ${DIM}❯${NC} ${BOLD}Tecnología de engaño"
+        _breadcrumb "Securizar ${DIM}❯${NC} Protección ${DIM}❯${NC} ${BOLD}Tecnología de engaño"
 
         echo -e "  ${DIM}Honeypots, tokens, honey files, usuarios canario, DNS, servicios falsos${NC}"
         echo ""
@@ -2565,7 +2569,7 @@ submenu_wireshark() {
         while $_ws_loop; do
         _ws_loop=false
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} Avanzado ${DIM}❯${NC} Wireshark ${DIM}❯${NC} ${BOLD}Dashboard"
+        _breadcrumb "Securizar ${DIM}❯${NC} Detección ${DIM}❯${NC} Wireshark ${DIM}❯${NC} ${BOLD}Dashboard"
 
         # ══ Banner sistema ══
         local _hn _dt _up _kern
@@ -3554,7 +3558,7 @@ submenu_wireshark() {
     _ws_conexiones() {
         set +e +o pipefail
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} Avanzado ${DIM}❯${NC} Wireshark ${DIM}❯${NC} ${BOLD}Conexiones"
+        _breadcrumb "Securizar ${DIM}❯${NC} Detección ${DIM}❯${NC} Wireshark ${DIM}❯${NC} ${BOLD}Conexiones"
         echo ""
 
         echo -e "  ${CYAN}${BOLD}PUERTOS EN ESCUCHA${NC}"
@@ -3653,7 +3657,7 @@ submenu_wireshark() {
     # ══════════════════════════════════════════════════════════════
     while true; do
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} Avanzado ${DIM}❯${NC} ${BOLD}Auditoría red Wireshark"
+        _breadcrumb "Securizar ${DIM}❯${NC} Detección ${DIM}❯${NC} ${BOLD}Auditoría red Wireshark"
 
         echo -e "  ${DIM}Wireshark, tshark, capturas, filtros, anomalías, reportes, Suricata${NC}"
         echo ""
@@ -3867,7 +3871,7 @@ submenu_auditoria_red() {
 
     while true; do
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} Avanzado ${DIM}❯${NC} ${BOLD}Auditoría infra red"
+        _breadcrumb "Securizar ${DIM}❯${NC} Detección ${DIM}❯${NC} ${BOLD}Auditoría infra red"
 
         echo -e "  ${DIM}nmap, TLS/SSL, SNMP, baseline, drift, reporte consolidado${NC}"
         echo ""
@@ -4044,7 +4048,11 @@ aplicar_todo_seguro() {
     echo -e "    ${RED}18-29${NC} ${DIM}Mitigaciones MITRE ATT&CK${NC}"
     echo -e "    ${GREEN}30-34${NC} ${DIM}Operaciones de Seguridad${NC}"
     echo -e "    ${CYAN}35-36${NC} ${DIM}Inteligencia${NC}"
-    echo -e "    ${YELLOW}37-70${NC} ${DIM}Avanzado${NC}"
+    echo -e "    ${YELLOW}37..${NC}  ${DIM}Infraestructura y Red${NC}"
+    echo -e "    ${YELLOW}  ..${NC}  ${DIM}Aplicaciones y Servicios${NC}"
+    echo -e "    ${YELLOW}  ..${NC}  ${DIM}Protección y Resiliencia${NC}"
+    echo -e "    ${YELLOW}  ..${NC}  ${DIM}Detección y Respuesta${NC}"
+    echo -e "    ${YELLOW}..70${NC}  ${DIM}Cumplimiento${NC}"
 
     if ! ask "¿Continuar con la aplicación de TODOS los módulos?"; then
         log_info "Operación cancelada por el usuario"
@@ -6113,6 +6121,48 @@ verificacion_proactiva() {
 # SUB-MENÚS
 # ============================================================
 
+_run_non_consecutive() {
+    local label=$1; shift
+    local modules=("$@")
+    local count=${#modules[@]}
+
+    echo ""
+    echo -e "  ${BG_CYAN} ${label} ${NC}"
+    echo -e "  ${DIM}Se ejecutarán ${count} módulos secuencialmente${NC}"
+
+    if ! ask "¿Continuar con todos los módulos de esta categoría?"; then
+        return 0
+    fi
+
+    local ok=0 fail=0 idx=0
+    for n in "${modules[@]}"; do
+        ((idx++))
+        echo ""
+        _progress_bar "$idx" "$count"
+        echo -e "  ${CYAN}▶${NC} ${BOLD}${MOD_NAMES[$n]}${NC}"
+        echo ""
+
+        if ${MOD_FUNCS[$n]}; then
+            MOD_RUN[$n]=1
+            echo -e "  ${GREEN}✓${NC} Completado"
+            ((ok++)) || true
+        else
+            MOD_RUN[$n]=1
+            echo -e "  ${RED}✗${NC} Falló"
+            ((fail++)) || true
+        fi
+    done
+
+    echo ""
+    _progress_bar "$count" "$count"
+    echo ""
+    if [[ $fail -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} ${BOLD}Todos completados${NC} ($ok/$count)"
+    else
+        echo -e "  ${YELLOW}⚠${NC} ${GREEN}$ok OK${NC} · ${RED}$fail fallidos${NC}"
+    fi
+}
+
 submenu_base() {
     while true; do
         _draw_header_compact
@@ -6298,18 +6348,89 @@ submenu_inteligencia() {
     done
 }
 
-submenu_avanzado() {
+submenu_infraestructura() {
     while true; do
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Avanzado"
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Infraestructura y Red"
 
-        echo -e "  ${DIM}Criptografía, contenedores, CIS, email, logging, supply chain, red, forense, kernel,${NC}"
-        echo -e "  ${DIM}BBDD, backup, web, secretos, cloud, LDAP, compliance, deception, wireless, VM, física,${NC}"
-        echo -e "  ${DIM}ZT, ransomware, parches, DevSecOps, APIs, IoT, DNS, auditoría red, infra red,${NC}"
-        echo -e "  ${DIM}runtime kernel, memoria/procesos, respuesta incidentes, EDR, vuln mgmt${NC}"
+        echo -e "  ${DIM}Criptografía, segmentación red, cloud/LDAP, wireless, virtualización, Zero Trust, DNS${NC}"
         echo ""
         local n
-        for n in 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70; do
+        for n in 37 43 50 51 54 55 57 63; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            37|43|50|51|54|55|57|63) _exec_module "$opt" ;;
+            t|T)         _run_non_consecutive "Infraestructura y Red" 37 43 50 51 54 55 57 63 ; _pause ;;
+            b|B|0)       return ;;
+            q|Q)         _exit_securizar ;;
+            "?")         _show_help ;;
+            "")          continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 70 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_aplicaciones() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Aplicaciones y Servicios"
+
+        echo -e "  ${DIM}Contenedores, email, BBDD, web, secretos, DevSecOps, APIs, IoT${NC}"
+        echo ""
+        local n
+        for n in 38 40 46 48 49 60 61 62; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            38|40|46|48|49|60|61|62) _exec_module "$opt" ;;
+            t|T)         _run_non_consecutive "Aplicaciones y Servicios" 38 40 46 48 49 60 61 62 ; _pause ;;
+            b|B|0)       return ;;
+            q|Q)         _exit_securizar ;;
+            "?")         _show_help ;;
+            "")          continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 70 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_proteccion() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Protección y Resiliencia"
+
+        echo -e "  ${DIM}Supply chain, livepatch, backup, deception, seguridad física, ransomware, parches, kernel, memoria${NC}"
+        echo ""
+        local n
+        for n in 42 45 47 53 56 58 59 66 67; do
             _show_module_entry "$n"
         done
 
@@ -6322,10 +6443,84 @@ submenu_avanzado() {
 
         case "$opt" in
             53) submenu_deception ;;
+            42|45|47|56|58|59|66|67) _exec_module "$opt" ;;
+            t|T)         _run_non_consecutive "Protección y Resiliencia" 42 45 47 53 56 58 59 66 67 ; _pause ;;
+            b|B|0)       return ;;
+            q|Q)         _exit_securizar ;;
+            "?")         _show_help ;;
+            "")          continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 70 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_deteccion() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Detección y Respuesta"
+
+        echo -e "  ${DIM}Logging, forense, auditoría red, respuesta incidentes, EDR, gestión vulnerabilidades${NC}"
+        echo ""
+        local n
+        for n in 41 44 64 65 68 69 70; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
             64) submenu_wireshark ;;
             65) submenu_auditoria_red ;;
-            37|38|39|40|41|42|43|44|45|46|47|48|49|50|51|52|54|55|56|57|58|59|60|61|62|63|66|67|68|69|70) _exec_module "$opt" ;;
-            t|T)         _run_category "Avanzado" 37 70 ; _pause ;;
+            41|44|68|69|70) _exec_module "$opt" ;;
+            t|T)         _run_non_consecutive "Detección y Respuesta" 41 44 64 65 68 69 70 ; _pause ;;
+            b|B|0)       return ;;
+            q|Q)         _exit_securizar ;;
+            "?")         _show_help ;;
+            "")          continue ;;
+            *)
+                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 70 ]]; then
+                    _exec_module "$opt"
+                else
+                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                fi
+                ;;
+        esac
+    done
+}
+
+submenu_cumplimiento() {
+    while true; do
+        _draw_header_compact
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Cumplimiento"
+
+        echo -e "  ${DIM}CIS benchmarks, cumplimiento normativo (PCI-DSS, HIPAA, GDPR, ENS)${NC}"
+        echo ""
+        local n
+        for n in 39 52; do
+            _show_module_entry "$n"
+        done
+
+        echo ""
+        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+        echo ""
+        echo -ne "  ${BOLD}❯${NC} "
+        read -r opt
+
+        case "$opt" in
+            39|52)       _exec_module "$opt" ;;
+            t|T)         _run_non_consecutive "Cumplimiento" 39 52 ; _pause ;;
             b|B|0)       return ;;
             q|Q)         _exit_securizar ;;
             "?")         _show_help ;;
@@ -6379,10 +6574,38 @@ menu_principal() {
         _cat_dots 2 "$intel_done"
         echo ""
 
-        local avz_done=0
-        for _n in 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((avz_done++)) || true; done
-        printf "    ${YELLOW}x${NC}   ${BOLD}Avanzado${NC}                     ${DIM}34 módulos${NC}  "
-        _cat_dots 34 "$avz_done"
+        echo ""
+        echo -e "  ${DIM}  ─────────────────────────────────────────────────────────${NC}"
+        echo ""
+
+        local infra_done=0
+        for _n in 37 43 50 51 54 55 57 63; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((infra_done++)) || true; done
+        printf "    ${CYAN}n${NC}   ${BOLD}Infraestructura y Red${NC}        ${DIM}8 módulos${NC}   "
+        _cat_dots 8 "$infra_done"
+        echo ""
+
+        local apps_done=0
+        for _n in 38 40 46 48 49 60 61 62; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((apps_done++)) || true; done
+        printf "    ${CYAN}s${NC}   ${BOLD}Aplicaciones y Servicios${NC}     ${DIM}8 módulos${NC}   "
+        _cat_dots 8 "$apps_done"
+        echo ""
+
+        local prot_done=0
+        for _n in 42 45 47 53 56 58 59 66 67; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((prot_done++)) || true; done
+        printf "    ${CYAN}r${NC}   ${BOLD}Protección y Resiliencia${NC}     ${DIM}9 módulos${NC}   "
+        _cat_dots 9 "$prot_done"
+        echo ""
+
+        local det_done=0
+        for _n in 41 44 64 65 68 69 70; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((det_done++)) || true; done
+        printf "    ${CYAN}d${NC}   ${BOLD}Detección y Respuesta${NC}        ${DIM}7 módulos${NC}   "
+        _cat_dots 7 "$det_done"
+        echo ""
+
+        local cumpl_done=0
+        for _n in 39 52; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((cumpl_done++)) || true; done
+        printf "    ${CYAN}c${NC}   ${BOLD}Cumplimiento${NC}                 ${DIM}2 módulos${NC}   "
+        _cat_dots 2 "$cumpl_done"
         echo ""
 
         echo ""
@@ -6402,6 +6625,9 @@ menu_principal() {
         if [[ "$opcion" == "53" ]]; then
             submenu_deception
             continue
+        elif [[ "$opcion" == "64" ]]; then
+            submenu_wireshark
+            continue
         elif [[ "$opcion" == "65" ]]; then
             submenu_auditoria_red
             continue
@@ -6416,7 +6642,11 @@ menu_principal() {
             m|M)    submenu_mitre ;;
             o|O)    submenu_operaciones ;;
             i|I)    submenu_inteligencia ;;
-            x|X)    submenu_avanzado ;;
+            n|N)    submenu_infraestructura ;;
+            s|S)    submenu_aplicaciones ;;
+            r|R)    submenu_proteccion ;;
+            d|D)    submenu_deteccion ;;
+            c|C)    submenu_cumplimiento ;;
             a|A)    aplicar_todo_seguro ; _pause ;;
             v|V)    verificacion_proactiva ; _pause ;;
             "?")    _show_help ;;
