@@ -311,19 +311,18 @@ if [[ -f /etc/pam.d/su ]]; then
     PAM_SU_HASH=$(sha256sum /etc/pam.d/su 2>/dev/null | awk '{print $1}')
 fi
 
-# ============================================================
-# MÓDULO 1: hardening-opensuse.sh (SEGURO - delegado)
-# ============================================================
-mod_01_opensuse() {
-    log_section "MÓDULO 1: Hardening openSUSE base"
-    local script="$SCRIPT_DIR/hardening-opensuse.sh"
+# ── Helpers de delegación ────────────────────────────────────
+_run_delegated() {
+    local mod_num="$1" mod_label="$2" script_name="$3"
+    log_section "MÓDULO ${mod_num}: ${mod_label}"
+    local script="$SCRIPT_DIR/${script_name}"
     if [[ -f "$script" ]]; then
         local rc=0
         bash "$script" || rc=$?
         if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 1 completado"
+            log_info "Módulo ${mod_num} completado"
         else
-            log_warn "Módulo 1 terminó con código $rc"
+            log_warn "Módulo ${mod_num} terminó con código $rc"
         fi
         return $rc
     else
@@ -332,20 +331,12 @@ mod_01_opensuse() {
     fi
 }
 
-# ============================================================
-# MÓDULO 2: hardening-seguro.sh (SEGURO - delegado)
-# ============================================================
-mod_02_seguro() {
-    log_section "MÓDULO 2: Hardening seguro"
-    local script="$SCRIPT_DIR/hardening-seguro.sh"
+_run_delegated_section() {
+    local script_name="$1" section="${2:-all}"
+    local script="$SCRIPT_DIR/${script_name}"
     if [[ -f "$script" ]]; then
         local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 2 completado"
-        else
-            log_warn "Módulo 2 terminó con código $rc"
-        fi
+        bash "$script" "$section" || rc=$?
         return $rc
     else
         log_error "No encontrado: $script"
@@ -353,47 +344,11 @@ mod_02_seguro() {
     fi
 }
 
-# ============================================================
-# MÓDULO 3: hardening-final.sh (SEGURO - delegado)
-# ============================================================
-mod_03_final() {
-    log_section "MÓDULO 3: Hardening final"
-    local script="$SCRIPT_DIR/hardening-final.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 3 completado"
-        else
-            log_warn "Módulo 3 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 4: hardening-externo.sh (SEGURO - delegado)
-# ============================================================
-mod_04_externo() {
-    log_section "MÓDULO 4: Hardening externo"
-    local script="$SCRIPT_DIR/hardening-externo.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 4 completado"
-        else
-            log_warn "Módulo 4 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 1-4: Hardening base delegado ────────────────────
+mod_01_opensuse()  { _run_delegated 1 "Hardening openSUSE base" "hardening-opensuse.sh"; }
+mod_02_seguro()    { _run_delegated 2 "Hardening seguro" "hardening-seguro.sh"; }
+mod_03_final()     { _run_delegated 3 "Hardening final" "hardening-final.sh"; }
+mod_04_externo()   { _run_delegated 4 "Hardening externo" "hardening-externo.sh"; }
 
 # ============================================================
 # MÓDULO 5: hardening-extremo SEGURO (INLINE)
@@ -1220,618 +1175,45 @@ EOF
 # ============================================================
 # MÓDULO 7: contramedidas-mesh.sh (SEGURO - delegado)
 # ============================================================
-mod_07_mesh() {
-    log_section "MÓDULO 7: Contramedidas mesh"
-    local script="$SCRIPT_DIR/contramedidas-mesh.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 7 completado"
-        else
-            log_warn "Módulo 7 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 7-9: Mesh, privacidad, banners ──────────────────
+mod_07_mesh()       { _run_delegated 7 "Contramedidas mesh" "contramedidas-mesh.sh"; }
+mod_09_privacidad() { _run_delegated 8 "Proteger privacidad" "proteger-privacidad.sh"; }
+mod_10_banners()    { _run_delegated 9 "Aplicar banners" "aplicar-banner-total.sh"; }
 
-# ============================================================
-# ============================================================
-# MÓDULO 8: proteger-privacidad.sh (SEGURO - delegado)
-# ============================================================
-mod_09_privacidad() {
-    log_section "MÓDULO 8: Proteger privacidad"
-    local script="$SCRIPT_DIR/proteger-privacidad.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 8 completado"
-        else
-            log_warn "Módulo 8 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 10-29: Proactiva + MITRE ────────────────────────
+mod_11_kernel_boot()       { _run_delegated 10 "Kernel boot y Secure Boot" "hardening-kernel-boot.sh"; }
+mod_12_servicios_systemd() { _run_delegated 11 "Sandboxing de servicios systemd" "hardening-servicios-systemd.sh"; }
+mod_13_cuentas()           { _run_delegated 12 "Seguridad de cuentas" "hardening-cuentas.sh"; }
+mod_14_red_avanzada()      { _run_delegated 13 "Red avanzada (IDS/DoT/VPN)" "proteger-red-avanzado.sh"; }
+mod_15_automatizacion()    { _run_delegated 14 "Automatización de seguridad" "automatizar-seguridad.sh"; }
+mod_16_sandbox()           { _run_delegated 15 "Sandboxing de aplicaciones" "sandbox-aplicaciones.sh"; }
+mod_17_auditoria_externa() { _run_delegated 16 "Auditoría externa (reconocimiento TA0043)" "auditoria-externa.sh"; }
+mod_18_threat_intel()      { _run_delegated 17 "Inteligencia de amenazas (IoC feeds M1019)" "inteligencia-amenazas.sh"; }
+mod_19_acceso_inicial()    { _run_delegated 18 "Mitigación acceso inicial (TA0001)" "mitigar-acceso-inicial.sh"; }
+mod_20_ejecucion()         { _run_delegated 19 "Mitigación ejecución (TA0002)" "mitigar-ejecucion.sh"; }
+mod_21_persistencia()      { _run_delegated 20 "Mitigación persistencia (TA0003)" "mitigar-persistencia.sh"; }
+mod_22_escalada()          { _run_delegated 21 "Mitigación escalada de privilegios (TA0004)" "mitigar-escalada.sh"; }
+mod_23_impacto()           { _run_delegated 22 "Mitigación de impacto (TA0040)" "mitigar-impacto.sh"; }
+mod_24_evasion()           { _run_delegated 23 "Mitigación de evasión de defensas (TA0005)" "mitigar-evasion.sh"; }
+mod_25_credenciales()      { _run_delegated 24 "Mitigación de acceso a credenciales (TA0006)" "mitigar-credenciales.sh"; }
+mod_26_descubrimiento()    { _run_delegated 25 "Mitigación de descubrimiento (TA0007)" "mitigar-descubrimiento.sh"; }
+mod_27_movimiento_lateral(){ _run_delegated 26 "Mitigación de movimiento lateral (TA0008)" "mitigar-movimiento-lateral.sh"; }
+mod_28_recoleccion()       { _run_delegated 27 "Mitigación de recolección (TA0009)" "mitigar-recoleccion.sh"; }
+mod_29_exfiltracion()      { _run_delegated 28 "Mitigación de exfiltración (TA0010)" "mitigar-exfiltracion.sh"; }
+mod_30_comando_control()   { _run_delegated 29 "Mitigación de comando y control (TA0011)" "mitigar-comando-control.sh"; }
 
-# ============================================================
-# MÓDULO 9: aplicar-banner-total.sh (SEGURO - delegado)
-# ============================================================
-mod_10_banners() {
-    log_section "MÓDULO 9: Aplicar banners"
-    local script="$SCRIPT_DIR/aplicar-banner-total.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 9 completado"
-        else
-            log_warn "Módulo 9 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 30-35: Operaciones + Inteligencia ───────────────
+mod_32_monitorizar()            { _run_delegated 30 "Monitorización continua" "monitorizar-continuo.sh"; }
+mod_33_reportes()               { _run_delegated 31 "Reportes de seguridad" "reportar-seguridad.sh"; }
+mod_34_cazar_amenazas()         { _run_delegated 32 "Caza de amenazas" "cazar-amenazas.sh"; }
+mod_35_automatizar_respuesta()  { _run_delegated 33 "Automatización de respuesta" "automatizar-respuesta.sh"; }
+mod_36_validar_controles()      { _run_delegated 34 "Validación de controles" "validar-controles.sh"; }
+mod_37_ciberinteligencia()      { _run_delegated 35 "Ciberinteligencia proactiva" "ciberinteligencia.sh"; }
 
-# ============================================================
-# MÓDULO 10: hardening-kernel-boot.sh (SEGURO - delegado)
-# ============================================================
-mod_11_kernel_boot() {
-    log_section "MÓDULO 10: Kernel boot y Secure Boot"
-    local script="$SCRIPT_DIR/hardening-kernel-boot.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 10 completado"
-        else
-            log_warn "Módulo 10 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 11: hardening-servicios-systemd.sh (SEGURO - delegado)
-# ============================================================
-mod_12_servicios_systemd() {
-    log_section "MÓDULO 11: Sandboxing de servicios systemd"
-    local script="$SCRIPT_DIR/hardening-servicios-systemd.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 11 completado"
-        else
-            log_warn "Módulo 11 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 12: hardening-cuentas.sh (SEGURO - delegado)
-# ============================================================
-mod_13_cuentas() {
-    log_section "MÓDULO 12: Seguridad de cuentas"
-    local script="$SCRIPT_DIR/hardening-cuentas.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 12 completado"
-        else
-            log_warn "Módulo 12 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 13: proteger-red-avanzado.sh (SEGURO - delegado)
-# ============================================================
-mod_14_red_avanzada() {
-    log_section "MÓDULO 13: Red avanzada (IDS/DoT/VPN)"
-    local script="$SCRIPT_DIR/proteger-red-avanzado.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 13 completado"
-        else
-            log_warn "Módulo 13 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 14: automatizar-seguridad.sh (SEGURO - delegado)
-# ============================================================
-mod_15_automatizacion() {
-    log_section "MÓDULO 14: Automatización de seguridad"
-    local script="$SCRIPT_DIR/automatizar-seguridad.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 14 completado"
-        else
-            log_warn "Módulo 14 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 15: sandbox-aplicaciones.sh (SEGURO - delegado)
-# ============================================================
-mod_16_sandbox() {
-    log_section "MÓDULO 15: Sandboxing de aplicaciones"
-    local script="$SCRIPT_DIR/sandbox-aplicaciones.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 15 completado"
-        else
-            log_warn "Módulo 15 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 16: auditoria-externa.sh (SEGURO - delegado)
-# ============================================================
-mod_17_auditoria_externa() {
-    log_section "MÓDULO 16: Auditoría externa (reconocimiento TA0043)"
-    local script="$SCRIPT_DIR/auditoria-externa.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 16 completado"
-        else
-            log_warn "Módulo 16 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 17: inteligencia-amenazas.sh (SEGURO - delegado)
-# ============================================================
-mod_18_threat_intel() {
-    log_section "MÓDULO 17: Inteligencia de amenazas (IoC feeds M1019)"
-    local script="$SCRIPT_DIR/inteligencia-amenazas.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 17 completado"
-        else
-            log_warn "Módulo 17 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 18: mitigar-acceso-inicial.sh (SEGURO - delegado)
-# ============================================================
-mod_19_acceso_inicial() {
-    log_section "MÓDULO 18: Mitigación acceso inicial (TA0001)"
-    local script="$SCRIPT_DIR/mitigar-acceso-inicial.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 18 completado"
-        else
-            log_warn "Módulo 18 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 19: mitigar-ejecucion.sh (SEGURO - delegado)
-# ============================================================
-mod_20_ejecucion() {
-    log_section "MÓDULO 19: Mitigación ejecución (TA0002)"
-    local script="$SCRIPT_DIR/mitigar-ejecucion.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 19 completado"
-        else
-            log_warn "Módulo 19 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 20: mitigar-persistencia.sh (SEGURO - delegado)
-# ============================================================
-mod_21_persistencia() {
-    log_section "MÓDULO 20: Mitigación persistencia (TA0003)"
-    local script="$SCRIPT_DIR/mitigar-persistencia.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 20 completado"
-        else
-            log_warn "Módulo 20 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 21: mitigar-escalada.sh (SEGURO - delegado)
-# ============================================================
-mod_22_escalada() {
-    log_section "MÓDULO 21: Mitigación escalada de privilegios (TA0004)"
-    local script="$SCRIPT_DIR/mitigar-escalada.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 21 completado"
-        else
-            log_warn "Módulo 21 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 22: mitigar-impacto.sh (SEGURO - delegado)
-# ============================================================
-mod_23_impacto() {
-    log_section "MÓDULO 22: Mitigación de impacto (TA0040)"
-    local script="$SCRIPT_DIR/mitigar-impacto.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 22 completado"
-        else
-            log_warn "Módulo 22 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 23: mitigar-evasion.sh (SEGURO - delegado)
-# ============================================================
-mod_24_evasion() {
-    log_section "MÓDULO 23: Mitigación de evasión de defensas (TA0005)"
-    local script="$SCRIPT_DIR/mitigar-evasion.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 23 completado"
-        else
-            log_warn "Módulo 23 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 24: mitigar-credenciales.sh (SEGURO - delegado)
-# ============================================================
-mod_25_credenciales() {
-    log_section "MÓDULO 24: Mitigación de acceso a credenciales (TA0006)"
-    local script="$SCRIPT_DIR/mitigar-credenciales.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 24 completado"
-        else
-            log_warn "Módulo 24 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 25: mitigar-descubrimiento.sh (SEGURO - delegado)
-# ============================================================
-mod_26_descubrimiento() {
-    log_section "MÓDULO 25: Mitigación de descubrimiento (TA0007)"
-    local script="$SCRIPT_DIR/mitigar-descubrimiento.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 25 completado"
-        else
-            log_warn "Módulo 25 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 26: mitigar-movimiento-lateral.sh (SEGURO - delegado)
-# ============================================================
-mod_27_movimiento_lateral() {
-    log_section "MÓDULO 26: Mitigación de movimiento lateral (TA0008)"
-    local script="$SCRIPT_DIR/mitigar-movimiento-lateral.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 26 completado"
-        else
-            log_warn "Módulo 26 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 27: mitigar-recoleccion.sh (SEGURO - delegado)
-# ============================================================
-mod_28_recoleccion() {
-    log_section "MÓDULO 27: Mitigación de recolección (TA0009)"
-    local script="$SCRIPT_DIR/mitigar-recoleccion.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 27 completado"
-        else
-            log_warn "Módulo 27 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 28: mitigar-exfiltracion.sh (SEGURO - delegado)
-# ============================================================
-mod_29_exfiltracion() {
-    log_section "MÓDULO 28: Mitigación de exfiltración (TA0010)"
-    local script="$SCRIPT_DIR/mitigar-exfiltracion.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 28 completado"
-        else
-            log_warn "Módulo 28 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 29: mitigar-comando-control.sh (SEGURO - delegado)
-# ============================================================
-mod_30_comando_control() {
-    log_section "MÓDULO 29: Mitigación de comando y control (TA0011)"
-    local script="$SCRIPT_DIR/mitigar-comando-control.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 29 completado"
-        else
-            log_warn "Módulo 29 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_32_monitorizar() {
-    log_section "MÓDULO 30: Monitorización continua"
-    local script="$SCRIPT_DIR/monitorizar-continuo.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 30 completado"
-        else
-            log_warn "Módulo 30 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_33_reportes() {
-    log_section "MÓDULO 31: Reportes de seguridad"
-    local script="$SCRIPT_DIR/reportar-seguridad.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 31 completado"
-        else
-            log_warn "Módulo 31 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_34_cazar_amenazas() {
-    log_section "MÓDULO 32: Caza de amenazas"
-    local script="$SCRIPT_DIR/cazar-amenazas.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 32 completado"
-        else
-            log_warn "Módulo 32 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_35_automatizar_respuesta() {
-    log_section "MÓDULO 33: Automatización de respuesta"
-    local script="$SCRIPT_DIR/automatizar-respuesta.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 33 completado"
-        else
-            log_warn "Módulo 33 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_36_validar_controles() {
-    log_section "MÓDULO 34: Validación de controles"
-    local script="$SCRIPT_DIR/validar-controles.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 34 completado"
-        else
-            log_warn "Módulo 34 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 35: ciberinteligencia.sh (delegado)
-# ============================================================
-mod_37_ciberinteligencia() {
-    log_section "MÓDULO 35: Ciberinteligencia proactiva"
-    local script="$SCRIPT_DIR/ciberinteligencia.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 35 completado"
-        else
-            log_warn "Módulo 35 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 36: proteger-contra-isp.sh (delegado)
-# ============================================================
+# ── Módulo 36: ISP (section-aware con log_section) ──────────
 mod_38_proteger_isp() {
-    local section="${1:-all}"
     log_section "MÓDULO 36: Protección contra espionaje ISP"
-    local script="$SCRIPT_DIR/proteger-contra-isp.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 36 completado"
-        else
-            log_warn "Módulo 36 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
+    _run_delegated_section "proteger-contra-isp.sh" "${1:-all}"
 }
 
 submenu_isp() {
@@ -1959,390 +1341,28 @@ submenu_isp() {
     done
 }
 
-# ============================================================
-# MÓDULO 37: hardening-criptografico.sh (delegado)
-# ============================================================
-mod_39_hardening_crypto() {
-    log_section "MÓDULO 37: Hardening criptográfico"
-    local script="$SCRIPT_DIR/hardening-criptografico.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 37 completado"
-        else
-            log_warn "Módulo 37 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 37-52: Infra, Apps, Cumplimiento ────────────────
+mod_39_hardening_crypto()       { _run_delegated 37 "Hardening criptográfico" "hardening-criptografico.sh"; }
+mod_40_contenedores()           { _run_delegated 38 "Seguridad de contenedores" "seguridad-contenedores.sh"; }
+mod_41_cumplimiento_cis()       { _run_delegated 39 "Cumplimiento CIS Benchmarks" "cumplimiento-cis.sh"; }
+mod_42_seguridad_email()        { _run_delegated 40 "Seguridad de email" "seguridad-email.sh"; }
+mod_43_logging_centralizado()   { _run_delegated 41 "Logging centralizado y SIEM" "logging-centralizado.sh"; }
+mod_44_cadena_suministro()      { _run_delegated 42 "Seguridad de cadena de suministro" "seguridad-cadena-suministro.sh"; }
+mod_45_segmentacion_zt()        { _run_delegated 43 "Segmentación de red y Zero Trust" "segmentacion-red-zt.sh"; }
+mod_46_forense_avanzado()       { _run_delegated 44 "Forense avanzado" "forense-avanzado.sh"; }
+mod_47_kernel_livepatch()       { _run_delegated 45 "Kernel live patching" "kernel-livepatch.sh"; }
+mod_48_seguridad_bases_datos()  { _run_delegated 46 "Seguridad de bases de datos" "seguridad-bases-datos.sh"; }
+mod_49_backup_recuperacion()    { _run_delegated 47 "Backup y recuperación ante desastres" "backup-recuperacion.sh"; }
+mod_50_seguridad_web()          { _run_delegated 48 "Seguridad de aplicaciones web" "seguridad-web.sh"; }
+mod_51_secrets_management()     { _run_delegated 49 "Gestión de secretos" "seguridad-secrets.sh"; }
+mod_52_seguridad_cloud()        { _run_delegated 50 "Seguridad cloud" "seguridad-cloud.sh"; }
+mod_53_seguridad_ldap()         { _run_delegated 51 "LDAP y Active Directory" "seguridad-ldap-ad.sh"; }
+mod_54_cumplimiento_normativo() { _run_delegated 52 "Cumplimiento normativo" "cumplimiento-normativo.sh"; }
+mod_57_virtualizacion()         { _run_delegated 55 "Seguridad de virtualización" "seguridad-virtualizacion.sh"; }
+mod_58_seguridad_fisica()       { _run_delegated 56 "Seguridad física avanzada" "seguridad-fisica.sh"; }
+mod_59_zero_trust_id()          { _run_delegated 57 "Zero Trust Identity" "zero-trust-identity.sh"; }
 
-# ============================================================
-# MÓDULO 38: seguridad-contenedores.sh (delegado)
-# ============================================================
-mod_40_contenedores() {
-    log_section "MÓDULO 38: Seguridad de contenedores"
-    local script="$SCRIPT_DIR/seguridad-contenedores.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 38 completado"
-        else
-            log_warn "Módulo 38 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 39: cumplimiento-cis.sh (delegado)
-# ============================================================
-mod_41_cumplimiento_cis() {
-    log_section "MÓDULO 39: Cumplimiento CIS Benchmarks"
-    local script="$SCRIPT_DIR/cumplimiento-cis.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 39 completado"
-        else
-            log_warn "Módulo 39 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 40: seguridad-email.sh (delegado)
-# ============================================================
-mod_42_seguridad_email() {
-    log_section "MÓDULO 40: Seguridad de email"
-    local script="$SCRIPT_DIR/seguridad-email.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 40 completado"
-        else
-            log_warn "Módulo 40 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 41: logging-centralizado.sh (delegado)
-# ============================================================
-mod_43_logging_centralizado() {
-    log_section "MÓDULO 41: Logging centralizado y SIEM"
-    local script="$SCRIPT_DIR/logging-centralizado.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 41 completado"
-        else
-            log_warn "Módulo 41 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 42: seguridad-cadena-suministro.sh (delegado)
-# ============================================================
-mod_44_cadena_suministro() {
-    log_section "MÓDULO 42: Seguridad de cadena de suministro"
-    local script="$SCRIPT_DIR/seguridad-cadena-suministro.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 42 completado"
-        else
-            log_warn "Módulo 42 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 43: segmentacion-red-zt.sh (delegado)
-# ============================================================
-mod_45_segmentacion_zt() {
-    log_section "MÓDULO 43: Segmentación de red y Zero Trust"
-    local script="$SCRIPT_DIR/segmentacion-red-zt.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 43 completado"
-        else
-            log_warn "Módulo 43 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 44: forense-avanzado.sh (delegado)
-# ============================================================
-mod_46_forense_avanzado() {
-    log_section "MÓDULO 44: Forense avanzado"
-    local script="$SCRIPT_DIR/forense-avanzado.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 44 completado"
-        else
-            log_warn "Módulo 44 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ============================================================
-# MÓDULO 45: kernel-livepatch.sh (delegado)
-# ============================================================
-mod_47_kernel_livepatch() {
-    log_section "MÓDULO 45: Kernel live patching"
-    local script="$SCRIPT_DIR/kernel-livepatch.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 45 completado"
-        else
-            log_warn "Módulo 45 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_48_seguridad_bases_datos() {
-    log_section "MÓDULO 46: Seguridad de bases de datos"
-    local script="$SCRIPT_DIR/seguridad-bases-datos.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 46 completado"
-        else
-            log_warn "Módulo 46 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_49_backup_recuperacion() {
-    log_section "MÓDULO 47: Backup y recuperación ante desastres"
-    local script="$SCRIPT_DIR/backup-recuperacion.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 47 completado"
-        else
-            log_warn "Módulo 47 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_50_seguridad_web() {
-    log_section "MÓDULO 48: Seguridad de aplicaciones web"
-    local script="$SCRIPT_DIR/seguridad-web.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 48 completado"
-        else
-            log_warn "Módulo 48 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 49: seguridad-secrets.sh (delegado) ──
-mod_51_secrets_management() {
-    log_section "MÓDULO 49: Gestión de secretos"
-    local script="$SCRIPT_DIR/seguridad-secrets.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 49 completado"
-        else
-            log_warn "Módulo 49 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 50: seguridad-cloud.sh (delegado) ──
-mod_52_seguridad_cloud() {
-    log_section "MÓDULO 50: Seguridad cloud"
-    local script="$SCRIPT_DIR/seguridad-cloud.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 50 completado"
-        else
-            log_warn "Módulo 50 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 51: seguridad-ldap-ad.sh (delegado) ──
-mod_53_seguridad_ldap() {
-    log_section "MÓDULO 51: LDAP y Active Directory"
-    local script="$SCRIPT_DIR/seguridad-ldap-ad.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 51 completado"
-        else
-            log_warn "Módulo 51 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_57_virtualizacion() {
-    log_section "MÓDULO 55: Seguridad de virtualización"
-    local script="$SCRIPT_DIR/seguridad-virtualizacion.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 55 completado"
-        else
-            log_warn "Módulo 55 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_58_seguridad_fisica() {
-    log_section "MÓDULO 56: Seguridad física avanzada"
-    local script="$SCRIPT_DIR/seguridad-fisica.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 56 completado"
-        else
-            log_warn "Módulo 56 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_59_zero_trust_id() {
-    log_section "MÓDULO 57: Zero Trust Identity"
-    local script="$SCRIPT_DIR/zero-trust-identity.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 57 completado"
-        else
-            log_warn "Módulo 57 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_54_cumplimiento_normativo() {
-    log_section "MÓDULO 52: Cumplimiento normativo"
-    local script="$SCRIPT_DIR/cumplimiento-normativo.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 52 completado"
-        else
-            log_warn "Módulo 52 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_55_deception_tech() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/tecnologia-engano.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+mod_55_deception_tech() { _run_delegated_section "tecnologia-engano.sh" "${1:-all}"; }
 
 submenu_deception() {
     local -a SEC_NAMES=(
@@ -2459,151 +1479,17 @@ submenu_deception() {
     done
 }
 
-mod_56_seguridad_wireless() {
-    log_section "MÓDULO 54: Seguridad wireless"
-    local script="$SCRIPT_DIR/seguridad-wireless.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 54 completado"
-        else
-            log_warn "Módulo 54 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 54-63: Wireless, ransomware, parches, etc. ──────
+mod_56_seguridad_wireless()    { _run_delegated 54 "Seguridad wireless" "seguridad-wireless.sh"; }
+mod_60_proteger_ransomware()   { _run_delegated 58 "Protección anti-ransomware" "proteger-ransomware.sh"; }
+mod_61_gestion_parches()       { _run_delegated 59 "Gestión de parches y vulnerabilidades" "gestion-parches.sh"; }
+mod_62_devsecops()             { _run_delegated 60 "DevSecOps hardening" "devsecops-hardening.sh"; }
+mod_63_seguridad_api()         { _run_delegated 61 "Seguridad de APIs" "seguridad-api.sh"; }
+mod_64_seguridad_iot()         { _run_delegated 62 "Seguridad IoT" "seguridad-iot.sh"; }
+mod_65_seguridad_dns()         { _run_delegated 63 "Seguridad DNS avanzada" "seguridad-dns-avanzada.sh"; }
 
-# ── MÓDULO 58: proteger-ransomware.sh (delegado) ──
-mod_60_proteger_ransomware() {
-    log_section "MÓDULO 58: Protección anti-ransomware"
-    local script="$SCRIPT_DIR/proteger-ransomware.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 58 completado"
-        else
-            log_warn "Módulo 58 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 59: gestion-parches.sh (delegado) ──
-mod_61_gestion_parches() {
-    log_section "MÓDULO 59: Gestión de parches y vulnerabilidades"
-    local script="$SCRIPT_DIR/gestion-parches.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 59 completado"
-        else
-            log_warn "Módulo 59 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 60: devsecops-hardening.sh (delegado) ──
-mod_62_devsecops() {
-    log_section "MÓDULO 60: DevSecOps hardening"
-    local script="$SCRIPT_DIR/devsecops-hardening.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 60 completado"
-        else
-            log_warn "Módulo 60 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 61: seguridad-api.sh (delegado) ──
-mod_63_seguridad_api() {
-    log_section "MÓDULO 61: Seguridad de APIs"
-    local script="$SCRIPT_DIR/seguridad-api.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 61 completado"
-        else
-            log_warn "Módulo 61 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 62: seguridad-iot.sh (delegado) ──
-mod_64_seguridad_iot() {
-    log_section "MÓDULO 62: Seguridad IoT"
-    local script="$SCRIPT_DIR/seguridad-iot.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 62 completado"
-        else
-            log_warn "Módulo 62 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 63: seguridad-dns-avanzada.sh (delegado) ──
-mod_65_seguridad_dns() {
-    log_section "MÓDULO 63: Seguridad DNS avanzada"
-    local script="$SCRIPT_DIR/seguridad-dns-avanzada.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" || rc=$?
-        if [[ $rc -eq 0 ]]; then
-            log_info "Módulo 63 completado"
-        else
-            log_warn "Módulo 63 terminó con código $rc"
-        fi
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 64: auditoria-red-wireshark.sh (delegado) ──
-mod_66_auditoria_red() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/auditoria-red-wireshark.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulo 64: Auditoría red (section-aware) ────────────────
+mod_66_auditoria_red() { _run_delegated_section "auditoria-red-wireshark.sh" "${1:-all}"; }
 
 submenu_wireshark() {
     local -a SEC_NAMES=(
@@ -3882,154 +2768,18 @@ submenu_wireshark() {
     done
 }
 
-# ── MÓDULO 65: auditoria-red-infraestructura.sh (delegado) ──
-mod_67_auditoria_infra() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/auditoria-red-infraestructura.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 66: seguridad-runtime-kernel.sh (delegado) ──
-mod_68_runtime_kernel() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/seguridad-runtime-kernel.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 67: hardening-memoria-procesos.sh (delegado) ──
-mod_69_mem_procesos() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/hardening-memoria-procesos.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 68: respuesta-incidentes.sh (delegado) ──
-mod_70_respuesta_incidentes() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/respuesta-incidentes.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 69: edr-osquery.sh (delegado) ──
-mod_71_edr_osquery() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/edr-osquery.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-# ── MÓDULO 70: gestion-vulnerabilidades.sh (delegado) ──
-mod_72_gestion_vulnerabilidades() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/gestion-vulnerabilidades.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_73_mac_selinux() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/mac-selinux-apparmor.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_74_aislamiento_ns() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/aislamiento-namespaces.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_75_integridad_arranque() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/integridad-arranque.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_76_acceso_privilegiado() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/acceso-privilegiado.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
-
-mod_77_caza_apt() {
-    local section="${1:-all}"
-    local script="$SCRIPT_DIR/caza-apt-hunting.sh"
-    if [[ -f "$script" ]]; then
-        local rc=0
-        bash "$script" "$section" || rc=$?
-        return $rc
-    else
-        log_error "No encontrado: $script"
-        return 1
-    fi
-}
+# ── Módulos 65-75: Section-aware ────────────────────────────
+mod_67_auditoria_infra()         { _run_delegated_section "auditoria-red-infraestructura.sh" "${1:-all}"; }
+mod_68_runtime_kernel()          { _run_delegated_section "seguridad-runtime-kernel.sh" "${1:-all}"; }
+mod_69_mem_procesos()            { _run_delegated_section "hardening-memoria-procesos.sh" "${1:-all}"; }
+mod_70_respuesta_incidentes()    { _run_delegated_section "respuesta-incidentes.sh" "${1:-all}"; }
+mod_71_edr_osquery()             { _run_delegated_section "edr-osquery.sh" "${1:-all}"; }
+mod_72_gestion_vulnerabilidades(){ _run_delegated_section "gestion-vulnerabilidades.sh" "${1:-all}"; }
+mod_73_mac_selinux()             { _run_delegated_section "mac-selinux-apparmor.sh" "${1:-all}"; }
+mod_74_aislamiento_ns()          { _run_delegated_section "aislamiento-namespaces.sh" "${1:-all}"; }
+mod_75_integridad_arranque()     { _run_delegated_section "integridad-arranque.sh" "${1:-all}"; }
+mod_76_acceso_privilegiado()     { _run_delegated_section "acceso-privilegiado.sh" "${1:-all}"; }
+mod_77_caza_apt()                { _run_delegated_section "caza-apt-hunting.sh" "${1:-all}"; }
 
 submenu_auditoria_red() {
     local -a SEC_NAMES=(
@@ -6504,379 +5254,154 @@ _run_non_consecutive() {
     fi
 }
 
-submenu_base() {
+# ── Infraestructura de submenús genéricos ───────────────────
+
+_show_submenu_footer() {
+    echo ""
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
+    echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
+    echo ""
+    echo -ne "  ${BOLD}❯${NC} "
+}
+
+_handle_submenu_default() {
+    local opt="$1"
+    if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
+        _exec_module "$opt"
+    else
+        echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+    fi
+}
+
+_count_done() {
+    local count=0 n
+    for n in "$@"; do
+        [[ "${MOD_RUN[$n]:-}" == "1" ]] && ((count++)) || true
+    done
+    echo "$count"
+}
+
+# Datos de categorías: título, descripción, módulos, tipo de ejecución
+declare -A _CAT_TITLE _CAT_DESC _CAT_MODULES _CAT_RUN_TYPE _CAT_RANGE _CAT_REDIRECTS
+
+_CAT_TITLE[base]="Hardening Base"
+_CAT_DESC[base]="Módulos fundamentales de securización del sistema"
+_CAT_MODULES[base]="1 2 3 4 5 6 7 8 9"
+_CAT_RUN_TYPE[base]="consecutive"
+_CAT_RANGE[base]="1 9"
+
+_CAT_TITLE[proactiva]="Securización Proactiva"
+_CAT_DESC[proactiva]="Módulos avanzados de protección proactiva"
+_CAT_MODULES[proactiva]="10 11 12 13 14 15 16 17"
+_CAT_RUN_TYPE[proactiva]="consecutive"
+_CAT_RANGE[proactiva]="10 17"
+
+_CAT_TITLE[mitre]="Mitigaciones MITRE ATT&CK"
+_CAT_DESC[mitre]="Defensa contra tácticas específicas del framework MITRE"
+_CAT_MODULES[mitre]="18 19 20 21 22 23 24 25 26 27 28 29"
+_CAT_RUN_TYPE[mitre]="consecutive"
+_CAT_RANGE[mitre]="18 29"
+
+_CAT_TITLE[operaciones]="Operaciones de Seguridad"
+_CAT_DESC[operaciones]="Monitorización, reportes, hunting, SOAR, purple team"
+_CAT_MODULES[operaciones]="30 31 32 33 34"
+_CAT_RUN_TYPE[operaciones]="consecutive"
+_CAT_RANGE[operaciones]="30 34"
+
+_CAT_TITLE[inteligencia]="Inteligencia"
+_CAT_DESC[inteligencia]="Ciberinteligencia proactiva, protección ISP, enriquecimiento IoC"
+_CAT_MODULES[inteligencia]="35 36"
+_CAT_RUN_TYPE[inteligencia]="consecutive"
+_CAT_RANGE[inteligencia]="35 36"
+_CAT_REDIRECTS[inteligencia]="36:submenu_isp"
+
+_CAT_TITLE[infraestructura]="Infraestructura y Red"
+_CAT_DESC[infraestructura]="Criptografía, segmentación red, cloud/LDAP, wireless, virtualización, Zero Trust, DNS"
+_CAT_MODULES[infraestructura]="37 43 50 51 54 55 57 63 73"
+_CAT_RUN_TYPE[infraestructura]="non_consecutive"
+
+_CAT_TITLE[aplicaciones]="Aplicaciones y Servicios"
+_CAT_DESC[aplicaciones]="Contenedores, email, BBDD, web, secretos, DevSecOps, APIs, IoT"
+_CAT_MODULES[aplicaciones]="38 40 46 48 49 60 61 62"
+_CAT_RUN_TYPE[aplicaciones]="non_consecutive"
+
+_CAT_TITLE[proteccion]="Protección y Resiliencia"
+_CAT_DESC[proteccion]="Supply chain, livepatch, backup, deception, seg. física, ransomware, parches, kernel, mem, MAC, ns"
+_CAT_MODULES[proteccion]="42 45 47 53 56 58 59 66 67 71 72"
+_CAT_RUN_TYPE[proteccion]="non_consecutive"
+_CAT_REDIRECTS[proteccion]="53:submenu_deception"
+
+_CAT_TITLE[deteccion]="Detección y Respuesta"
+_CAT_DESC[deteccion]="Logging, forense, auditoría red, resp. incidentes, EDR, vuln, acceso priv., APT hunting"
+_CAT_MODULES[deteccion]="41 44 64 65 68 69 70 74 75"
+_CAT_RUN_TYPE[deteccion]="non_consecutive"
+_CAT_REDIRECTS[deteccion]="64:submenu_wireshark 65:submenu_auditoria_red"
+
+_CAT_TITLE[cumplimiento]="Cumplimiento"
+_CAT_DESC[cumplimiento]="CIS benchmarks, cumplimiento normativo (PCI-DSS, HIPAA, GDPR, ENS)"
+_CAT_MODULES[cumplimiento]="39 52"
+_CAT_RUN_TYPE[cumplimiento]="non_consecutive"
+
+_generic_submenu() {
+    local cat_key="$1"
+    local title="${_CAT_TITLE[$cat_key]}"
+    local -a modules=(${_CAT_MODULES[$cat_key]})
+
+    # Parse redirects into local associative array
+    local -A redirects=()
+    local redir
+    for redir in ${_CAT_REDIRECTS[$cat_key]:-}; do
+        redirects[${redir%%:*}]="${redir#*:}"
+    done
+
     while true; do
         _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Hardening Base"
-
-        echo -e "  ${DIM}Módulos fundamentales de securización del sistema${NC}"
+        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}${title}"
+        echo -e "  ${DIM}${_CAT_DESC[$cat_key]}${NC}"
         echo ""
         local n
-        for n in 1 2 3 4 5 6 7 8 9; do
+        for n in "${modules[@]}"; do
             _show_module_entry "$n"
         done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
+        _show_submenu_footer
         read -r opt
 
         case "$opt" in
-            [1-9])    _exec_module "$opt" ;;
-            t|T)      _run_category "Hardening Base" 1 9 ; _pause ;;
-            b|B|0)    return ;;
-            q|Q)      _exit_securizar ;;
-            "?")      _show_help ;;
-            "")       continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
+            t|T)
+                if [[ "${_CAT_RUN_TYPE[$cat_key]}" == "consecutive" ]]; then
+                    local -a range=(${_CAT_RANGE[$cat_key]})
+                    _run_category "$title" "${range[0]}" "${range[1]}"
                 else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
+                    _run_non_consecutive "$title" "${modules[@]}"
+                fi
+                _pause ;;
+            b|B|0)  return ;;
+            q|Q)    _exit_securizar ;;
+            "?")    _show_help ;;
+            "")     continue ;;
+            *)
+                # Check for redirect
+                if [[ -n "${redirects[$opt]:-}" ]]; then
+                    ${redirects[$opt]}
+                else
+                    _handle_submenu_default "$opt"
                 fi
                 ;;
         esac
     done
 }
 
-submenu_proactiva() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Securización Proactiva"
-
-        echo -e "  ${DIM}Módulos avanzados de protección proactiva${NC}"
-        echo ""
-        local n
-        for n in 10 11 12 13 14 15 16 17; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            1[0-7])   _exec_module "$opt" ;;
-            t|T)      _run_category "Securización Proactiva" 10 17 ; _pause ;;
-            b|B|0)    return ;;
-            q|Q)      _exit_securizar ;;
-            "?")      _show_help ;;
-            "")       continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_mitre() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Mitigaciones MITRE ATT&CK"
-
-        echo -e "  ${DIM}Defensa contra tácticas específicas del framework MITRE${NC}"
-        echo ""
-        local n
-        for n in 18 19 20 21 22 23 24 25 26 27 28 29; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            18|19|20|21|22|23|24|25|26|27|28|29) _exec_module "$opt" ;;
-            t|T)         _run_category "Mitigaciones MITRE ATT&CK" 18 29 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_operaciones() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Operaciones de Seguridad"
-
-        echo -e "  ${DIM}Monitorización, reportes, hunting, SOAR, purple team${NC}"
-        echo ""
-        local n
-        for n in 30 31 32 33 34; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            3[0-4]) _exec_module "$opt" ;;
-            t|T)         _run_category "Operaciones de Seguridad" 30 34 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_inteligencia() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Inteligencia"
-
-        echo -e "  ${DIM}Ciberinteligencia proactiva, protección ISP, enriquecimiento IoC${NC}"
-        echo ""
-        local n
-        for n in 35 36; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            36)          submenu_isp ;;
-            35)          _exec_module "$opt" ;;
-            t|T)         _run_category "Inteligencia" 35 36 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_infraestructura() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Infraestructura y Red"
-
-        echo -e "  ${DIM}Criptografía, segmentación red, cloud/LDAP, wireless, virtualización, Zero Trust, DNS${NC}"
-        echo ""
-        local n
-        for n in 37 43 50 51 54 55 57 63 73; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            37|43|50|51|54|55|57|63|73) _exec_module "$opt" ;;
-            t|T)         _run_non_consecutive "Infraestructura y Red" 37 43 50 51 54 55 57 63 73 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_aplicaciones() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Aplicaciones y Servicios"
-
-        echo -e "  ${DIM}Contenedores, email, BBDD, web, secretos, DevSecOps, APIs, IoT${NC}"
-        echo ""
-        local n
-        for n in 38 40 46 48 49 60 61 62; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            38|40|46|48|49|60|61|62) _exec_module "$opt" ;;
-            t|T)         _run_non_consecutive "Aplicaciones y Servicios" 38 40 46 48 49 60 61 62 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_proteccion() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Protección y Resiliencia"
-
-        echo -e "  ${DIM}Supply chain, livepatch, backup, deception, seg. física, ransomware, parches, kernel, mem, MAC, ns${NC}"
-        echo ""
-        local n
-        for n in 42 45 47 53 56 58 59 66 67 71 72; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            53) submenu_deception ;;
-            42|45|47|56|58|59|66|67|71|72) _exec_module "$opt" ;;
-            t|T)         _run_non_consecutive "Protección y Resiliencia" 42 45 47 53 56 58 59 66 67 71 72 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_deteccion() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Detección y Respuesta"
-
-        echo -e "  ${DIM}Logging, forense, auditoría red, resp. incidentes, EDR, vuln, acceso priv., APT hunting${NC}"
-        echo ""
-        local n
-        for n in 41 44 64 65 68 69 70 74 75; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            64) submenu_wireshark ;;
-            65) submenu_auditoria_red ;;
-            41|44|68|69|70|74|75) _exec_module "$opt" ;;
-            t|T)         _run_non_consecutive "Detección y Respuesta" 41 44 64 65 68 69 70 74 75 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
-
-submenu_cumplimiento() {
-    while true; do
-        _draw_header_compact
-        _breadcrumb "Securizar ${DIM}❯${NC} ${BOLD}Cumplimiento"
-
-        echo -e "  ${DIM}CIS benchmarks, cumplimiento normativo (PCI-DSS, HIPAA, GDPR, ENS)${NC}"
-        echo ""
-        local n
-        for n in 39 52; do
-            _show_module_entry "$n"
-        done
-
-        echo ""
-        echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        echo -e "  ${WHITE}t${NC} ${DIM}Todos${NC}    ${WHITE}b${NC} ${DIM}Volver${NC}    ${WHITE}q${NC} ${DIM}Salir${NC}    ${WHITE}?${NC} ${DIM}Ayuda${NC}"
-        echo ""
-        echo -ne "  ${BOLD}❯${NC} "
-        read -r opt
-
-        case "$opt" in
-            39|52)       _exec_module "$opt" ;;
-            t|T)         _run_non_consecutive "Cumplimiento" 39 52 ; _pause ;;
-            b|B|0)       return ;;
-            q|Q)         _exit_securizar ;;
-            "?")         _show_help ;;
-            "")          continue ;;
-            *)
-                if [[ "$opt" =~ ^[0-9]+$ ]] && [[ "$opt" -ge 1 ]] && [[ "$opt" -le 75 ]]; then
-                    _exec_module "$opt"
-                else
-                    echo -e "  ${RED}✗${NC} Opción no válida"; sleep 0.5
-                fi
-                ;;
-        esac
-    done
-}
+# ── Submenús de categoría (wrappers a _generic_submenu) ─────
+submenu_base()            { _generic_submenu "base"; }
+submenu_proactiva()       { _generic_submenu "proactiva"; }
+submenu_mitre()           { _generic_submenu "mitre"; }
+submenu_operaciones()     { _generic_submenu "operaciones"; }
+submenu_inteligencia()    { _generic_submenu "inteligencia"; }
+submenu_infraestructura() { _generic_submenu "infraestructura"; }
+submenu_aplicaciones()    { _generic_submenu "aplicaciones"; }
+submenu_proteccion()      { _generic_submenu "proteccion"; }
+submenu_deteccion()       { _generic_submenu "deteccion"; }
+submenu_cumplimiento()    { _generic_submenu "cumplimiento"; }
 
 # ============================================================
 # MENÚ PRINCIPAL
@@ -6887,67 +5412,43 @@ menu_principal() {
         _draw_sysinfo
         echo ""
 
-        # Count module progress per category
-        local base_done=0 pro_done=0 mitre_done=0 ops_done=0
-        local _n
-        for _n in 1 2 3 4 5 6 7 8 9; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((base_done++)) || true; done
-        for _n in 10 11 12 13 14 15 16 17; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((pro_done++)) || true; done
-        for _n in 18 19 20 21 22 23 24 25 26 27 28 29; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((mitre_done++)) || true; done
-        for _n in 30 31 32 33 34; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((ops_done++)) || true; done
-
+        # Display categories with progress
         echo -e "  ${BOLD}Módulos${NC}"
         echo ""
         printf "    ${CYAN}b${NC}   ${BOLD}Hardening Base${NC}              ${DIM}9 módulos${NC}   "
-        _cat_dots 9 "$base_done"
+        _cat_dots 9 "$(_count_done 1 2 3 4 5 6 7 8 9)"
         echo ""
         printf "    ${CYAN}p${NC}   ${BOLD}Securización Proactiva${NC}       ${DIM}8 módulos${NC}   "
-        _cat_dots 8 "$pro_done"
+        _cat_dots 8 "$(_count_done 10 11 12 13 14 15 16 17)"
         echo ""
         printf "    ${CYAN}m${NC}   ${BOLD}Mitigaciones MITRE ATT&CK${NC}   ${DIM}12 módulos${NC}  "
-        _cat_dots 12 "$mitre_done"
+        _cat_dots 12 "$(_count_done 18 19 20 21 22 23 24 25 26 27 28 29)"
         echo ""
         printf "    ${CYAN}o${NC}   ${BOLD}Operaciones de Seguridad${NC}     ${DIM}5 módulos${NC}   "
-        _cat_dots 5 "$ops_done"
+        _cat_dots 5 "$(_count_done 30 31 32 33 34)"
         echo ""
-
-        local intel_done=0
-        for _n in 35 36; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((intel_done++)) || true; done
         printf "    ${CYAN}i${NC}   ${BOLD}Inteligencia${NC}                 ${DIM}2 módulos${NC}   "
-        _cat_dots 2 "$intel_done"
+        _cat_dots 2 "$(_count_done 35 36)"
         echo ""
 
         echo ""
         echo -e "  ${DIM}  ─────────────────────────────────────────────────────────${NC}"
         echo ""
 
-        local infra_done=0
-        for _n in 37 43 50 51 54 55 57 63 73; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((infra_done++)) || true; done
         printf "    ${CYAN}n${NC}   ${BOLD}Infraestructura y Red${NC}        ${DIM}9 módulos${NC}   "
-        _cat_dots 9 "$infra_done"
+        _cat_dots 9 "$(_count_done 37 43 50 51 54 55 57 63 73)"
         echo ""
-
-        local apps_done=0
-        for _n in 38 40 46 48 49 60 61 62; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((apps_done++)) || true; done
         printf "    ${CYAN}s${NC}   ${BOLD}Aplicaciones y Servicios${NC}     ${DIM}8 módulos${NC}   "
-        _cat_dots 8 "$apps_done"
+        _cat_dots 8 "$(_count_done 38 40 46 48 49 60 61 62)"
         echo ""
-
-        local prot_done=0
-        for _n in 42 45 47 53 56 58 59 66 67 71 72; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((prot_done++)) || true; done
         printf "    ${CYAN}r${NC}   ${BOLD}Protección y Resiliencia${NC}    ${DIM}11 módulos${NC}   "
-        _cat_dots 11 "$prot_done"
+        _cat_dots 11 "$(_count_done 42 45 47 53 56 58 59 66 67 71 72)"
         echo ""
-
-        local det_done=0
-        for _n in 41 44 64 65 68 69 70 74 75; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((det_done++)) || true; done
         printf "    ${CYAN}d${NC}   ${BOLD}Detección y Respuesta${NC}        ${DIM}9 módulos${NC}   "
-        _cat_dots 9 "$det_done"
+        _cat_dots 9 "$(_count_done 41 44 64 65 68 69 70 74 75)"
         echo ""
-
-        local cumpl_done=0
-        for _n in 39 52; do [[ "${MOD_RUN[$_n]:-}" == "1" ]] && ((cumpl_done++)) || true; done
         printf "    ${CYAN}c${NC}   ${BOLD}Cumplimiento${NC}                 ${DIM}2 módulos${NC}   "
-        _cat_dots 2 "$cumpl_done"
+        _cat_dots 2 "$(_count_done 39 52)"
         echo ""
 
         echo ""
