@@ -30,6 +30,8 @@
 
 set -euo pipefail
 
+ISP_SECTION="${1:-all}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
@@ -40,6 +42,221 @@ securizar_setup_traps
 ISP_CONF_DIR="/etc/securizar"
 ISP_BIN_DIR="/usr/local/bin"
 
+# ── Verificación exhaustiva ──────────────────────────────────
+_isp_verificacion_exhaustiva() {
+    local ok=0 total=23
+    local _r
+
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║   VERIFICACIÓN EXHAUSTIVA - Protección contra ISP            ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+
+    # ── VPN (5 checks) ──
+    echo -e "  ${BOLD}[VPN]${NC}"
+
+    _r="!!"; [[ -f /etc/securizar/vpn-killswitch.sh ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} Script kill switch existe"
+
+    _r="!!"; [[ -f /etc/securizar/vpn-killswitch-off.sh ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} Script kill switch OFF existe"
+
+    _r="!!"
+    if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q 'securizar-vpn-killswitch' 2>/dev/null; then
+        _r="OK"; ((ok++))
+    elif iptables -S 2>/dev/null | grep -q 'securizar-vpn' 2>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Kill switch ACTIVO (nft/iptables)"
+
+    _r="!!"
+    if systemctl is-enabled securizar-vpn-killswitch.service &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Servicio kill switch habilitado"
+
+    _r="!!"
+    if ip link show 2>/dev/null | grep -qE '(wg0|tun0|proton0|nordlynx)'; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Interfaz VPN activa"
+    echo ""
+
+    # ── DNS (5 checks) ──
+    echo -e "  ${BOLD}[DNS]${NC}"
+
+    _r="!!"
+    if systemctl is-active unbound &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Unbound activo"
+
+    _r="!!"
+    if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
+        _r="OK"; ((ok++))
+    elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf 2>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} DNS-over-TLS (forward-tls-upstream)"
+
+    _r="!!"
+    if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'val-clean-additional\|auto-trust-anchor-file' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
+        _r="OK"; ((ok++))
+    elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'auto-trust-anchor-file' /etc/unbound/unbound.conf 2>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} DNSSEC habilitado"
+
+    _r="!!"
+    if grep -q '^nameserver 127\.0\.0\.1' /etc/resolv.conf 2>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} resolv.conf apunta a 127.0.0.1"
+
+    _r="!!"
+    if ! systemctl is-active avahi-daemon &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} avahi-daemon inactivo"
+    echo ""
+
+    # ── Privacidad (2 checks) ──
+    echo -e "  ${BOLD}[Privacidad]${NC}"
+
+    _r="!!"
+    if [[ -f /etc/NetworkManager/conf.d/91-securizar-mac.conf ]] || \
+       [[ -f /etc/NetworkManager/conf.d/99-securizar-mac.conf ]]; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} MAC randomización configurada"
+
+    _r="!!"
+    if [[ -f /etc/sysctl.d/99-securizar-ipv6.conf ]] && \
+       sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null | grep -q '1'; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} IPv6 deshabilitado"
+    echo ""
+
+    # ── Red (3 checks) ──
+    echo -e "  ${BOLD}[Red]${NC}"
+
+    _r="!!"
+    if command -v obfs4proxy &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} obfs4proxy disponible"
+
+    _r="!!"
+    if systemctl is-active securizar-traffic-pad.service &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Traffic padding activo"
+
+    _r="!!"
+    if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
+        _r="OK"; ((ok++))
+    elif command -v firewall-cmd &>/dev/null && firewall-cmd --list-ports 2>/dev/null | grep -q '853' 2>/dev/null; then
+        _r="OK"; ((ok++))
+    elif iptables -S 2>/dev/null | grep -q '853' 2>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Puerto 853 (DoT) en firewall"
+    echo ""
+
+    # ── Tiempo (2 checks) ──
+    echo -e "  ${BOLD}[Tiempo]${NC}"
+
+    _r="!!"
+    if [[ -f /etc/chrony.d/securizar-nts.conf ]] && systemctl is-active chronyd &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} Chrony NTS activo"
+
+    _r="!!"
+    if ! systemctl is-active systemd-timesyncd &>/dev/null; then
+        _r="OK"; ((ok++))
+    fi
+    echo -e "    ${_r} timesyncd inactivo"
+    echo ""
+
+    # ── Navegador (3 checks) ──
+    echo -e "  ${BOLD}[Navegador]${NC}"
+
+    local _ff_found=0 _ech=0 _webrtc=0 _https=0
+    for ff_dir in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
+        [[ -f "${ff_dir}/user.js" ]] || continue
+        _ff_found=1
+        grep -q 'network.dns.echconfig.enabled.*true' "${ff_dir}/user.js" 2>/dev/null && _ech=1
+        grep -q 'media.peerconnection.enabled.*false' "${ff_dir}/user.js" 2>/dev/null && _webrtc=1
+        grep -q 'dom.security.https_only_mode.*true' "${ff_dir}/user.js" 2>/dev/null && _https=1
+    done
+
+    _r="!!"; [[ $_ech -eq 1 ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} ECH (Encrypted Client Hello)"
+
+    _r="!!"; [[ $_webrtc -eq 1 ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} WebRTC desactivado"
+
+    _r="!!"; [[ $_https -eq 1 ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} HTTPS-Only mode"
+    echo ""
+
+    # ── Herramientas (3 checks) ──
+    echo -e "  ${BOLD}[Herramientas]${NC}"
+
+    _r="!!"; [[ -x /usr/local/bin/auditoria-isp.sh ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} auditoria-isp.sh"
+
+    _r="!!"; [[ -x /usr/local/bin/detectar-dns-leak.sh ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} detectar-dns-leak.sh"
+
+    _r="!!"; [[ -x /usr/local/bin/detectar-http-inseguro.sh ]] && _r="OK" && ((ok++))
+    echo -e "    ${_r} detectar-http-inseguro.sh"
+    echo ""
+
+    # ── Scoring ──
+    echo "  ─────────────────────────────────────────"
+    local nivel
+    if [[ $ok -ge 20 ]]; then
+        nivel="EXCELENTE"
+    elif [[ $ok -ge 15 ]]; then
+        nivel="BUENO"
+    elif [[ $ok -ge 10 ]]; then
+        nivel="MEJORABLE"
+    else
+        nivel="DEFICIENTE"
+    fi
+    echo -e "  Resultado: ${BOLD}${ok}/${total} OK${NC} — ${nivel}"
+    echo ""
+}
+
+# ── Handler --verify ─────────────────────────────────────────
+if [[ "$ISP_SECTION" == "--verify" ]]; then
+    _isp_verificacion_exhaustiva
+    exit 0
+fi
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+if [[ "$ISP_SECTION" == "all" ]]; then
+_precheck 10
+_pc 'check_file_exists /etc/securizar/vpn-killswitch.sh && check_file_exists /etc/systemd/system/securizar-vpn-killswitch.service && check_file_exists /etc/sysctl.d/99-securizar-ipv6.conf'
+_pc 'check_service_enabled unbound'
+_pc true  # S3 - ECH Firefox (perfiles dinámicos)
+_pc true  # S4 - WebRTC Firefox (perfiles dinámicos)
+_pc true  # S5 - DPI evasion (opción interactiva)
+_pc true  # S6 - privacidad navegador (perfiles dinámicos)
+_pc true  # S7 - HTTPS-only (perfiles dinámicos)
+_pc 'check_file_exists /etc/chrony.d/securizar-nts.conf'
+_pc 'check_service_enabled securizar-traffic-pad.service'
+_pc 'check_executable /usr/local/bin/auditoria-isp.sh'
+_precheck_result
+fi  # all - precheck
+
+mkdir -p "$ISP_CONF_DIR"
+
+if [[ "$ISP_SECTION" == "all" ]]; then
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   PROTECCIÓN CONTRA ESPIONAJE ISP - Módulo 38             ║"
@@ -60,26 +277,28 @@ echo -e "  ${CYAN}S8${NC}  NTP con NTS (Network Time Security)"
 echo -e "  ${CYAN}S9${NC}  Ofuscación de patrones de tráfico"
 echo -e "  ${CYAN}S10${NC} Auditoría de metadatos ISP"
 echo ""
+fi  # all - banner
 
-mkdir -p "$ISP_CONF_DIR"
-
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S1" ]]; then
 # ============================================================
 # S1 — VPN KILL SWITCH
 # ============================================================
 log_section "S1: VPN KILL SWITCH"
 
 echo "Crea reglas firewall que bloquean TODO tráfico si la VPN cae."
-echo "Permite: loopback, LAN, DHCP, interfaces VPN (wg0/tun0)."
+echo "Permite: loopback, LAN, DHCP, interfaces VPN (wg0/tun0/proton0)."
 echo "Compatible con nftables, iptables y firewalld."
 echo ""
 
-if ask "¿Configurar VPN Kill Switch?"; then
+if check_file_exists /etc/securizar/vpn-killswitch.sh; then
+    log_already "VPN Kill Switch (scripts ya creados)"
+elif ask "¿Configurar VPN Kill Switch?"; then
 
     # Script para activar kill switch (multi-backend)
     cat > "${ISP_CONF_DIR}/vpn-killswitch.sh" << 'KILLSWITCH_ON'
 #!/bin/bash
 # VPN Kill Switch - Activar
-# Bloquea todo tráfico que no pase por VPN (wg0/tun0)
+# Bloquea todo tráfico que no pase por VPN (wg0/tun0/proton0)
 set -euo pipefail
 
 if command -v nft &>/dev/null; then
@@ -102,6 +321,8 @@ if command -v nft &>/dev/null; then
     nft add rule inet securizar_ks output oifname "wg0" accept
     nft add rule inet securizar_ks output oifname "tun0" accept
     nft add rule inet securizar_ks output oifname "tun*" accept
+    # Permitir interfaces WireGuard (ProtonVPN, Mullvad, etc.)
+    nft add rule inet securizar_ks output oifname "proton*" accept
     # Permitir conexiones establecidas
     nft add rule inet securizar_ks output ct state established,related accept
     # DROP todo lo demás
@@ -125,6 +346,8 @@ elif command -v iptables &>/dev/null; then
     iptables -A "$CHAIN" -o wg0 -j ACCEPT
     iptables -A "$CHAIN" -o tun0 -j ACCEPT
     iptables -A "$CHAIN" -o tun+ -j ACCEPT
+    # WireGuard (ProtonVPN, Mullvad, etc.)
+    iptables -A "$CHAIN" -o proton+ -j ACCEPT
     iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A "$CHAIN" -j DROP
     iptables -I OUTPUT -j "$CHAIN"
@@ -179,6 +402,7 @@ KILLSWITCH_OFF
 #!/bin/bash
 # NetworkManager dispatcher: activa kill switch cuando VPN sube,
 # desactiva cuando VPN baja
+# Soporta: OpenVPN (vpn-up/vpn-down), WireGuard/ProtonVPN (up/down en iface VPN)
 IFACE="$1"
 ACTION="$2"
 
@@ -188,6 +412,17 @@ case "$ACTION" in
         ;;
     vpn-down)
         /etc/securizar/vpn-killswitch-off.sh 2>/dev/null || true
+        ;;
+    up)
+        # WireGuard (ProtonVPN, Mullvad, etc.)
+        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*)
+            /etc/securizar/vpn-killswitch.sh 2>/dev/null || true
+        esac
+        ;;
+    down)
+        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*)
+            /etc/securizar/vpn-killswitch-off.sh 2>/dev/null || true
+        esac
         ;;
 esac
 NM_HOOK
@@ -203,6 +438,104 @@ else
     log_skip "VPN Kill Switch"
 fi
 
+# ── S1 post: Auto-activar kill switch si VPN ya conectada ──
+if [[ -f "${ISP_CONF_DIR}/vpn-killswitch.sh" ]]; then
+    _ks_active=false
+    if command -v nft &>/dev/null; then
+        nft list table inet securizar_ks &>/dev/null 2>&1 && _ks_active=true
+    elif command -v iptables &>/dev/null; then
+        iptables -L SECURIZAR_KS &>/dev/null 2>&1 && _ks_active=true
+    fi
+
+    if [[ "$_ks_active" == "true" ]]; then
+        log_already "Kill switch activo (reglas firewall presentes)"
+    else
+        for _ks_iface in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx; do
+            if ip link show "$_ks_iface" &>/dev/null 2>&1; then
+                if ask "VPN $_ks_iface detectada pero kill switch NO activo. ¿Activar ahora?"; then
+                    bash "${ISP_CONF_DIR}/vpn-killswitch.sh" 2>/dev/null && \
+                        log_change "Kill switch" "Activado (VPN $_ks_iface detectada)" || \
+                        log_warn "Kill switch: fallo al activar"
+                else
+                    log_skip "Activación kill switch"
+                fi
+                break
+            fi
+        done
+    fi
+fi
+
+# ── S1 post: Persistencia systemd para kill switch en arranque ──
+if [[ -f "${ISP_CONF_DIR}/vpn-killswitch.sh" ]]; then
+    if [[ -f /etc/systemd/system/securizar-vpn-killswitch.service ]]; then
+        log_already "Kill switch persistencia (securizar-vpn-killswitch.service)"
+    elif ask "¿Crear servicio systemd para kill switch en arranque?"; then
+        cat > /etc/systemd/system/securizar-vpn-killswitch.service << 'KS_SVC'
+[Unit]
+Description=Securizar - VPN Kill Switch (persistencia en arranque)
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/bash -c 'for i in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx; do ip link show "$i" 2>/dev/null && exit 0; done; exit 1'
+ExecStart=/etc/securizar/vpn-killswitch.sh
+ExecStop=/etc/securizar/vpn-killswitch-off.sh
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+KS_SVC
+        systemctl daemon-reload
+        systemctl enable securizar-vpn-killswitch.service 2>/dev/null || true
+        log_change "Creado" "/etc/systemd/system/securizar-vpn-killswitch.service (boot persistence)"
+    else
+        log_skip "Kill switch persistencia systemd"
+    fi
+fi
+
+# ── S1 extra: MAC randomización (anti-tracking por ISP/AP) ──
+if [[ -d /etc/NetworkManager/conf.d ]]; then
+    if [[ -f /etc/NetworkManager/conf.d/91-securizar-mac.conf ]]; then
+        log_already "MAC randomización (91-securizar-mac.conf)"
+    elif ask "¿Configurar MAC randomización? (anti-tracking WiFi/Ethernet)"; then
+        cat > /etc/NetworkManager/conf.d/91-securizar-mac.conf << 'MAC_CONF'
+# Securizar M38 S1: MAC randomización
+# stable = misma MAC por sesión, cambia cada reinicio
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=stable
+ethernet.cloned-mac-address=stable
+connection.stable-id=${CONNECTION}/${BOOT}
+MAC_CONF
+        nmcli general reload conf 2>/dev/null || true
+        log_change "Creado" "/etc/NetworkManager/conf.d/91-securizar-mac.conf (MAC stable per-boot)"
+    else
+        log_skip "MAC randomización"
+    fi
+fi
+
+# ── S1 extra: Deshabilitar IPv6 persistente (anti-leak) ──
+if [[ -f /etc/sysctl.d/99-securizar-ipv6.conf ]]; then
+    log_already "IPv6 deshabilitado persistente (99-securizar-ipv6.conf)"
+elif ask "¿Deshabilitar IPv6 persistente? (previene fugas fuera de VPN)"; then
+    cat > /etc/sysctl.d/99-securizar-ipv6.conf << 'IPV6_CONF'
+# Securizar M38 S1: Deshabilitar IPv6 (prevención de fugas)
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+IPV6_CONF
+    sysctl -p /etc/sysctl.d/99-securizar-ipv6.conf 2>/dev/null || true
+    log_change "Creado" "/etc/sysctl.d/99-securizar-ipv6.conf (IPv6 deshabilitado persistente)"
+else
+    log_skip "IPv6 deshabilitado persistente"
+fi
+fi  # S1
+
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S2" ]]; then
 # ============================================================
 # S2 — PREVENCIÓN DE FUGAS DNS (DNS-over-TLS con unbound)
 # ============================================================
@@ -214,7 +547,9 @@ echo "Unbound cifra las consultas por el puerto 853, que el ISP no puede bloquea
 echo "Incluye DNSSEC, cache local y desactiva mDNS/LLMNR."
 echo ""
 
-if ask "¿Configurar DNS cifrado con unbound (DNS-over-TLS)?"; then
+if check_service_enabled unbound; then
+    log_already "DNS cifrado con unbound (servicio habilitado)"
+elif ask "¿Configurar DNS cifrado con unbound (DNS-over-TLS)?"; then
 
     # ── Instalar unbound si no está ──
     if ! command -v unbound &>/dev/null; then
@@ -431,16 +766,27 @@ RESOLV_CONF
         fi
     fi
 
-    # ── Verificar que unbound funciona ──
-    sleep 2
+    # ── Verificar que unbound funciona (con warm-up DoT) ──
+    sleep 3
     if ss -tlnp 2>/dev/null | grep -q "unbound" || ss -ulnp 2>/dev/null | grep -q "unbound"; then
         log_info "unbound escuchando en 127.0.0.1:53"
 
-        # Test rápido de resolución
-        if nslookup example.com 127.0.0.1 &>/dev/null; then
-            log_info "Resolución DNS via DoT funcionando correctamente"
-        else
-            log_warn "unbound activo pero la resolución falla. Verifica: sudo unbound-checkconf"
+        # Warm-up: forzar handshake TLS con upstream DoT
+        nslookup example.com 127.0.0.1 &>/dev/null || true
+        sleep 2
+
+        # Verificación con reintentos
+        _unbound_ok=false
+        for _dns_try in 1 2 3; do
+            if nslookup example.com 127.0.0.1 &>/dev/null; then
+                log_info "Resolución DNS via DoT funcionando correctamente"
+                _unbound_ok=true
+                break
+            fi
+            [[ $_dns_try -lt 3 ]] && sleep 2
+        done
+        if [[ "$_unbound_ok" != "true" ]]; then
+            log_warn "unbound activo pero resolución lenta (DoT handshake inicial ~5-10s es normal)"
         fi
     else
         log_warn "unbound no parece estar escuchando. Verifica con: systemctl status unbound"
@@ -544,6 +890,89 @@ DNS_LEAK
     chmod 755 "${ISP_BIN_DIR}/detectar-dns-leak.sh"
     log_change "Creado" "${ISP_BIN_DIR}/detectar-dns-leak.sh"
 
+    # ── Override global DNS de NM: forzar unbound sobre VPN comerciales ──
+    # ProtonVPN fuerza DNS 10.2.0.1 via NM con prioridad -1500,
+    # bypaseando unbound. [global-dns] sobreescribe CUALQUIER DNS de
+    # conexión, incluida VPN. NM >= 1.2 (2016+).
+    # Cadena resultante: App → unbound (cache+DNSSEC) → DoT:853 → túnel VPN → Cloudflare/Quad9
+    if [[ -d /etc/NetworkManager/conf.d ]]; then
+        cat > /etc/NetworkManager/conf.d/90-securizar-dns.conf << 'NM_DNS_GLOBAL'
+# Securizar M38 S2: Forzar DNS a unbound (DoT+DNSSEC)
+# Sobreescribe DNS de VPN comerciales (ProtonVPN, Mullvad, etc.)
+# App → unbound (cache+DNSSEC) → DoT:853 → túnel VPN → Cloudflare/Quad9
+
+[global-dns]
+searches=
+options=edns0 trust-ad
+
+[global-dns-domain-*]
+servers=127.0.0.1
+NM_DNS_GLOBAL
+        log_change "Creado" "/etc/NetworkManager/conf.d/90-securizar-dns.conf (override global DNS)"
+
+        # Recargar NM para aplicar inmediatamente
+        nmcli general reload dns 2>/dev/null || \
+            systemctl reload NetworkManager 2>/dev/null || true
+        log_info "DNS global forzado a unbound: ProtonVPN/Mullvad ya no pueden sobreescribir"
+    fi
+
+    # ── NM dispatcher: respaldo para forzar unbound tras VPN up ──
+    # Belt-and-suspenders: si global-dns no basta, el dispatcher
+    # reescribe resolv.conf con reintentos tras VPN up.
+    if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
+        cat > /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn << 'DNS_HOOK'
+#!/bin/bash
+# Respaldo: forzar DNS via unbound cuando VPN sube (ProtonVPN, Mullvad, etc.)
+# El mecanismo principal es /etc/NetworkManager/conf.d/90-securizar-dns.conf
+# Este dispatcher actúa como respaldo con reintentos por si la VPN
+# sobreescribe resolv.conf después de NM.
+IFACE="$1"
+ACTION="$2"
+
+is_vpn_event() {
+    case "$ACTION" in vpn-up|vpn-down) return 0 ;; esac
+    case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|tun*) return 0 ;; esac
+    return 1
+}
+
+is_vpn_event || exit 0
+
+force_unbound_dns() {
+    if ss -tlnp 2>/dev/null | grep -q "127.0.0.1:53.*unbound"; then
+        printf '%s\n' "# Securizar - DNS via unbound (DoT+DNSSEC)" \
+                      "nameserver 127.0.0.1" \
+                      "options edns0 trust-ad" > /etc/resolv.conf
+        return 0
+    fi
+    return 1
+}
+
+case "$ACTION" in
+    vpn-up|up)
+        # Intento inmediato
+        force_unbound_dns
+
+        # Reintento tras 3s: VPNs comerciales pueden escribir resolv.conf
+        # después del dispatcher (race condition)
+        (
+            sleep 3
+            if ! grep -q "^nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
+                force_unbound_dns && \
+                    logger -t securizar-dns "VPN $IFACE: DNS re-forzado a unbound (reintento)"
+            fi
+        ) &
+        logger -t securizar-dns "VPN $IFACE up: DNS forzado a unbound (127.0.0.1)"
+        ;;
+    vpn-down|down)
+        logger -t securizar-dns "VPN $IFACE down: NetworkManager restaurará DNS"
+        ;;
+esac
+DNS_HOOK
+        chmod 755 /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn
+        log_change "Creado" "/etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn (respaldo con reintentos)"
+        log_info "Hook DNS-VPN instalado: doble protección contra override de VPN comerciales"
+    fi
+
     # ── Script para restaurar DNS original ──
     cat > "${ISP_BIN_DIR}/restaurar-dns-isp.sh" << 'DNS_RESTORE'
 #!/bin/bash
@@ -559,11 +988,16 @@ echo ""
 systemctl stop unbound 2>/dev/null || true
 systemctl disable unbound 2>/dev/null || true
 echo "[+] unbound detenido"
+# Eliminar override global DNS
+rm -f /etc/NetworkManager/conf.d/90-securizar-dns.conf
+rm -f /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn
+echo "[+] Override DNS global y dispatcher eliminados"
 # Restaurar NetworkManager
 active_conn=$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)
 if [[ -n "$active_conn" ]]; then
     nmcli con modify "$active_conn" ipv4.dns "" 2>/dev/null || true
     nmcli con modify "$active_conn" ipv4.ignore-auto-dns no 2>/dev/null || true
+    nmcli general reload dns 2>/dev/null || true
     nmcli con down "$active_conn" && sleep 2 && nmcli con up "$active_conn"
     echo "[+] NetworkManager restaurado"
 fi
@@ -585,7 +1019,9 @@ DNS_RESTORE
 else
     log_skip "Prevención de fugas DNS"
 fi
+fi  # S2
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S3" ]]; then
 # ============================================================
 # S3 — ECH (ENCRYPTED CLIENT HELLO)
 # ============================================================
@@ -628,7 +1064,9 @@ ECH_JS
 else
     log_skip "ECH (Encrypted Client Hello)"
 fi
+fi  # S3
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S4" ]]; then
 # ============================================================
 # S4 — PREVENCIÓN DE FUGAS WebRTC
 # ============================================================
@@ -665,7 +1103,9 @@ WEBRTC_JS
 else
     log_skip "Prevención de fugas WebRTC"
 fi
+fi  # S4
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S5" ]]; then
 # ============================================================
 # S5 — EVASIÓN DE DPI (DEEP PACKET INSPECTION)
 # ============================================================
@@ -744,7 +1184,9 @@ STUNNEL_CONF
 else
     log_skip "Evasión de DPI"
 fi
+fi  # S5
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S6" ]]; then
 # ============================================================
 # S6 — HARDENING DE PRIVACIDAD DEL NAVEGADOR
 # ============================================================
@@ -830,7 +1272,9 @@ PRIVACY_JS
 else
     log_skip "Hardening de privacidad del navegador"
 fi
+fi  # S6
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S7" ]]; then
 # ============================================================
 # S7 — HTTPS-ONLY ENFORCEMENT
 # ============================================================
@@ -899,7 +1343,9 @@ HTTP_DETECT
 else
     log_skip "HTTPS-Only enforcement"
 fi
+fi  # S7
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S8" ]]; then
 # ============================================================
 # S8 — NTP CON NTS (NETWORK TIME SECURITY)
 # ============================================================
@@ -910,7 +1356,9 @@ echo "NTS añade autenticación criptográfica a la sincronización."
 echo "Se usa chrony con servidores NTS."
 echo ""
 
-if ask "¿Configurar NTP con NTS?"; then
+if check_file_exists /etc/chrony.d/securizar-nts.conf; then
+    log_already "NTP con NTS (chrony NTS ya configurado)"
+elif ask "¿Configurar NTP con NTS?"; then
 
     pkg_install chrony 2>/dev/null || log_warn "chrony no disponible"
 
@@ -947,12 +1395,20 @@ NTS_CONF
         systemctl restart chronyd 2>/dev/null || true
         log_change "Servicio" "chronyd habilitado y reiniciado"
 
-        # Verificar NTS
-        sleep 2
-        if chronyc -n authdata 2>/dev/null | grep -q "NTS"; then
-            log_info "NTS activo y funcionando"
-        else
-            log_warn "NTS configurado pero verificación pendiente (puede tardar)"
+        # Verificar NTS (handshake NTS-KE puede tardar 5-10s)
+        _nts_ok=false
+        for _nts_try in 1 2 3; do
+            sleep 3
+            if chronyc -n authdata 2>/dev/null | grep -q "NTS"; then
+                _nts_ok=true
+                nts_sources=$(chronyc -n authdata 2>/dev/null | grep -c "NTS" || echo "0")
+                log_info "NTS activo y funcionando ($nts_sources fuentes verificadas)"
+                break
+            fi
+        done
+        if [[ "$_nts_ok" != "true" ]]; then
+            log_warn "NTS configurado pero verificación pendiente (NTS-KE handshake puede tardar)"
+            log_info "Verificar manualmente: chronyc -n authdata | grep NTS"
         fi
     else
         log_warn "chrony no instalado, NTS no configurado"
@@ -960,7 +1416,9 @@ NTS_CONF
 else
     log_skip "NTP con NTS"
 fi
+fi  # S8
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S9" ]]; then
 # ============================================================
 # S9 — OFUSCACIÓN DE PATRONES DE TRÁFICO
 # ============================================================
@@ -975,7 +1433,9 @@ echo "  - Tamaño: 1K-64K bytes variables"
 echo "  - Límites: CPUQuota=5%, MemoryMax=64M"
 echo ""
 
-if ask "¿Configurar ofuscación de patrones de tráfico?"; then
+if check_service_enabled securizar-traffic-pad.service; then
+    log_already "Ofuscación de tráfico (servicio habilitado)"
+elif ask "¿Configurar ofuscación de patrones de tráfico?"; then
 
     # Script de padding de tráfico
     cat > "${ISP_BIN_DIR}/securizar-traffic-pad.sh" << 'TRAFFIC_PAD'
@@ -1075,28 +1535,108 @@ TRAFFIC_SVC
 else
     log_skip "Ofuscación de patrones de tráfico"
 fi
+fi  # S9
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S10" ]]; then
 # ============================================================
 # S10 — AUDITORÍA DE METADATOS ISP
 # ============================================================
 log_section "S10: AUDITORÍA DE METADATOS ISP"
 
-echo "Crea un script de auditoría que verifica:"
+echo "Crea un script de auditoría parametrizable que verifica:"
 echo "  VPN, kill switch, DNS leaks, IPv6, NTS, ECH, WebRTC,"
-echo "  HTTPS-only, traffic padding"
-echo "Produce puntuación: BUENO / MEJORABLE / DEFICIENTE"
+echo "  HTTPS-only, traffic padding, MAC, mDNS, DPI, HTTP leaks"
+echo "Configuración: /etc/securizar/auditoria-isp.conf"
+echo "Reportes:      /var/lib/securizar/auditoria-isp/"
+echo "Uso:           auditoria-isp.sh [--report] [--quiet] [--help]"
+echo "Produce puntuación ponderada: BUENO / MEJORABLE / DEFICIENTE"
 echo ""
 
-if ask "¿Instalar auditoría de metadatos ISP?"; then
+if check_executable /usr/local/bin/auditoria-isp.sh; then
+    log_already "Auditoría ISP (script ya instalado)"
+elif ask "¿Instalar auditoría de metadatos ISP?"; then
 
+    # ── Directorios de reportes ──
+    mkdir -p /var/lib/securizar/auditoria-isp
+    mkdir -p /var/log/securizar
+
+    # ── Configuración parametrizable ──
+    if [[ ! -f /etc/securizar/auditoria-isp.conf ]]; then
+        cat > /etc/securizar/auditoria-isp.conf << 'ISP_CONF'
+# ============================================================
+# Configuración de Auditoría ISP - Securizar Módulo 38
+# ============================================================
+# Editar para ajustar a tu entorno. Reaplicar módulo no sobreescribe.
+
+# === Interfaces VPN a detectar (separadas por espacio) ===
+VPN_INTERFACES="wg0 tun0 tun1 proton0 mullvad-wg nordlynx"
+
+# === Procesos VPN esperados ===
+VPN_PROCESSES="openvpn wireguard wg-quick"
+
+# === DNS ===
+DNS_LOCAL_ADDR="127.0.0.1"
+DNS_SERVICE="unbound"
+DNS_CONF="/etc/unbound/unbound.conf"
+DNS_DOT_PORT=853
+
+# === Kill Switch ===
+KS_NFT_TABLE="securizar_ks"
+KS_IPT_CHAIN="SECURIZAR_KS"
+
+# === NTP/NTS ===
+NTS_SERVICE="chronyd"
+
+# === Traffic Padding ===
+PAD_SERVICE="securizar-traffic-pad.service"
+
+# === Firefox (globs de perfiles, separados por espacio) ===
+FF_PROFILE_DIRS="/home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*"
+
+# === Reportes ===
+REPORT_DIR="/var/lib/securizar/auditoria-isp"
+REPORT_RETENTION=30
+LOG_FILE="/var/log/securizar/auditoria-isp.log"
+
+# === Umbrales de puntuación (porcentaje) ===
+THRESHOLD_GOOD=80
+THRESHOLD_FAIR=50
+
+# === Checks opcionales (yes/no) ===
+CHECK_EXTERNAL_IP=no
+EXTERNAL_IP_URL="https://api.ipify.org"
+CHECK_MAC_RANDOM=yes
+CHECK_MDNS=yes
+CHECK_DPI=yes
+CHECK_HTTP_LEAKS=yes
+CHECK_TOR=no
+
+# === Pesos por categoría (1-5) ===
+WEIGHT_VPN=3
+WEIGHT_DNS=3
+WEIGHT_NETWORK=2
+WEIGHT_BROWSER=2
+WEIGHT_TRAFFIC=2
+ISP_CONF
+        chmod 640 /etc/securizar/auditoria-isp.conf
+        log_change "Creado" "/etc/securizar/auditoria-isp.conf"
+    else
+        log_already "Configuración auditoria-isp.conf ya existe"
+    fi
+
+    # ── Script de auditoría ──
     cat > "${ISP_BIN_DIR}/auditoria-isp.sh" << 'ISP_AUDIT'
 #!/bin/bash
 # ============================================================
 # Auditoría de protección contra espionaje ISP
 # Securizar Módulo 38 - S10
 # ============================================================
+# Parametrizable via /etc/securizar/auditoria-isp.conf
+# Uso: auditoria-isp.sh [--report] [--quiet] [--section SEC] [--help]
+# ============================================================
 set -euo pipefail
 
+# ── Colores ──
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -1105,171 +1645,467 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-score=0
-max_score=0
+# ── Valores por defecto (sobreescritos por conf) ──
+VPN_INTERFACES="wg0 tun0 tun1 proton0 mullvad-wg nordlynx"
+VPN_PROCESSES="openvpn wireguard wg-quick"
+DNS_LOCAL_ADDR="127.0.0.1"
+DNS_SERVICE="unbound"
+DNS_CONF="/etc/unbound/unbound.conf"
+DNS_DOT_PORT=853
+KS_NFT_TABLE="securizar_ks"
+KS_IPT_CHAIN="SECURIZAR_KS"
+NTS_SERVICE="chronyd"
+PAD_SERVICE="securizar-traffic-pad.service"
+FF_PROFILE_DIRS="/home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*"
+REPORT_DIR="/var/lib/securizar/auditoria-isp"
+REPORT_RETENTION=30
+LOG_FILE="/var/log/securizar/auditoria-isp.log"
+THRESHOLD_GOOD=80
+THRESHOLD_FAIR=50
+CHECK_EXTERNAL_IP=no
+EXTERNAL_IP_URL="https://api.ipify.org"
+CHECK_MAC_RANDOM=yes
+CHECK_MDNS=yes
+CHECK_DPI=yes
+CHECK_HTTP_LEAKS=yes
+CHECK_TOR=no
+WEIGHT_VPN=3
+WEIGHT_DNS=3
+WEIGHT_NETWORK=2
+WEIGHT_BROWSER=2
+WEIGHT_TRAFFIC=2
+
+# ── Cargar configuración ──
+CONF_FILE="/etc/securizar/auditoria-isp.conf"
+if [[ -f "$CONF_FILE" ]]; then
+    while IFS= read -r _line; do
+        _line="${_line#"${_line%%[![:space:]]*}"}"
+        [[ -z "$_line" || "$_line" == \#* ]] && continue
+        if [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            eval "$_line"
+        fi
+    done < "$CONF_FILE"
+fi
+
+# ── Argumentos CLI ──
+OPT_REPORT=0
+OPT_QUIET=0
+OPT_SECTION="all"
+OPT_HELP=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --report|-r)  OPT_REPORT=1; shift ;;
+        --quiet|-q)   OPT_QUIET=1; shift ;;
+        --section|-s) OPT_SECTION="${2:-all}"; shift 2 ;;
+        --help|-h)    OPT_HELP=1; shift ;;
+        *) shift ;;
+    esac
+done
+
+if [[ $OPT_HELP -eq 1 ]]; then
+    echo "Uso: auditoria-isp.sh [OPCIONES]"
+    echo ""
+    echo "  --report, -r        Guardar reporte en $REPORT_DIR"
+    echo "  --quiet, -q         Salida mínima (para cron)"
+    echo "  --section, -s SEC   Solo ejecutar sección: vpn dns net browser traffic"
+    echo "  --help, -h          Mostrar esta ayuda"
+    echo ""
+    echo "Configuración: $CONF_FILE"
+    exit 0
+fi
+
+# ── Motor de auditoría ──
+declare -a _check_names=()
+declare -a _check_results=()
+declare -a _check_details=()
+declare -a _check_weights=()
+declare -a _check_categories=()
 issues=()
 
-check() {
-    local name="$1"
-    local result="$2"  # 0=pass, 1=fail
-    local detail="${3:-}"
-    max_score=$((max_score + 1))
+audit_check() {
+    local category="$1" weight="$2" name="$3" result="$4" detail="${5:-}"
+    _check_names+=("$name")
+    _check_results+=("$result")
+    _check_details+=("$detail")
+    _check_weights+=("$weight")
+    _check_categories+=("$category")
 
-    if [[ "$result" -eq 0 ]]; then
-        score=$((score + 1))
-        echo -e "  ${GREEN}[OK]${NC}  $name"
-    else
-        echo -e "  ${RED}[!!]${NC}  $name"
-        [[ -n "$detail" ]] && echo -e "        ${DIM}$detail${NC}"
-        issues+=("$name")
+    if [[ $OPT_QUIET -eq 0 ]]; then
+        if [[ "$result" -eq 0 ]]; then
+            echo -e "  ${GREEN}[OK]${NC}  $name"
+        else
+            echo -e "  ${RED}[!!]${NC}  $name"
+            [[ -n "$detail" ]] && echo -e "        ${DIM}$detail${NC}"
+        fi
     fi
+    [[ "$result" -ne 0 ]] && issues+=("$name|$detail")
 }
 
-echo ""
-echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}${BOLD}  AUDITORÍA DE PROTECCIÓN CONTRA ISP${NC}"
-echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════════${NC}"
-echo -e "  ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
-echo ""
+section_header() {
+    [[ $OPT_QUIET -eq 0 ]] && echo "" && echo -e "${BOLD}── $1 ──${NC}"
+}
 
-# 1. VPN activa
-echo -e "${BOLD}── VPN ──${NC}"
-vpn_fail=1
-for iface in wg0 tun0; do
-    if ip link show "$iface" &>/dev/null; then
-        vpn_fail=0
-        break
+# ── Helpers para Firefox ──
+ff_pref_exists() {
+    local pref="$1" value="${2:-}"
+    # shellcheck disable=SC2086
+    for ff_dir in $FF_PROFILE_DIRS; do
+        [[ -f "${ff_dir}/user.js" ]] || continue
+        if [[ -n "$value" ]]; then
+            grep -q "${pref}.*${value}" "${ff_dir}/user.js" 2>/dev/null && return 0
+        else
+            grep -q "$pref" "${ff_dir}/user.js" 2>/dev/null && return 0
+        fi
+    done
+    return 1
+}
+
+# ── Cabecera ──
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+if [[ $OPT_QUIET -eq 0 ]]; then
+    echo ""
+    echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}${BOLD}  AUDITORÍA DE PROTECCIÓN CONTRA ISP${NC}"
+    echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════════════${NC}"
+    echo -e "  ${DIM}${TIMESTAMP}${NC}"
+    echo -e "  ${DIM}Conf: ${CONF_FILE}${NC}"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# CATEGORÍA: VPN (peso: WEIGHT_VPN)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$OPT_SECTION" == "all" || "$OPT_SECTION" == "vpn" ]]; then
+    section_header "VPN"
+
+    # C1: Interfaz VPN activa
+    vpn_fail=1
+    vpn_iface_found=""
+    for iface in $VPN_INTERFACES; do
+        if ip link show "$iface" &>/dev/null; then
+            vpn_fail=0
+            vpn_iface_found="$iface"
+            break
+        fi
+    done
+    if [[ $vpn_fail -eq 0 ]]; then
+        audit_check "vpn" "$WEIGHT_VPN" "Interfaz VPN activa ($vpn_iface_found)" 0
+    else
+        audit_check "vpn" "$WEIGHT_VPN" "Interfaz VPN activa" 1 \
+            "No detectada. Interfaces buscadas: $VPN_INTERFACES"
     fi
-done
-check "Interfaz VPN activa (wg0/tun0)" $vpn_fail "No se detectó interfaz VPN"
 
-# 2. Kill switch
-echo ""
-echo -e "${BOLD}── Kill Switch ──${NC}"
-ks_fail=1
-if nft list table inet securizar_ks &>/dev/null 2>&1; then
-    ks_fail=0
-elif iptables -L SECURIZAR_KS -n &>/dev/null 2>&1; then
-    ks_fail=0
-elif firewall-cmd --get-default-zone 2>/dev/null | grep -q "drop"; then
-    ks_fail=0
-fi
-check "Kill switch VPN activo" $ks_fail "Ejecutar: /etc/securizar/vpn-killswitch.sh"
+    # C2: Proceso VPN ejecutándose
+    vpn_proc_fail=1
+    vpn_proc_found=""
+    for proc in $VPN_PROCESSES; do
+        if pgrep -x "$proc" &>/dev/null; then
+            vpn_proc_fail=0
+            vpn_proc_found="$proc"
+            break
+        fi
+    done
+    if [[ $vpn_proc_fail -eq 0 ]]; then
+        audit_check "vpn" "$WEIGHT_VPN" "Proceso VPN activo ($vpn_proc_found)" 0
+    else
+        audit_check "vpn" "$WEIGHT_VPN" "Proceso VPN activo" 1 \
+            "No detectado. Procesos buscados: $VPN_PROCESSES"
+    fi
 
-# 3. DNS
-echo ""
-echo -e "${BOLD}── DNS ──${NC}"
-# unbound activo (DNS-over-TLS)
-dot_fail=1
-if systemctl is-active unbound &>/dev/null; then
-    if grep -q "forward-tls-upstream: yes" /etc/unbound/unbound.conf 2>/dev/null; then
-        dot_fail=0
+    # C3: Kill switch
+    ks_fail=1
+    ks_backend=""
+    if nft list table inet "$KS_NFT_TABLE" &>/dev/null 2>&1; then
+        ks_fail=0; ks_backend="nftables"
+    elif iptables -L "$KS_IPT_CHAIN" -n &>/dev/null 2>&1; then
+        ks_fail=0; ks_backend="iptables"
+    elif command -v firewall-cmd &>/dev/null && \
+         firewall-cmd --get-default-zone 2>/dev/null | grep -q "drop"; then
+        ks_fail=0; ks_backend="firewalld"
+    fi
+    if [[ $ks_fail -eq 0 ]]; then
+        audit_check "vpn" "$WEIGHT_VPN" "Kill switch VPN activo ($ks_backend)" 0
+    else
+        audit_check "vpn" "$WEIGHT_VPN" "Kill switch VPN activo" 1 \
+            "Ejecutar: sudo /etc/securizar/vpn-killswitch.sh"
     fi
 fi
-check "DNS-over-TLS (unbound) activo" $dot_fail "Ejecutar: sudo systemctl start unbound"
 
-# DNS apunta a unbound (local)
-dns_local_fail=1
-if grep -qE "^nameserver\s+127\.0\.0\.1" /etc/resolv.conf 2>/dev/null; then
-    dns_local_fail=0
-elif nmcli -t -f ipv4.dns con show "$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)" 2>/dev/null | grep -q "127.0.0.1"; then
-    dns_local_fail=0
-fi
-check "DNS apunta a unbound (127.0.0.1)" $dns_local_fail "DNS no redirigido a unbound local"
+# ═══════════════════════════════════════════════════════════════
+# CATEGORÍA: DNS (peso: WEIGHT_DNS)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$OPT_SECTION" == "all" || "$OPT_SECTION" == "dns" ]]; then
+    section_header "DNS"
 
-# DNSSEC via unbound
-dnssec_fail=1
-if [[ -f /etc/unbound/unbound.conf ]]; then
-    if grep -q "auto-trust-anchor-file" /etc/unbound/unbound.conf 2>/dev/null; then
+    # C4: DNS cifrado activo
+    dot_fail=1
+    if systemctl is-active "$DNS_SERVICE" &>/dev/null; then
+        if [[ -f "$DNS_CONF" ]] && grep -q "forward-tls-upstream: yes" "$DNS_CONF" 2>/dev/null; then
+            dot_fail=0
+        fi
+    fi
+    if [[ $dot_fail -eq 0 ]]; then
+        audit_check "dns" "$WEIGHT_DNS" "DNS-over-TLS ($DNS_SERVICE) activo" 0
+    else
+        audit_check "dns" "$WEIGHT_DNS" "DNS-over-TLS ($DNS_SERVICE) activo" 1 \
+            "Ejecutar: sudo systemctl start $DNS_SERVICE"
+    fi
+
+    # C5: DNS apunta a resolvedor local
+    dns_local_fail=1
+    dns_source=""
+    if grep -qE "^nameserver\s+${DNS_LOCAL_ADDR}" /etc/resolv.conf 2>/dev/null; then
+        dns_local_fail=0; dns_source="resolv.conf"
+    elif command -v nmcli &>/dev/null; then
+        active_conn=$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)
+        if [[ -n "$active_conn" ]] && \
+           nmcli -t -f ipv4.dns con show "$active_conn" 2>/dev/null | grep -q "$DNS_LOCAL_ADDR"; then
+            dns_local_fail=0; dns_source="NetworkManager"
+        fi
+    fi
+    if [[ $dns_local_fail -eq 0 ]]; then
+        audit_check "dns" "$WEIGHT_DNS" "DNS local ($DNS_LOCAL_ADDR via $dns_source)" 0
+    else
+        audit_check "dns" "$WEIGHT_DNS" "DNS apunta a resolvedor local ($DNS_LOCAL_ADDR)" 1 \
+            "DNS no redirigido a $DNS_SERVICE local"
+    fi
+
+    # C6: DNSSEC
+    dnssec_fail=1
+    if [[ -f "$DNS_CONF" ]] && grep -q "auto-trust-anchor-file" "$DNS_CONF" 2>/dev/null; then
         dnssec_fail=0
     fi
-fi
-check "DNSSEC habilitado (unbound)" $dnssec_fail "DNSSEC no configurado en unbound"
+    audit_check "dns" "$WEIGHT_DNS" "DNSSEC habilitado" $dnssec_fail \
+        "Añadir auto-trust-anchor-file a $DNS_CONF"
 
-# 4. IPv6
-echo ""
-echo -e "${BOLD}── IPv6 ──${NC}"
-ipv6_fail=0
-if [[ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]]; then
-    disabled=$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")
-    if [[ "$disabled" != "1" ]]; then
-        # IPv6 habilitado - verificar si hay dirección pública
-        if ip -6 addr show scope global 2>/dev/null | grep -q "inet6"; then
-            ipv6_fail=1
+    # C7: Sin fugas DNS plaintext (puerto 53 saliente)
+    dns_leak_fail=0
+    plain_dns=$(ss -tnp 2>/dev/null | grep ":53 " | grep -v "127\.\|::1" || true)
+    if [[ -n "$plain_dns" ]]; then
+        dns_leak_fail=1
+    fi
+    audit_check "dns" "$WEIGHT_DNS" "Sin fugas DNS plaintext (puerto 53)" $dns_leak_fail \
+        "Conexiones DNS sin cifrar detectadas al exterior"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# CATEGORÍA: RED (peso: WEIGHT_NETWORK)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$OPT_SECTION" == "all" || "$OPT_SECTION" == "net" ]]; then
+    section_header "Red"
+
+    # C8: IPv6 sin exposición pública
+    ipv6_fail=0
+    if [[ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]]; then
+        ipv6_disabled=$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo "0")
+        if [[ "$ipv6_disabled" != "1" ]]; then
+            if ip -6 addr show scope global 2>/dev/null | grep -q "inet6"; then
+                ipv6_fail=1
+            fi
+        fi
+    fi
+    audit_check "net" "$WEIGHT_NETWORK" "IPv6 sin exposición pública" $ipv6_fail \
+        "IPv6 global detectada (posible fuga fuera de VPN)"
+
+    # C9: NTS activo
+    nts_fail=1
+    nts_detail=""
+    if systemctl is-active "$NTS_SERVICE" &>/dev/null; then
+        nts_count=$(chronyc -n authdata 2>/dev/null | grep -c "NTS" || echo "0")
+        if [[ "$nts_count" -gt 0 ]]; then
+            nts_fail=0
+            nts_detail="$nts_count fuentes NTS"
+        fi
+    fi
+    if [[ $nts_fail -eq 0 ]]; then
+        audit_check "net" "$WEIGHT_NETWORK" "NTS activo ($nts_detail)" 0
+    else
+        audit_check "net" "$WEIGHT_NETWORK" "NTS (Network Time Security) activo" 1 \
+            "Usar chrony con servidores NTS: sudo systemctl start $NTS_SERVICE"
+    fi
+
+    # C10: MAC randomización (opcional)
+    if [[ "$CHECK_MAC_RANDOM" == "yes" ]]; then
+        mac_fail=1
+        if command -v nmcli &>/dev/null; then
+            wifi_mac=$(nmcli -t -f 802-11-wireless.cloned-mac-address con show --active 2>/dev/null | head -1 || true)
+            eth_mac=$(nmcli -t -f 802-3-ethernet.cloned-mac-address con show --active 2>/dev/null | head -1 || true)
+            if [[ "$wifi_mac" == *"random"* || "$wifi_mac" == *"stable"* || \
+                  "$eth_mac" == *"random"* || "$eth_mac" == *"stable"* ]]; then
+                mac_fail=0
+            fi
+        fi
+        # También comprobar en NM conf global
+        if [[ $mac_fail -eq 1 ]] && grep -rq "wifi.cloned-mac-address=random\|wifi.cloned-mac-address=stable" \
+             /etc/NetworkManager/ 2>/dev/null; then
+            mac_fail=0
+        fi
+        audit_check "net" "$WEIGHT_NETWORK" "MAC randomización configurada" $mac_fail \
+            "nmcli con modify CONN wifi.cloned-mac-address random"
+    fi
+
+    # C11: mDNS/LLMNR desactivado (opcional)
+    if [[ "$CHECK_MDNS" == "yes" ]]; then
+        mdns_fail=0
+        if systemctl is-active avahi-daemon &>/dev/null 2>&1; then
+            mdns_fail=1
+        fi
+        if [[ -f /etc/systemd/resolved.conf ]] && \
+           ! grep -q "^LLMNR=no" /etc/systemd/resolved.conf 2>/dev/null; then
+            if systemctl is-active systemd-resolved &>/dev/null 2>&1; then
+                # resolved activo sin LLMNR desactivado
+                if resolvectl status 2>/dev/null | grep -qi "LLMNR.*yes"; then
+                    mdns_fail=1
+                fi
+            fi
+        fi
+        audit_check "net" "$WEIGHT_NETWORK" "mDNS/LLMNR desactivado" $mdns_fail \
+            "avahi-daemon activo o LLMNR habilitado (fuga en red local)"
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# CATEGORÍA: NAVEGADOR (peso: WEIGHT_BROWSER)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$OPT_SECTION" == "all" || "$OPT_SECTION" == "browser" ]]; then
+    section_header "Navegador"
+
+    # C12: ECH
+    ech_fail=1
+    ff_pref_exists "echconfig.enabled" "true" && ech_fail=0
+    audit_check "browser" "$WEIGHT_BROWSER" "ECH (Encrypted Client Hello)" $ech_fail \
+        "SNI visible al ISP. Configurar network.dns.echconfig.enabled=true"
+
+    # C13: WebRTC desactivado
+    webrtc_fail=1
+    ff_pref_exists "peerconnection.enabled" "false" && webrtc_fail=0
+    audit_check "browser" "$WEIGHT_BROWSER" "WebRTC desactivado" $webrtc_fail \
+        "WebRTC puede filtrar IP real. Configurar media.peerconnection.enabled=false"
+
+    # C14: HTTPS-Only
+    https_fail=1
+    ff_pref_exists "https_only_mode" "true" && https_fail=0
+    audit_check "browser" "$WEIGHT_BROWSER" "HTTPS-Only mode" $https_fail \
+        "Tráfico HTTP visible al ISP. Configurar dom.security.https_only_mode=true"
+
+    # C15: Privacidad hardening (telemetría + fingerprint resistance)
+    priv_fail=1
+    if ff_pref_exists "resistFingerprinting" "true" && \
+       ff_pref_exists "toolkit.telemetry.enabled" "false"; then
+        priv_fail=0
+    fi
+    audit_check "browser" "$WEIGHT_BROWSER" "Fingerprint resistance + telemetría off" $priv_fail \
+        "Configurar privacy.resistFingerprinting=true, toolkit.telemetry.enabled=false"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# CATEGORÍA: TRÁFICO (peso: WEIGHT_TRAFFIC)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$OPT_SECTION" == "all" || "$OPT_SECTION" == "traffic" ]]; then
+    section_header "Tráfico"
+
+    # C16: Traffic padding activo
+    pad_fail=1
+    if systemctl is-active "$PAD_SERVICE" &>/dev/null; then
+        pad_fail=0
+    fi
+    audit_check "traffic" "$WEIGHT_TRAFFIC" "Traffic padding activo ($PAD_SERVICE)" $pad_fail \
+        "Patrones de tráfico expuestos al ISP"
+
+    # C17: Sin conexiones HTTP activas (opcional)
+    if [[ "$CHECK_HTTP_LEAKS" == "yes" ]]; then
+        http_fail=0
+        http_count=$(ss -tnp state established 2>/dev/null | grep -c ":80 " || echo "0")
+        if [[ "$http_count" -gt 0 ]]; then
+            http_fail=1
+        fi
+        audit_check "traffic" "$WEIGHT_TRAFFIC" "Sin conexiones HTTP activas ($http_count)" $http_fail \
+            "Conexiones HTTP (sin cifrar) visibles al ISP"
+    fi
+
+    # C18: DPI evasión configurada (opcional)
+    if [[ "$CHECK_DPI" == "yes" ]]; then
+        dpi_fail=1
+        if command -v obfs4proxy &>/dev/null; then
+            dpi_fail=0
+        elif command -v stunnel &>/dev/null || command -v stunnel4 &>/dev/null; then
+            dpi_fail=0
+        elif [[ -f /etc/tor/torrc.d/bridges.conf ]]; then
+            dpi_fail=0
+        elif [[ -f /etc/securizar/stunnel-vpn-wrap.conf ]]; then
+            dpi_fail=0
+        fi
+        audit_check "traffic" "$WEIGHT_TRAFFIC" "DPI evasión configurada" $dpi_fail \
+            "Instalar obfs4proxy o stunnel para ofuscar tráfico VPN/Tor"
+    fi
+
+    # C19: Tor disponible (opcional)
+    if [[ "$CHECK_TOR" == "yes" ]]; then
+        tor_fail=1
+        if command -v tor &>/dev/null && systemctl is-active tor &>/dev/null 2>&1; then
+            tor_fail=0
+        fi
+        audit_check "traffic" "$WEIGHT_TRAFFIC" "Tor activo" $tor_fail \
+            "Tor no detectado. Instalar: sudo zypper install tor"
+    fi
+
+    # C20: IP externa (opcional - requiere internet)
+    if [[ "$CHECK_EXTERNAL_IP" == "yes" ]]; then
+        ext_ip_fail=1
+        ext_ip=$(curl -s --max-time 5 "$EXTERNAL_IP_URL" 2>/dev/null || true)
+        if [[ -n "$ext_ip" ]] && [[ "$ext_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # IP obtenida, verificar si es diferente a la IP del gateway local
+            gw_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+            local_ip=$(ip -4 addr show "$gw_iface" 2>/dev/null | grep -oP 'inet \K[\d.]+' | head -1 || true)
+            if [[ -n "$local_ip" ]] && [[ "$ext_ip" != "$local_ip" ]]; then
+                ext_ip_fail=0
+            elif [[ -z "$local_ip" ]]; then
+                ext_ip_fail=0  # No se puede comparar, asumimos VPN
+            fi
+        fi
+        if [[ $ext_ip_fail -eq 0 ]]; then
+            audit_check "traffic" "$WEIGHT_TRAFFIC" "IP externa enmascarada ($ext_ip)" 0
+        else
+            audit_check "traffic" "$WEIGHT_TRAFFIC" "IP externa enmascarada" 1 \
+                "IP $ext_ip coincide con IP local - sin VPN activa"
         fi
     fi
 fi
-check "IPv6 sin exposición pública" $ipv6_fail "IPv6 global detectada (posible fuga)"
 
-# 5. NTS
-echo ""
-echo -e "${BOLD}── NTP/NTS ──${NC}"
-nts_fail=1
-if systemctl is-active chronyd &>/dev/null; then
-    if chronyc -n authdata 2>/dev/null | grep -q "NTS"; then
-        nts_fail=0
-    fi
-fi
-check "NTS (Network Time Security) activo" $nts_fail "Usar chrony con servidores NTS"
+# ═══════════════════════════════════════════════════════════════
+# PUNTUACIÓN PONDERADA
+# ═══════════════════════════════════════════════════════════════
+total_weighted=0
+pass_weighted=0
+total_checks=${#_check_names[@]}
 
-# 6. ECH
-echo ""
-echo -e "${BOLD}── Navegador ──${NC}"
-ech_fail=1
-for ff_dir in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
-    [[ -f "${ff_dir}/user.js" ]] || continue
-    if grep -q "echconfig.enabled.*true" "${ff_dir}/user.js" 2>/dev/null; then
-        ech_fail=0
-        break
+for i in $(seq 0 $((total_checks - 1))); do
+    w=${_check_weights[$i]}
+    total_weighted=$((total_weighted + w))
+    if [[ "${_check_results[$i]}" -eq 0 ]]; then
+        pass_weighted=$((pass_weighted + w))
     fi
 done
-check "ECH (Encrypted Client Hello)" $ech_fail "SNI visible al ISP"
-
-# 7. WebRTC
-webrtc_fail=1
-for ff_dir in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
-    [[ -f "${ff_dir}/user.js" ]] || continue
-    if grep -q "peerconnection.enabled.*false" "${ff_dir}/user.js" 2>/dev/null; then
-        webrtc_fail=0
-        break
-    fi
-done
-check "WebRTC desactivado" $webrtc_fail "WebRTC puede filtrar IP real"
-
-# 8. HTTPS-Only
-https_fail=1
-for ff_dir in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
-    [[ -f "${ff_dir}/user.js" ]] || continue
-    if grep -q "https_only_mode.*true" "${ff_dir}/user.js" 2>/dev/null; then
-        https_fail=0
-        break
-    fi
-done
-check "HTTPS-Only mode" $https_fail "Tráfico HTTP visible al ISP"
-
-# 9. Traffic padding
-echo ""
-echo -e "${BOLD}── Tráfico ──${NC}"
-pad_fail=1
-if systemctl is-active securizar-traffic-pad.service &>/dev/null; then
-    pad_fail=0
-fi
-check "Traffic padding activo" $pad_fail "Patrones de tráfico expuestos"
-
-# ── Puntuación ──
-echo ""
-echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
-echo ""
 
 pct=0
-if [[ $max_score -gt 0 ]]; then
-    pct=$(( score * 100 / max_score ))
+if [[ $total_weighted -gt 0 ]]; then
+    pct=$(( pass_weighted * 100 / total_weighted ))
 fi
 
-if [[ $pct -ge 80 ]]; then
+pass_count=0
+fail_count=0
+for r in "${_check_results[@]}"; do
+    if [[ "$r" -eq 0 ]]; then
+        pass_count=$((pass_count + 1))
+    else
+        fail_count=$((fail_count + 1))
+    fi
+done
+
+if [[ $pct -ge $THRESHOLD_GOOD ]]; then
     label="BUENO"
     color="$GREEN"
-elif [[ $pct -ge 50 ]]; then
+elif [[ $pct -ge $THRESHOLD_FAIR ]]; then
     label="MEJORABLE"
     color="$YELLOW"
 else
@@ -1277,61 +2113,160 @@ else
     color="$RED"
 fi
 
-echo -e "  Puntuación: ${color}${BOLD}${score}/${max_score}${NC} (${color}${pct}%${NC})"
-echo -e "  Nivel: ${color}${BOLD}${label}${NC}"
-echo ""
+if [[ $OPT_QUIET -eq 0 ]]; then
+    echo ""
+    echo -e "${BOLD}══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  Checks: ${GREEN}${pass_count} OK${NC} / ${RED}${fail_count} FAIL${NC} / ${total_checks} total"
+    echo -e "  Puntuación ponderada: ${color}${BOLD}${pass_weighted}/${total_weighted}${NC} (${color}${pct}%${NC})"
+    echo -e "  Nivel: ${color}${BOLD}${label}${NC}"
+    echo ""
 
-if [[ ${#issues[@]} -gt 0 ]]; then
-    echo -e "  ${YELLOW}Puntos a mejorar:${NC}"
-    for issue in "${issues[@]}"; do
-        echo -e "    ${DIM}•${NC} $issue"
+    if [[ ${#issues[@]} -gt 0 ]]; then
+        echo -e "  ${YELLOW}Puntos a mejorar:${NC}"
+        for issue in "${issues[@]}"; do
+            IFS='|' read -r iname idetail <<< "$issue"
+            echo -e "    ${RED}•${NC} $iname"
+            [[ -n "$idetail" ]] && echo -e "      ${DIM}$idetail${NC}"
+        done
+        echo ""
+    fi
+
+    # Resumen por categoría
+    echo -e "  ${CYAN}Desglose por categoría:${NC}"
+    for cat in vpn dns net browser traffic; do
+        cat_pass=0; cat_total=0; cat_w_pass=0; cat_w_total=0
+        for i in $(seq 0 $((total_checks - 1))); do
+            [[ "${_check_categories[$i]}" != "$cat" ]] && continue
+            w=${_check_weights[$i]}
+            cat_w_total=$((cat_w_total + w))
+            cat_total=$((cat_total + 1))
+            if [[ "${_check_results[$i]}" -eq 0 ]]; then
+                cat_pass=$((cat_pass + 1))
+                cat_w_pass=$((cat_w_pass + w))
+            fi
+        done
+        [[ $cat_total -eq 0 ]] && continue
+        cat_pct=$(( cat_w_pass * 100 / cat_w_total ))
+        if [[ $cat_pct -ge $THRESHOLD_GOOD ]]; then cat_c="$GREEN"
+        elif [[ $cat_pct -ge $THRESHOLD_FAIR ]]; then cat_c="$YELLOW"
+        else cat_c="$RED"
+        fi
+        printf "    %-12s ${cat_c}%3d%%${NC}  (%d/%d checks)\n" "$cat" "$cat_pct" "$cat_pass" "$cat_total"
     done
+    echo ""
+    echo -e "  ${DIM}Conf: ${CONF_FILE}${NC}"
     echo ""
 fi
 
-echo -e "  ${DIM}Ejecutar: sudo bash /ruta/securizar/proteger-contra-isp.sh${NC}"
-echo ""
+# ── Guardar reporte ──
+if [[ $OPT_REPORT -eq 1 ]]; then
+    mkdir -p "$REPORT_DIR"
+    report_file="${REPORT_DIR}/auditoria-isp-$(date +%Y%m%d-%H%M%S).txt"
+    {
+        echo "AUDITORÍA DE PROTECCIÓN CONTRA ISP"
+        echo "Fecha: $TIMESTAMP"
+        echo "Nivel: $label ($pct%)"
+        echo "Checks: ${pass_count}/${total_checks} OK"
+        echo "Puntuación ponderada: ${pass_weighted}/${total_weighted}"
+        echo ""
+        echo "=== RESULTADOS ==="
+        for i in $(seq 0 $((total_checks - 1))); do
+            if [[ "${_check_results[$i]}" -eq 0 ]]; then
+                echo "  [OK]  ${_check_names[$i]}"
+            else
+                echo "  [!!]  ${_check_names[$i]}"
+                [[ -n "${_check_details[$i]}" ]] && echo "        ${_check_details[$i]}"
+            fi
+        done
+        echo ""
+        echo "=== CATEGORÍAS ==="
+        for cat in vpn dns net browser traffic; do
+            cat_pass=0; cat_total=0
+            for i in $(seq 0 $((total_checks - 1))); do
+                [[ "${_check_categories[$i]}" != "$cat" ]] && continue
+                cat_total=$((cat_total + 1))
+                [[ "${_check_results[$i]}" -eq 0 ]] && cat_pass=$((cat_pass + 1))
+            done
+            [[ $cat_total -eq 0 ]] && continue
+            printf "  %-12s %d/%d\n" "$cat" "$cat_pass" "$cat_total"
+        done
+    } > "$report_file"
+    chmod 640 "$report_file"
+    [[ $OPT_QUIET -eq 0 ]] && echo -e "  ${GREEN}Reporte:${NC} $report_file"
 
-exit 0
+    # Rotación de reportes antiguos
+    if [[ -d "$REPORT_DIR" ]]; then
+        ls -t "$REPORT_DIR"/auditoria-isp-*.txt 2>/dev/null | \
+            tail -n "+$((REPORT_RETENTION + 1))" | xargs rm -f 2>/dev/null || true
+    fi
+fi
+
+# ── Log ──
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+echo "${TIMESTAMP} nivel=${label} pct=${pct} ok=${pass_count}/${total_checks} weighted=${pass_weighted}/${total_weighted}" \
+    >> "$LOG_FILE" 2>/dev/null || true
+
+# Código de salida refleja nivel
+if [[ $pct -ge $THRESHOLD_GOOD ]]; then
+    exit 0
+elif [[ $pct -ge $THRESHOLD_FAIR ]]; then
+    exit 1
+else
+    exit 2
+fi
 ISP_AUDIT
     chmod 755 "${ISP_BIN_DIR}/auditoria-isp.sh"
     log_change "Creado" "${ISP_BIN_DIR}/auditoria-isp.sh"
 
-    # Cron semanal
+    # Cron semanal (usa --report --quiet para salida mínima + reporte persistente)
     mkdir -p /etc/cron.weekly
     cat > /etc/cron.weekly/auditoria-isp << 'CRON_ISP'
 #!/bin/bash
 # Auditoría semanal de protección ISP - Securizar M38
-/usr/local/bin/auditoria-isp.sh > /var/log/auditoria-isp-$(date +%Y%m%d).log 2>&1
-# Mantener solo últimos 12 reportes
-ls -t /var/log/auditoria-isp-*.log 2>/dev/null | tail -n +13 | xargs rm -f 2>/dev/null || true
+# Genera reporte en /var/lib/securizar/auditoria-isp/ (rotación automática)
+/usr/local/bin/auditoria-isp.sh --report --quiet 2>/dev/null
+rc=$?
+# Alertar si nivel es DEFICIENTE (exit code 2)
+if [[ $rc -eq 2 ]]; then
+    logger -t securizar-isp "ALERTA: Auditoría ISP nivel DEFICIENTE"
+fi
 CRON_ISP
     chmod 755 /etc/cron.weekly/auditoria-isp
-    log_change "Creado" "/etc/cron.weekly/auditoria-isp"
+    log_change "Creado" "/etc/cron.weekly/auditoria-isp (semanal, --report --quiet)"
 
-    log_info "Auditoría de metadatos ISP instalada (semanal)"
+    log_info "Auditoría de metadatos ISP instalada (20 checks, parametrizable)"
+    log_info "Configuración: /etc/securizar/auditoria-isp.conf"
+    log_info "Uso: auditoria-isp.sh [--report] [--quiet] [--section vpn|dns|net|browser|traffic]"
 else
     log_skip "Auditoría de metadatos ISP"
 fi
+fi  # S10
 
+if [[ "$ISP_SECTION" == "all" ]]; then
 # ============================================================
 # RESUMEN FINAL
 # ============================================================
 echo ""
-echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║   MÓDULO 38 COMPLETADO                                    ║"
-echo "╠═══════════════════════════════════════════════════════════╣"
-echo "║                                                           ║"
-echo "║   Herramientas instaladas:                                ║"
-echo "║     • /etc/securizar/vpn-killswitch.sh      (kill switch) ║"
-echo "║     • /usr/local/bin/detectar-dns-leak.sh    (DNS leaks)  ║"
-echo "║     • /usr/local/bin/detectar-http-inseguro.sh (HTTP)     ║"
-echo "║     • /usr/local/bin/securizar-traffic-pad.sh  (padding)  ║"
-echo "║     • /usr/local/bin/auditoria-isp.sh        (auditoría)  ║"
-echo "║                                                           ║"
-echo "║   Ejecutar auditoría: auditoria-isp.sh                   ║"
-echo "║                                                           ║"
-echo "╚═══════════════════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║   MÓDULO 38 COMPLETADO                                      ║"
+echo "╠══════════════════════════════════════════════════════════════╣"
+echo "║                                                              ║"
+echo "║   Herramientas instaladas:                                   ║"
+echo "║     • /etc/securizar/vpn-killswitch.sh       (kill switch)   ║"
+echo "║     • /usr/local/bin/detectar-dns-leak.sh    (DNS leaks)     ║"
+echo "║     • /usr/local/bin/detectar-http-inseguro.sh (HTTP)        ║"
+echo "║     • /usr/local/bin/securizar-traffic-pad.sh  (padding)     ║"
+echo "║     • /usr/local/bin/auditoria-isp.sh         (20 checks)   ║"
+echo "║     • /etc/securizar/auditoria-isp.conf      (configuración)║"
+echo "║                                                              ║"
+echo "║   Auditoría: auditoria-isp.sh [--report] [--quiet]          ║"
+echo "║   Secciones: --section vpn|dns|net|browser|traffic           ║"
+echo "║   Reportes:  /var/lib/securizar/auditoria-isp/               ║"
+echo "║                                                              ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
 log_info "Módulo 38 - Protección contra espionaje ISP completado"
+show_changes_summary
+fi  # all - resumen final
