@@ -24,6 +24,22 @@ require_root
 securizar_setup_traps
 init_backup "auditoria-red-wireshark"
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_executable /usr/bin/tshark || check_executable /usr/local/bin/tshark'
+_pc 'check_dir_exists /etc/securizar/wireshark-profiles && test -n "$(ls /etc/securizar/wireshark-profiles/ 2>/dev/null)"'
+_pc 'check_dir_exists /etc/securizar/wireshark-profiles'
+_pc 'check_file_exists /etc/securizar/wireshark-filters/capture-filters.txt'
+_pc 'check_executable /usr/local/bin/auditoria-red-captura.sh'
+_pc 'true'
+_pc 'check_executable /usr/local/bin/auditoria-red-anomalias.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-reporte.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-correlacion.sh'
+_pc 'check_file_exists /etc/securizar/auditoria-red-policy.conf'
+_precheck_result
+
+AUDIT_SECTION="${1:-all}"
+
 log_section "MODULO 66: AUDITORIA DE RED CON WIRESHARK"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
@@ -52,6 +68,7 @@ log_info "Interfaz principal detectada: $MAIN_IFACE"
 # ============================================================
 # S1: INSTALACION DE WIRESHARK Y TSHARK
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S1" ]]; then
 log_section "S1: INSTALACION DE WIRESHARK Y TSHARK"
 
 echo "Wireshark es el analizador de protocolos de red mas utilizado del mundo."
@@ -59,7 +76,9 @@ echo "tshark es su version de linea de comandos, ideal para servidores y automat
 echo "Se instalaran ambos para auditoria completa de trafico de red."
 echo ""
 
-if ask "¿Instalar Wireshark y tshark para auditoria de red?"; then
+if check_executable /usr/bin/tshark || check_executable /usr/local/bin/tshark; then
+    log_already "Wireshark y tshark (tshark ya instalado)"
+elif ask "¿Instalar Wireshark y tshark para auditoria de red?"; then
     TSHARK_INSTALLED=0
     WIRESHARK_INSTALLED=0
 
@@ -147,9 +166,12 @@ else
     log_info "Instalacion omitida por el usuario"
 fi
 
+fi
+
 # ============================================================
 # S2: CONFIGURACION DE PERMISOS (GRUPO WIRESHARK)
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S2" ]]; then
 log_section "S2: CONFIGURACION DE PERMISOS"
 
 echo "Para capturar trafico sin ser root, se configura el grupo 'wireshark'."
@@ -157,7 +179,9 @@ echo "Solo los usuarios de este grupo podran realizar capturas de red."
 echo "Esto sigue el principio de minimo privilegio."
 echo ""
 
-if ask "¿Configurar permisos de captura con grupo wireshark?"; then
+if getent group wireshark &>/dev/null; then
+    log_already "Permisos de captura (grupo wireshark existe)"
+elif ask "¿Configurar permisos de captura con grupo wireshark?"; then
     # Crear grupo wireshark si no existe
     if ! getent group wireshark &>/dev/null; then
         groupadd wireshark 2>/dev/null || true
@@ -226,16 +250,21 @@ else
     log_info "Configuracion de permisos omitida"
 fi
 
+fi
+
 # ============================================================
 # S3: PERFILES DE CAPTURA PARA AUDITORIA DE SEGURIDAD
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S3" ]]; then
 log_section "S3: PERFILES DE CAPTURA PARA AUDITORIA"
 
 echo "Se crearan perfiles de captura optimizados para diferentes escenarios"
 echo "de auditoria de seguridad."
 echo ""
 
-if ask "¿Crear perfiles de captura para auditoria?"; then
+if check_dir_exists /etc/securizar/wireshark-profiles && [[ -n "$(ls /etc/securizar/wireshark-profiles/*.conf 2>/dev/null)" ]]; then
+    log_already "Perfiles de captura (perfiles ya existen en wireshark-profiles/)"
+elif ask "¿Crear perfiles de captura para auditoria?"; then
 
     # Perfil 1: Captura general de seguridad
     cat > "$PROFILE_DIR/captura-seguridad-general.conf" << 'EOFPROF'
@@ -327,16 +356,21 @@ else
     log_info "Creacion de perfiles omitida"
 fi
 
+fi
+
 # ============================================================
 # S4: FILTROS DE CAPTURA PREDEFINIDOS
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S4" ]]; then
 log_section "S4: FILTROS DE CAPTURA PREDEFINIDOS"
 
 echo "Se instalaran filtros de captura y display optimizados para"
 echo "deteccion de amenazas y auditoria de seguridad."
 echo ""
 
-if ask "¿Instalar filtros de captura predefinidos?"; then
+if check_file_exists /etc/securizar/wireshark-filters/capture-filters.txt; then
+    log_already "Filtros de captura predefinidos (capture-filters.txt existe)"
+elif ask "¿Instalar filtros de captura predefinidos?"; then
 
     # Filtros de captura (BPF)
     cat > "$FILTER_DIR/capture-filters.txt" << 'EOFCF'
@@ -381,6 +415,12 @@ UNAUTHORIZED_VPN=port 1194 or port 1723 or port 500 or port 4500
 
 # --- Base de datos expuesta ---
 DB_EXPOSED=port 3306 or port 5432 or port 1433 or port 27017 or port 6379
+
+# --- IPv6 Router Advertisement (RA spoofing) ---
+IPV6_RA=icmp6 and ip6[40] == 134
+
+# --- Gratuitous ARP (sender IP == target IP) ---
+GARP=arp and arp[14:4] == arp[24:4]
 EOFCF
     log_info "Filtros de captura BPF instalados"
 
@@ -429,6 +469,24 @@ MALFORMED=_ws.malformed
 
 # --- NBNS/LLMNR (ataques de envenenamiento) ---
 NBNS_LLMNR=nbns or llmnr or mdns
+
+# --- Gratuitous ARP (posible ARP poisoning) ---
+ARP_GRATUITOUS=arp.isgratuitous == 1
+
+# --- DHCP starvation (exceso de DHCP Discover) ---
+DHCP_STARVATION=dhcp.option.dhcp == 1
+
+# --- Rogue DHCP server (DHCP Offer de fuentes inesperadas) ---
+DHCP_ROGUE=dhcp.option.dhcp == 2
+
+# --- LLMNR poisoning (respuestas LLMNR = posible Responder) ---
+LLMNR_POISONING=llmnr and dns.flags.response == 1
+
+# --- mDNS poisoning (respuestas mDNS excesivas) ---
+MDNS_POISONING=mdns and dns.flags.response == 1
+
+# --- IPv6 Router Advertisement spoofing ---
+IPV6_RA_SPOOF=icmpv6.type == 134
 EOFDF
     log_info "Filtros de display instalados"
 
@@ -438,16 +496,21 @@ else
     log_info "Instalacion de filtros omitida"
 fi
 
+fi
+
 # ============================================================
 # S5: SCRIPTS DE CAPTURA AUTOMATIZADA
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S5" ]]; then
 log_section "S5: SCRIPTS DE CAPTURA AUTOMATIZADA"
 
 echo "Se creara un script de captura automatizada que puede ejecutarse"
 echo "periodicamente o bajo demanda para auditoria de red."
 echo ""
 
-if ask "¿Crear scripts de captura automatizada?"; then
+if check_executable /usr/local/bin/auditoria-red-captura.sh; then
+    log_already "Scripts de captura automatizada (auditoria-red-captura.sh existe)"
+elif ask "¿Crear scripts de captura automatizada?"; then
 
     # Script principal de captura de auditoria
     cat > /usr/local/bin/auditoria-red-captura.sh << 'EOFCAP'
@@ -787,16 +850,21 @@ else
     log_info "Scripts de captura automatizada omitidos"
 fi
 
+fi
+
 # ============================================================
 # S6: ANALISIS DE PROTOCOLOS INSEGUROS
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S6" ]]; then
 log_section "S6: ANALISIS DE PROTOCOLOS INSEGUROS"
 
 echo "Se realizara un analisis en tiempo real para detectar protocolos"
 echo "inseguros (sin cifrar) activos en la red."
 echo ""
 
-if ask "¿Ejecutar analisis rapido de protocolos inseguros? (10 segundos)"; then
+if false; then
+    : # S6 es deteccion en vivo, siempre re-evaluar
+elif ask "¿Ejecutar analisis rapido de protocolos inseguros? (10 segundos)"; then
     if command -v tshark &>/dev/null; then
         echo ""
         echo -e "  ${CYAN}Capturando trafico durante 10 segundos...${NC}"
@@ -837,16 +905,21 @@ else
     log_info "Analisis de protocolos inseguros omitido"
 fi
 
+fi
+
 # ============================================================
 # S7: DETECCION DE ANOMALIAS DE RED
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S7" ]]; then
 log_section "S7: DETECCION DE ANOMALIAS DE RED"
 
 echo "Se creara un script de deteccion de anomalias de red que puede"
 echo "ejecutarse periodicamente como tarea cron."
 echo ""
 
-if ask "¿Crear script de deteccion de anomalias de red?"; then
+if check_executable /usr/local/bin/auditoria-red-anomalias.sh; then
+    log_already "Deteccion de anomalias de red (auditoria-red-anomalias.sh existe)"
+elif ask "¿Crear script de deteccion de anomalias de red?"; then
 
     cat > /usr/local/bin/auditoria-red-anomalias.sh << 'EOFANOM'
 #!/bin/bash
@@ -968,7 +1041,45 @@ if [[ "$NBNS_COUNT" -gt 0 ]]; then
     log_alert "NBNS/LLMNR activo: $NBNS_COUNT paquetes (vulnerable a poisoning)"
 fi
 
-# Check 8: Protocolos inseguros
+# Check 8: Gratuitous ARP (posible spoofing)
+GARP_COUNT=$(tshark -r "$TEMP_PCAP" -Y "arp.isgratuitous == 1" 2>/dev/null | wc -l || echo "0")
+if [[ "$GARP_COUNT" -gt 5 ]]; then
+    log_alert "Gratuitous ARP excesivo: $GARP_COUNT paquetes (posible ARP poisoning activo)"
+else
+    log_ok "Gratuitous ARP normal: $GARP_COUNT paquetes"
+fi
+
+# Check 9: DHCP starvation (exceso de DHCP Discover)
+DHCP_DISCOVER=$(tshark -r "$TEMP_PCAP" -Y "dhcp.option.dhcp == 1" 2>/dev/null | wc -l || echo "0")
+if [[ "$DHCP_DISCOVER" -gt 50 ]]; then
+    log_alert "Posible DHCP starvation: $DHCP_DISCOVER Discover en ${DURACION}s"
+else
+    log_ok "DHCP Discover normal: $DHCP_DISCOVER"
+fi
+
+# Check 10: Rogue DHCP server (multiples servidores DHCP respondiendo)
+DHCP_SERVERS=$(tshark -r "$TEMP_PCAP" -Y "dhcp.option.dhcp == 2" -T fields -e ip.src 2>/dev/null | sort -u | grep -c '[0-9]' || true)
+if [[ "$DHCP_SERVERS" -gt 1 ]]; then
+    DHCP_SRV_LIST=$(tshark -r "$TEMP_PCAP" -Y "dhcp.option.dhcp == 2" -T fields -e ip.src 2>/dev/null | sort -u | tr '\n' ' ')
+    log_alert "Multiples servidores DHCP detectados ($DHCP_SERVERS): $DHCP_SRV_LIST (posible rogue DHCP)"
+else
+    log_ok "Servidores DHCP: $DHCP_SERVERS"
+fi
+
+# Check 11: LLMNR/mDNS responses (posible Responder/poisoner activo)
+LLMNR_RESP=$(tshark -r "$TEMP_PCAP" -Y "llmnr and dns.flags.response == 1" 2>/dev/null | wc -l || echo "0")
+MDNS_RESP=$(tshark -r "$TEMP_PCAP" -Y "mdns and dns.flags.response == 1" 2>/dev/null | wc -l || echo "0")
+if [[ "$LLMNR_RESP" -gt 10 ]]; then
+    LLMNR_SRC=$(tshark -r "$TEMP_PCAP" -Y "llmnr and dns.flags.response == 1" -T fields -e ip.src 2>/dev/null | sort | uniq -c | sort -rn | head -3)
+    log_alert "LLMNR responses excesivas: $LLMNR_RESP (posible poisoner activo: $LLMNR_SRC)"
+fi
+if [[ "$MDNS_RESP" -gt 50 ]]; then
+    log_alert "mDNS responses excesivas: $MDNS_RESP (posible mDNS poisoning)"
+else
+    log_ok "LLMNR/mDNS responses: LLMNR=$LLMNR_RESP, mDNS=$MDNS_RESP"
+fi
+
+# Check 12: Protocolos inseguros
 for proto_port in "21:FTP" "23:Telnet" "110:POP3" "143:IMAP"; do
     port="${proto_port%%:*}"
     name="${proto_port##*:}"
@@ -1008,16 +1119,21 @@ else
     log_info "Script de anomalias omitido"
 fi
 
+fi
+
 # ============================================================
 # S8: EXPORTACION Y REPORTES DE AUDITORIA
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S8" ]]; then
 log_section "S8: EXPORTACION Y REPORTES"
 
 echo "Se creara un script de generacion de reportes de auditoria"
 echo "de red en formato texto y CSV."
 echo ""
 
-if ask "¿Crear script de reportes de auditoria de red?"; then
+if check_executable /usr/local/bin/auditoria-red-reporte.sh; then
+    log_already "Reportes de auditoria de red (auditoria-red-reporte.sh existe)"
+elif ask "¿Crear script de reportes de auditoria de red?"; then
 
     cat > /usr/local/bin/auditoria-red-reporte.sh << 'EOFREP'
 #!/bin/bash
@@ -1183,16 +1299,21 @@ else
     log_info "Scripts de reportes omitidos"
 fi
 
+fi
+
 # ============================================================
 # S9: INTEGRACION CON SURICATA/IDS
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S9" ]]; then
 log_section "S9: INTEGRACION CON SURICATA/IDS"
 
 echo "Se configurara la integracion entre Wireshark/tshark y Suricata"
 echo "para correlacionar capturas con alertas del IDS."
 echo ""
 
-if ask "¿Configurar integracion con Suricata?"; then
+if check_executable /usr/local/bin/auditoria-red-correlacion.sh; then
+    log_already "Integracion con Suricata (auditoria-red-correlacion.sh existe)"
+elif ask "¿Configurar integracion con Suricata?"; then
     if command -v suricata &>/dev/null; then
         log_info "Suricata detectado"
 
@@ -1293,16 +1414,21 @@ else
     log_info "Integracion con Suricata omitida"
 fi
 
+fi
+
 # ============================================================
 # S10: POLITICA DE RETENCION Y ROTACION DE CAPTURAS
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" || "$AUDIT_SECTION" == "S10" ]]; then
 log_section "S10: POLITICA DE RETENCION Y ROTACION"
 
 echo "Se configurara la rotacion automatica de capturas de red"
 echo "para evitar llenar el disco y cumplir con politicas de retencion."
 echo ""
 
-if ask "¿Configurar politica de retencion de capturas?"; then
+if check_file_exists /etc/securizar/auditoria-red-policy.conf; then
+    log_already "Politica de retencion de capturas (auditoria-red-policy.conf existe)"
+elif ask "¿Configurar politica de retencion de capturas?"; then
 
     # Script de rotacion
     cat > /usr/local/bin/auditoria-red-rotacion.sh << 'EOFROT'
@@ -1418,9 +1544,12 @@ else
     log_info "Politica de retencion omitida"
 fi
 
+fi
+
 # ============================================================
 # RESUMEN FINAL
 # ============================================================
+if [[ "$AUDIT_SECTION" == "all" ]]; then
 log_section "RESUMEN DEL MODULO 66"
 
 echo ""
@@ -1460,3 +1589,5 @@ echo -e "    ${CYAN}auditoria-red-listar.sh${NC}               Listar capturas"
 echo ""
 
 log_info "Modulo 66 completado"
+fi
+show_changes_summary

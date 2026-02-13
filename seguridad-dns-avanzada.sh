@@ -20,6 +20,21 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 securizar_setup_traps
 init_backup "dns-security"
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /etc/securizar/dns-security-policy.conf'
+_pc 'check_file_exists /usr/local/bin/verificar-dot.sh'
+_pc 'check_file_exists /etc/securizar/dns/doh-setup.conf'
+_pc 'check_file_contains /etc/unbound/unbound.conf.d/securizar.conf "harden-glue" 2>/dev/null || check_file_contains /etc/unbound/conf.d/securizar.conf "harden-glue" 2>/dev/null'
+_pc 'check_file_exists /usr/local/bin/actualizar-dns-blocklist.sh'
+_pc 'check_file_exists /usr/local/bin/detectar-dns-tunneling.sh'
+_pc 'check_file_exists /usr/local/bin/test-cache-poisoning.sh'
+_pc 'check_file_exists /etc/securizar/split-dns-zones.conf'
+_pc 'check_file_exists /usr/local/bin/monitorear-dns.sh'
+_pc 'check_file_exists /usr/local/bin/auditar-dns-avanzado.sh'
+_precheck_result
+
 log_section "MODULO 65: SEGURIDAD DNS AVANZADA"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
@@ -69,7 +84,9 @@ echo "  - Script de verificacion /usr/local/bin/verificar-dnssec.sh"
 echo "  - Politica en /etc/securizar/dns-security-policy.conf"
 echo ""
 
-if ask "Aplicar validacion DNSSEC?"; then
+if check_file_exists /etc/securizar/dns-security-policy.conf; then
+    log_already "Validacion DNSSEC (dns-security-policy.conf existe)"
+elif ask "Aplicar validacion DNSSEC?"; then
 
     # --- systemd-resolved DNSSEC ---
     RESOLVED_CONF="/etc/systemd/resolved.conf"
@@ -328,7 +345,9 @@ echo "  - Bloqueo de puerto 53 saliente (DNS sin cifrar)"
 echo "  - Script de verificacion DoT"
 echo ""
 
-if ask "Aplicar DNS-over-TLS estricto?"; then
+if check_file_exists /usr/local/bin/verificar-dot.sh; then
+    log_already "DNS-over-TLS estricto (verificar-dot.sh existe)"
+elif ask "Aplicar DNS-over-TLS estricto?"; then
 
     RESOLVED_CONF="/etc/systemd/resolved.conf"
 
@@ -524,7 +543,9 @@ echo "  - Stubby como resolver DoT/DoH"
 echo "  - Configuracion para navegadores"
 echo ""
 
-if ask "Configurar DNS-over-HTTPS?"; then
+if check_file_exists /etc/securizar/dns/doh-setup.conf; then
+    log_already "DNS-over-HTTPS (doh-setup.conf existe)"
+elif ask "Configurar DNS-over-HTTPS?"; then
 
     # --- Instalar Stubby si no existe ---
     if [[ "$HAS_STUBBY" == false ]]; then
@@ -696,7 +717,9 @@ echo "  - Rate limiting"
 echo "  - Configuracion en /etc/unbound/unbound.conf.d/securizar.conf"
 echo ""
 
-if ask "Aplicar hardening de Unbound resolver?"; then
+if check_file_contains /etc/unbound/unbound.conf.d/securizar.conf "harden-glue" 2>/dev/null || check_file_contains /etc/unbound/conf.d/securizar.conf "harden-glue" 2>/dev/null; then
+    log_already "Hardening de Unbound resolver (securizar.conf existe)"
+elif ask "Aplicar hardening de Unbound resolver?"; then
 
     # Instalar Unbound si no existe
     if [[ "$HAS_UNBOUND" == false ]]; then
@@ -946,7 +969,9 @@ echo "  - Cron diario de actualizacion"
 echo "  - Soporte de whitelist"
 echo ""
 
-if ask "Configurar DNS sinkhole y RPZ?"; then
+if check_file_exists /usr/local/bin/actualizar-dns-blocklist.sh; then
+    log_already "DNS sinkhole y RPZ (actualizar-dns-blocklist.sh existe)"
+elif ask "Configurar DNS sinkhole y RPZ?"; then
 
     # Crear directorios
     mkdir -p /etc/securizar/dns/blocklists
@@ -1196,7 +1221,9 @@ echo "  - Deteccion de herramientas iodine/dnscat2"
 echo "  - Reglas Suricata para DNS tunneling"
 echo ""
 
-if ask "Configurar deteccion de DNS tunneling?"; then
+if check_file_exists /usr/local/bin/detectar-dns-tunneling.sh; then
+    log_already "Deteccion de DNS tunneling (detectar-dns-tunneling.sh existe)"
+elif ask "Configurar deteccion de DNS tunneling?"; then
 
     # --- Script de deteccion de DNS tunneling ---
     cat > /usr/local/bin/detectar-dns-tunneling.sh << 'EOF'
@@ -1481,7 +1508,9 @@ echo "  - Max TTL en cache"
 echo "  - Script de test"
 echo ""
 
-if ask "Aplicar proteccion contra cache poisoning?"; then
+if check_file_exists /usr/local/bin/test-cache-poisoning.sh; then
+    log_already "Proteccion contra cache poisoning (test-cache-poisoning.sh existe)"
+elif ask "Aplicar proteccion contra cache poisoning?"; then
 
     # --- Sysctl para randomizacion de puertos ---
     SYSCTL_DNS="/etc/sysctl.d/90-securizar-dns.conf"
@@ -1690,6 +1719,48 @@ if command -v dig &>/dev/null; then
     fi
 fi
 
+# 8. DNS multi-resolver: comparar respuestas de distintos resolvers
+if command -v dig &>/dev/null; then
+    TEST_DOMAIN="example.com"
+    RESOLVERS="1.1.1.1 8.8.8.8 9.9.9.9"
+    DNS_ANSWERS=""
+    for resolver in $RESOLVERS; do
+        ans=$(dig +short +time=3 +tries=1 "$TEST_DOMAIN" A "@$resolver" 2>/dev/null | sort | head -5 | tr '\n' ',' || true)
+        DNS_ANSWERS="$DNS_ANSWERS|$resolver:$ans"
+    done
+    # Extraer solo las IPs de respuesta (sin el resolver prefix) para comparar
+    UNIQUE_ANSWERS=$(echo "$DNS_ANSWERS" | tr '|' '\n' | grep ':' | cut -d: -f2 | sort -u | grep -c '[0-9]' || true)
+    if [[ "$UNIQUE_ANSWERS" -le 1 ]]; then
+        check "DNS multi-resolver consistente ($TEST_DOMAIN)" "PASS"
+    else
+        check "DNS multi-resolver INCONSISTENTE: $UNIQUE_ANSWERS respuestas distintas (posible manipulacion upstream)" "FAIL"
+    fi
+fi
+
+# 9. TTL anomaly: detectar TTL sospechoso
+if command -v dig &>/dev/null; then
+    TEST_TTL=$(dig +noall +answer example.com A 2>/dev/null | awk '{print $2}' | head -1 || true)
+    if [[ -n "$TEST_TTL" ]] && [[ "$TEST_TTL" =~ ^[0-9]+$ ]]; then
+        if [[ "$TEST_TTL" -gt 86400 ]]; then
+            check "TTL anomalo: $TEST_TTL > 86400 (posible poisoning persistente)" "FAIL"
+        elif [[ "$TEST_TTL" -lt 10 ]]; then
+            check "TTL anomalo: $TEST_TTL < 10 (posible fast-flux)" "WARN"
+        else
+            check "TTL razonable: $TEST_TTL" "PASS"
+        fi
+    fi
+fi
+
+# 10. DNS rebinding protection (Unbound private-address)
+if command -v unbound-control &>/dev/null; then
+    PRIV_ADDR=$(unbound-control get_option private-address 2>/dev/null || true)
+    if [[ -n "$PRIV_ADDR" ]]; then
+        check "Unbound private-address configurado (proteccion DNS rebinding)" "PASS"
+    else
+        check "Unbound private-address no configurado (vulnerable a DNS rebinding)" "FAIL"
+    fi
+fi
+
 echo ""
 echo -e "${CYAN}Puntuacion: ${SCORE}/${TOTAL}${NC}"
 if [[ $TOTAL -gt 0 ]]; then
@@ -1722,7 +1793,9 @@ echo "  - Plantillas Unbound"
 echo "  - Configuracion en /etc/securizar/split-dns-zones.conf"
 echo ""
 
-if ask "Configurar split-horizon DNS?"; then
+if check_file_exists /etc/securizar/split-dns-zones.conf; then
+    log_already "Split-horizon DNS (split-dns-zones.conf existe)"
+elif ask "Configurar split-horizon DNS?"; then
 
     # --- Configuracion de zonas split-horizon ---
     SPLIT_DNS_CONF="/etc/securizar/split-dns-zones.conf"
@@ -1940,7 +2013,9 @@ echo "  - Deteccion de hijacking DNS"
 echo "  - Servicio systemd"
 echo ""
 
-if ask "Configurar monitorizacion DNS?"; then
+if check_file_exists /usr/local/bin/monitorear-dns.sh; then
+    log_already "Monitorizacion DNS (monitorear-dns.sh existe)"
+elif ask "Configurar monitorizacion DNS?"; then
 
     # --- Script de monitorizacion DNS ---
     cat > /usr/local/bin/monitorear-dns.sh << 'EOF'
@@ -2245,7 +2320,9 @@ echo "  - Sistema de puntuacion"
 echo "  - Cron semanal"
 echo ""
 
-if ask "Configurar auditoria DNS avanzada?"; then
+if check_file_exists /usr/local/bin/auditar-dns-avanzado.sh; then
+    log_already "Auditoria DNS avanzada (auditar-dns-avanzado.sh existe)"
+elif ask "Configurar auditoria DNS avanzada?"; then
 
     # --- Script de auditoria DNS ---
     cat > /usr/local/bin/auditar-dns-avanzado.sh << 'EOF'

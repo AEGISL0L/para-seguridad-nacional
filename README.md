@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 70 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2), respuesta a incidentes (forense, custodia digital, IOCs, escalacion, hunting, metricas IR), EDR con osquery (threat detection, Wazuh, fleet, baseline/drift) y gestion de vulnerabilidades (Trivy, grype, OpenSCAP, CVSS/EPSS, drift). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 75 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia, cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2), respuesta a incidentes (forense, custodia digital, IOCs, escalacion, hunting, metricas IR), EDR con osquery (threat detection, Wazuh, fleet, baseline/drift), gestion de vulnerabilidades (Trivy, grype, OpenSCAP, CVSS/EPSS, drift), control de acceso obligatorio (SELinux/AppArmor), aislamiento de namespaces, integridad de arranque (Secure Boot, TPM2, IMA/EVM), gestion de acceso privilegiado y caza de APTs (YARA, IOC sweep, hunting playbooks). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -13,13 +13,13 @@ Suite completa de hardening y securizacion para Linux, con 70 modulos interactiv
 
 ## Caracteristicas principales
 
-- **70 modulos** organizados en 6 categorias con menu interactivo
+- **75 modulos** organizados en 10 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
 - **Backups automaticos** antes de cada modificacion
 - **Protecciones de seguridad**: no bloquea al usuario, no modifica PAM, no deshabilita SSH
-- **Verificacion proactiva** de 79 categorias de controles
+- **Verificacion proactiva** de 84 categorias de controles
 - **Operaciones SOC**: IR, monitoreo continuo, SOAR, threat hunting, purple team
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana
 - **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
@@ -68,7 +68,7 @@ cd securizar
 sudo bash securizar-menu.sh
 ```
 
-El menu principal muestra 10 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-70):
+El menu principal muestra 10 categorias con indicadores de progreso. Se navega con las teclas indicadas o accediendo directamente por numero de modulo (1-75):
 
 ```
   b  Hardening Base            (modulos 1-9)    ●●●○○○○○○○
@@ -77,13 +77,13 @@ El menu principal muestra 10 categorias con indicadores de progreso. Se navega c
   o  Operaciones de Seguridad  (modulos 30-34)   ○○○○○
   i  Inteligencia              (modulos 35-36)   ○○
   ─────────────────────────────────────────────
-  n  Infraestructura y Red     (8 modulos)       ○○○○○○○○
+  n  Infraestructura y Red     (9 modulos)       ○○○○○○○○○
   s  Aplicaciones y Servicios  (8 modulos)       ○○○○○○○○
-  r  Proteccion y Resiliencia  (9 modulos)       ○○○○○○○○○
-  d  Deteccion y Respuesta     (7 modulos)       ○○○○○○○
+  r  Proteccion y Resiliencia  (11 modulos)      ○○○○○○○○○○○
+  d  Deteccion y Respuesta     (9 modulos)       ○○○○○○○○○
   c  Cumplimiento              (2 modulos)       ○○
 
-  a  Aplicar todos    v  Verificacion    1-70 Acceso directo    q  Salir
+  a  Aplicar todos    v  Verificacion    1-75 Acceso directo    q  Salir
 ```
 
 Tambien es posible ejecutar cualquier modulo individualmente:
@@ -99,7 +99,7 @@ sudo bash mitigar-acceso-inicial.sh  # Modulo 18
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (70 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (75 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -180,7 +180,12 @@ securizar/
 ├── hardening-memoria-procesos.sh  # Modulo 67: Hardening de memoria y procesos
 ├── respuesta-incidentes.sh        # Modulo 68: Respuesta a incidentes (IR, forense, custodia, IOCs, hunting)
 ├── edr-osquery.sh                 # Modulo 69: EDR con osquery (threat detection, Wazuh, fleet, baseline)
-└── gestion-vulnerabilidades.sh    # Modulo 70: Gestion de vulnerabilidades (Trivy, grype, SCAP, CVSS/EPSS)
+├── gestion-vulnerabilidades.sh    # Modulo 70: Gestion de vulnerabilidades (Trivy, grype, SCAP, CVSS/EPSS)
+├── mac-selinux-apparmor.sh        # Modulo 71: Control de acceso obligatorio (SELinux/AppArmor)
+├── aislamiento-namespaces.sh      # Modulo 72: Aislamiento de namespaces
+├── integridad-arranque.sh         # Modulo 73: Integridad de arranque (Secure Boot, UEFI, TPM2)
+├── acceso-privilegiado.sh         # Modulo 74: Gestion de acceso privilegiado
+└── caza-apt-hunting.sh            # Modulo 75: Caza de APTs (YARA, IOC sweep, hunting playbooks)
 ```
 
 ---
@@ -386,7 +391,7 @@ Modulos avanzados de proteccion preventiva.
 | 10 | **Kernel boot y Secure Boot** | `hardening-kernel-boot.sh` | Parametros GRUB cmdline, verificacion Secure Boot, modulos firmados, proteccion GRUB con contrasena, lockdown del kernel |
 | 11 | **Sandboxing de servicios** | `hardening-servicios-systemd.sh` | Drop-ins systemd para sshd, fail2ban, firewalld, NetworkManager, security-monitor con ProtectSystem, ProtectHome, NoNewPrivileges |
 | 12 | **Seguridad de cuentas** | `hardening-cuentas.sh` | Politicas de contrasenas en login.defs, faillock, deteccion de cuentas sin contrasena, verificacion UID=0 extra, shells de sistema, cuentas inactivas |
-| 13 | **Red avanzada** | `proteger-red-avanzado.sh` | Suricata IDS, DNS over TLS, WireGuard VPN, arpwatch, captura forense ring buffer, custom IDS rules, DNS sinkhole, baseline de trafico, auditoria de red |
+| 13 | **Red avanzada** | `proteger-red-avanzado.sh` | Suricata IDS, DNS over TLS, WireGuard VPN, arpwatch, captura forense ring buffer, custom IDS rules, DNS sinkhole, baseline de trafico, auditoria de red, proteccion ARP avanzada (arp_accept/arp_filter/IPv6 ND hardening), validacion MAC del gateway |
 | 14 | **Automatizacion** | `automatizar-seguridad.sh` | Cron jobs para AIDE, parches de seguridad, lynis, rkhunter, logrotate, digest diario; timer systemd de notificaciones |
 | 15 | **Sandboxing de aplicaciones** | `sandbox-aplicaciones.sh` | Firejail (perfiles para Firefox, Thunderbird, LibreOffice, Dolphin, firecfg), bubblewrap |
 | 16 | **Auditoria externa** | `auditoria-externa.sh` | Reconocimiento MITRE TA0043: puertos expuestos, banners, fingerprinting OS, DNS, cabeceras HTTP, SNMP, consulta Shodan/Censys, metadatos web, certificados SSL/TLS, defensas anti-escaneo |
@@ -432,7 +437,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 35 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
 | 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
 
-### Categoria 6: Infraestructura y Red (8 modulos)
+### Categoria 6: Infraestructura y Red (9 modulos)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -443,7 +448,8 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 54 | **Seguridad wireless** | `seguridad-wireless.sh` | WPA3 Enterprise, FreeRADIUS 802.1X, rogue AP, Bluetooth, monitoring |
 | 55 | **Seguridad virtualizacion** | `seguridad-virtualizacion.sh` | KVM/QEMU, libvirt hardening, VM aislamiento, escape protection |
 | 57 | **Zero Trust Identity** | `zero-trust-identity.sh` | CISA ZT maturity, continuous auth, device trust, IAP, microseg |
-| 63 | **DNS avanzado** | `seguridad-dns-avanzada.sh` | DNSSEC, DoT/DoH, Unbound, RPZ sinkhole, tunneling, cache poisoning |
+| 63 | **DNS avanzado** | `seguridad-dns-avanzada.sh` | DNSSEC, DoT/DoH, Unbound, RPZ sinkhole, tunneling, cache poisoning, DNS multi-resolver consistency, TTL anomaly detection, DNS rebinding protection |
+| 73 | **Integridad de arranque** | `integridad-arranque.sh` | Secure Boot, UEFI hardening, GRUB2, kernel signature, dm-verity, IMA/EVM, TPM2, bootkit detection, measured boot |
 
 ### Categoria 7: Aplicaciones y Servicios (8 modulos)
 
@@ -458,7 +464,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 61 | **Seguridad de APIs** | `seguridad-api.sh` | Rate limiting, JWT/OAuth2, CORS, mTLS, GraphQL, webhooks, audit |
 | 62 | **Seguridad IoT** | `seguridad-iot.sh` | Inventario IoT, MQTT TLS, CoAP, firmware, credenciales, Zigbee/BLE |
 
-### Categoria 8: Proteccion y Resiliencia (9 modulos)
+### Categoria 8: Proteccion y Resiliencia (11 modulos)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
@@ -471,18 +477,22 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 59 | **Gestion de parches** | `gestion-parches.sh` | Auto-patch, CVE scan, SBOM, staging/rollback, advisories, compliance |
 | 66 | **Runtime kernel** | `seguridad-runtime-kernel.sh` | LKRG, kernel lockdown, eBPF hardening, Falco runtime monitoring, module signing, CPU mitigations (Spectre/MDS/TAA/Retbleed), kernel memory protection, debug restriction, runtime integrity, audit con scoring |
 | 67 | **Memoria y procesos** | `hardening-memoria-procesos.sh` | Hardened allocator, stack protection (SSP/CET), user namespace restriction, cgroups v2, seccomp-BPF generator, ASLR/PIE enforcement, W^X strict (noexec), ptrace control (yama), coredump sanitization, process integrity audit |
+| 71 | **Control acceso obligatorio** | `mac-selinux-apparmor.sh` | SELinux/AppArmor enforcing, politicas de red, confinamiento servicios, proteccion ficheros, contenedores, denegaciones, politicas custom, MLS/MCS |
+| 72 | **Aislamiento namespaces** | `aislamiento-namespaces.sh` | User/PID/net/mount namespaces, rootless containers, systemd sandboxing, seccomp-BPF, cgroups v2, escape detection |
 
-### Categoria 9: Deteccion y Respuesta (7 modulos)
+### Categoria 9: Deteccion y Respuesta (9 modulos)
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
 | 41 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog TLS, CEF/JSON, hash chain SHA-256, correlacion 8 patrones, SIEM, forense |
 | 44 | **Forense avanzado** | `forense-avanzado.sh` | RAM (LiME), disco forense, volatiles RFC 3227, YARA, custodia digital, timeline |
-| 64 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, anomalias, correlacion IDS |
-| 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap, TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes |
+| 64 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, anomalias (gratuitous ARP, DHCP starvation, rogue DHCP, LLMNR/mDNS poisoning), filtros BPF/display anti-poisoning, correlacion IDS |
+| 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap, TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes, auditoria sysctl ARP/IPv6, deteccion avahi-daemon/LLMNR |
 | 68 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Recoleccion forense, playbooks contencion MITRE, timeline, aislamiento de red, recuperacion, cadena de custodia digital, extraccion de IOCs, comunicacion/escalacion, hunting de IOCs en flota, metricas IR (MTTD/MTTR/MTTC) |
 | 69 | **EDR con Osquery** | `edr-osquery.sh` | Osquery multi-distro, packs de seguridad (10 queries), deteccion de amenazas (10 queries), guia Wazuh, decorators custom, alertas syslog/JSON, baseline y drift, FleetDM prep, queries diferenciales, auditoria EDR |
 | 70 | **Gestion de vulnerabilidades** | `gestion-vulnerabilidades.sh` | Trivy, grype, OpenSCAP, escaneo sistema/contenedores, priorizacion CVSS+EPSS+KEV, analisis dependencias, reporting HTML/JSON, verificacion parches, escaneo programado semanal, auditoria madurez (L1-L5) |
+| 74 | **Acceso privilegiado** | `acceso-privilegiado.sh` | Inventario privilegiado, grabacion sesiones, sudo granular, restriccion su, JIT access, alertas, capabilities, credenciales, breakglass |
+| 75 | **Caza de APTs** | `caza-apt-hunting.sh` | YARA rules engine, filesystem scan, memory hunting, network hunting, behavioral baseline, persistence detection, IOC sweep, threat intel, hunting playbooks |
 
 ### Categoria 10: Cumplimiento (2 modulos)
 
@@ -506,14 +516,14 @@ Menu principal
 ├── m  Mitigaciones MITRE ATT&CK (18-29)
 ├── o  Operaciones de Seguridad (30-34)
 ├── i  Inteligencia (35-36)
-├── n  Infraestructura y Red (8 modulos)
+├── n  Infraestructura y Red (9 modulos)
 ├── s  Aplicaciones y Servicios (8 modulos)
-├── r  Proteccion y Resiliencia (9 modulos)
-├── d  Deteccion y Respuesta (7 modulos)
+├── r  Proteccion y Resiliencia (11 modulos)
+├── d  Deteccion y Respuesta (9 modulos)
 ├── c  Cumplimiento (2 modulos)
-├── a  Aplicar todos los 70 modulos
-├── v  Verificacion proactiva (79 checks)
-├── 1-70  Acceso directo por numero
+├── a  Aplicar todos los 75 modulos
+├── v  Verificacion proactiva (84 checks)
+├── 1-75  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
 ```
@@ -552,7 +562,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 79 verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 84 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -588,6 +598,11 @@ La opcion `v` ejecuta 79 verificaciones agrupadas por categoria:
 - Respuesta a incidentes
 - EDR con Osquery (packs, threat detection, baseline, auditoria)
 - Gestion de vulnerabilidades (escaneo, priorizacion, reporting, auditoria)
+- Control de acceso obligatorio (SELinux/AppArmor, enforce, denegaciones)
+- Aislamiento de namespaces (user ns, PID, escape detection)
+- Integridad de arranque (Secure Boot, GRUB2, bootkit detection)
+- Acceso privilegiado (inventario, sesiones, auditoria)
+- Caza de APTs (YARA, persistencia, IOC sweep, playbooks)
 
 ### Session tracking
 

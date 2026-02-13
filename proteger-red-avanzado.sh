@@ -52,15 +52,101 @@ elif ask "¿Instalar y configurar Suricata IDS?"; then
     # Instalar suricata
     if ! command -v suricata &>/dev/null; then
         log_info "Instalando Suricata..."
-        pkg_install suricata || {
-            log_error "No se pudo instalar Suricata. Verifica los repositorios."
+        if ! pkg_install suricata; then
+            # Añadir repo extra según distro y reintentar
             case "$DISTRO_FAMILY" in
-                suse)   log_warn "Intenta: zypper addrepo https://download.opensuse.org/repositories/security/ security" ;;
-                debian) log_warn "Intenta: apt-get update && apt-get install suricata" ;;
-                rhel)   log_warn "Intenta: dnf install epel-release && dnf install suricata" ;;
-                arch)   log_warn "Intenta: pacman -S suricata" ;;
+                suse)
+                    log_warn "Suricata no encontrado en repos. Intentando repo server:monitoring..."
+                    _suse_repo_base="https://download.opensuse.org/repositories/server:/monitoring"
+                    if [[ "$DISTRO_ID" == "opensuse-tumbleweed" ]]; then
+                        zypper addrepo -f "${_suse_repo_base}/openSUSE_Tumbleweed/" server_monitoring 2>/dev/null || true
+                    else
+                        zypper addrepo -f "${_suse_repo_base}/${DISTRO_VERSION}/" server_monitoring 2>/dev/null || true
+                    fi
+                    zypper --gpg-auto-import-keys refresh server_monitoring 2>/dev/null || true
+                    if ! pkg_install suricata; then
+                        log_warn "Repo no disponible (posible error SSL CDN). Compilando Suricata desde fuente..."
+                        # Limpiar repo fallido
+                        zypper removerepo server_monitoring 2>/dev/null || true
+                        # Dependencias de compilación (instalar una a una para evitar que un conflicto cancele todo)
+                        for _dep in gcc gcc-c++ make automake autoconf libtool pkg-config \
+                            libyaml-devel pcre2-devel libpcap-devel libjansson-devel \
+                            libcap-ng-devel file-devel python3 python3-pip python3-PyYAML; do
+                            pkg_install "$_dep" 2>/dev/null || true
+                        done
+                        # zlib: preferir zlib-ng-compat-devel (Leap 16+), fallback a zlib-devel
+                        pkg_install zlib-ng-compat-devel 2>/dev/null || pkg_install zlib-devel 2>/dev/null || true
+                        # Rust: en openSUSE los paquetes son rust y cargo
+                        pkg_install rust cargo 2>/dev/null || pkg_install rust1.84 cargo1.84 2>/dev/null || true
+                        # cbindgen: instalar via cargo si no hay paquete
+                        if ! command -v cbindgen &>/dev/null; then
+                            cargo install --force cbindgen 2>/dev/null || true
+                            export PATH="$HOME/.cargo/bin:$PATH"
+                        fi
+                        # Descargar y compilar última versión estable
+                        _suricata_ver="7.0.8"
+                        _suricata_url="https://www.openinfosecfoundation.org/download/suricata-${_suricata_ver}.tar.gz"
+                        _build_dir="/tmp/suricata-build-$$"
+                        mkdir -p "$_build_dir"
+                        # Intentar curl normal, si falla por SSL usar --insecure (fuente confiable OISF)
+                        if ! curl -fsSL "$_suricata_url" -o "$_build_dir/suricata.tar.gz" 2>/dev/null; then
+                            log_warn "SSL débil en CDN. Descargando con verificación relajada (fuente OISF confiable)..."
+                            curl -fsSLk "$_suricata_url" -o "$_build_dir/suricata.tar.gz" || true
+                        fi
+                        if [[ -f "$_build_dir/suricata.tar.gz" ]] && [[ -s "$_build_dir/suricata.tar.gz" ]]; then
+                            tar xzf "$_build_dir/suricata.tar.gz" -C "$_build_dir" --strip-components=1
+                            cd "$_build_dir"
+                            ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+                                --enable-nfqueue --enable-unix-socket --enable-geoip 2>/dev/null || \
+                            ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var 2>/dev/null
+                            make -j"$(nproc)" && make install install-conf
+                            cd /
+                            rm -rf "$_build_dir"
+                            # Crear usuario y directorios
+                            id suricata &>/dev/null || useradd -r -s /sbin/nologin -d /var/lib/suricata suricata
+                            mkdir -p /var/log/suricata /var/lib/suricata/rules /var/run/suricata
+                            chown suricata:suricata /var/log/suricata /var/run/suricata
+                            # Crear servicio systemd si no existe
+                            if [[ ! -f /etc/systemd/system/suricata.service ]] && [[ ! -f /usr/lib/systemd/system/suricata.service ]]; then
+                                cat > /etc/systemd/system/suricata.service << 'EOFUNIT'
+[Unit]
+Description=Suricata IDS/IPS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/suricata --build-info
+ExecStart=/usr/bin/suricata -c /etc/suricata/suricata.yaml --pidfile /var/run/suricata/suricata.pid -i %I
+ExecReload=/bin/kill -USR2 $MAINPID
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOFUNIT
+                                systemctl daemon-reload
+                            fi
+                            log_change "Compilado" "Suricata ${_suricata_ver} desde fuente"
+                        else
+                            log_error "No se pudo descargar Suricata desde ${_suricata_url}"
+                        fi
+                    fi
+                    ;;
+                debian)
+                    log_warn "Suricata no encontrado. Intentando con PPA/backports..."
+                    apt-get update -qq 2>/dev/null || true
+                    pkg_install suricata || log_error "No se pudo instalar Suricata"
+                    ;;
+                rhel)
+                    log_warn "Suricata no encontrado. Añadiendo EPEL..."
+                    pkg_install epel-release 2>/dev/null || true
+                    pkg_install suricata || log_error "No se pudo instalar Suricata tras añadir EPEL"
+                    ;;
+                arch)
+                    pkg_install suricata || log_error "No se pudo instalar Suricata"
+                    ;;
             esac
-        }
+        fi
     fi
 
     if command -v suricata &>/dev/null; then
@@ -447,12 +533,31 @@ net.ipv4.conf.default.arp_announce = 2
 # 1 = responder solo si la dirección está configurada en la interfaz
 net.ipv4.conf.all.arp_ignore = 1
 net.ipv4.conf.default.arp_ignore = 1
+
+# arp_accept: rechazar gratuitous ARP no solicitados
+# 0 = no crear nuevas entradas desde gratuitous ARP
+net.ipv4.conf.all.arp_accept = 0
+net.ipv4.conf.default.arp_accept = 0
+
+# arp_filter: filtrar respuestas ARP por interfaz
+# 1 = responder solo en la interfaz correcta
+net.ipv4.conf.all.arp_filter = 1
+net.ipv4.conf.default.arp_filter = 1
+
+# IPv6 Neighbor Discovery hardening
+# Rechazar Router Advertisements (prevenir RA spoofing/MITM)
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
+
+# Rechazar IPv6 redirects (prevenir MITM)
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
 EOF
 
     log_change "Creado" "/etc/sysctl.d/99-arp-protection.conf"
     /usr/sbin/sysctl --system > /dev/null 2>&1 || true
     log_change "Aplicado" "sysctl --system"
-    log_info "Protección ARP aplicada (arp_announce=2, arp_ignore=1)"
+    log_info "Protección ARP aplicada (arp_announce=2, arp_ignore=1, arp_accept=0, arp_filter=1, IPv6 ND hardening)"
 
     # Script de verificación ARP
     cat > /usr/local/bin/verificar-arp.sh << 'EOFARP'
@@ -524,6 +629,48 @@ else
     journalctl -u arpwatch --no-pager -n 10 2>/dev/null || echo "  Sin eventos recientes"
 fi
 
+# 6. Validación de MAC del gateway contra baseline
+echo ""
+echo -e "${CYAN}── Validación MAC del gateway ──${NC}"
+GW_IP=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+if [[ -n "$GW_IP" ]]; then
+    GW_MAC=$(ip neigh show "$GW_IP" 2>/dev/null | awk '{print $5}' | head -1)
+    KNOWN_MAC_FILE="/etc/securizar/known-gateway-mac"
+    if [[ -n "$GW_MAC" ]] && [[ "$GW_MAC" != "FAILED" ]]; then
+        echo -e "  Gateway: $GW_IP -> MAC: $GW_MAC"
+        if [[ -f "$KNOWN_MAC_FILE" ]]; then
+            EXPECTED_MAC=$(cat "$KNOWN_MAC_FILE" 2>/dev/null)
+            if [[ "$GW_MAC" == "$EXPECTED_MAC" ]]; then
+                echo -e "  ${GREEN}OK${NC}  MAC del gateway coincide con baseline"
+            else
+                echo -e "  ${RED}ALERTA: MAC del gateway cambió!${NC}"
+                echo -e "  ${RED}  Esperada: $EXPECTED_MAC${NC}"
+                echo -e "  ${RED}  Actual:   $GW_MAC${NC}"
+                echo -e "  ${YELLOW}Posible ARP spoofing del gateway${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}!!${NC}  Sin baseline de MAC del gateway"
+            echo -e "  ${YELLOW}     Guarda con: echo '$GW_MAC' > $KNOWN_MAC_FILE${NC}"
+        fi
+    else
+        echo -e "  ${YELLOW}!!${NC}  No se pudo resolver MAC del gateway ($GW_IP)"
+    fi
+else
+    echo -e "  ${YELLOW}!!${NC}  No se detectó gateway por defecto"
+fi
+
+# 7. Verificar arp_accept=0 (rechazo de gratuitous ARP)
+echo ""
+echo -e "${CYAN}── Protección contra Gratuitous ARP ──${NC}"
+for param in net.ipv4.conf.all.arp_accept net.ipv4.conf.all.arp_filter; do
+    val=$(sysctl -n "$param" 2>/dev/null || echo "N/A")
+    if [[ "$val" == "0" && "$param" == *arp_accept* ]] || [[ "$val" == "1" && "$param" == *arp_filter* ]]; then
+        echo -e "  ${GREEN}OK${NC}  $param = $val"
+    else
+        echo -e "  ${YELLOW}!!${NC}  $param = $val (revisar)"
+    fi
+done
+
 echo ""
 echo -e "${BOLD}Verificación completada: $(date)${NC}"
 EOFARP
@@ -532,6 +679,19 @@ EOFARP
     log_change "Creado" "/usr/local/bin/verificar-arp.sh"
     log_change "Permisos" "/usr/local/bin/verificar-arp.sh -> +x"
     log_info "Script creado: /usr/local/bin/verificar-arp.sh"
+
+    # Guardar MAC del gateway actual como baseline
+    mkdir -p /etc/securizar
+    GW_IP=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    if [[ -n "$GW_IP" ]]; then
+        GW_MAC=$(ip neigh show "$GW_IP" 2>/dev/null | awk '{print $5}' | head -1)
+        if [[ -n "$GW_MAC" ]] && [[ "$GW_MAC" != "FAILED" ]]; then
+            echo "$GW_MAC" > /etc/securizar/known-gateway-mac
+            chmod 600 /etc/securizar/known-gateway-mac
+            log_change "Creado" "/etc/securizar/known-gateway-mac ($GW_IP -> $GW_MAC)"
+            log_info "Baseline MAC del gateway guardada: $GW_MAC"
+        fi
+    fi
 else
     log_skip "Instalar arpwatch y configurar protección ARP"
 fi
