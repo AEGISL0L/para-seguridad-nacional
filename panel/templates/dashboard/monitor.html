@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Monitor{% endblock %}
+{% block page_title %}Estado del Monitor{% endblock %}
+
+{% block content %}
+<div class="grid grid-3 mb-2">
+  <div class="card">
+    <div class="card-title">Estado del Monitor</div>
+    <div class="card-value {% if status.active %}text-green{% else %}text-red{% endif %}" style="font-size:1.5rem">
+      {% if status.active %}ACTIVO{% else %}INACTIVO{% endif %}
+    </div>
+    {% if status.pid %}<div class="card-sub">PID: {{ status.pid }}</div>{% endif %}
+  </div>
+  <div class="card">
+    <div class="card-title">Tokens Monitorizados</div>
+    <div class="card-value text-blue">{{ status.tokens }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alertas Totales</div>
+    <div class="card-value text-yellow">{{ status.alerts }}</div>
+    <div class="card-sub">Incidentes: {{ status.incidents }}</div>
+  </div>
+</div>
+
+<!-- Controls -->
+<div class="card mb-2">
+  <div class="section-title">Controles</div>
+  <div class="flex gap-2">
+    {% if status.active %}
+    <form method="post" action="{% url 'dashboard:monitor_stop' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-red" onclick="return confirm('Detener el monitor de honey tokens?')">Detener Monitor</button>
+    </form>
+    {% else %}
+    <form method="post" action="{% url 'dashboard:monitor_start' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-green">Iniciar Monitor</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Ultima alerta -->
+{% if status.last_alert %}
+<div class="card mb-2">
+  <div class="card-title mb-1">Ultima Alerta</div>
+  <div class="mono text-muted">{{ status.last_alert }}</div>
+</div>
+{% endif %}
+
+<!-- Auditd Status -->
+<div class="card mb-2">
+  <div class="section-title">Estado de Auditd</div>
+  <div class="grid grid-3">
+    <div>
+      <div class="card-title">Estado</div>
+      <span class="badge {% if auditd.active %}badge-green{% else %}badge-red{% endif %}">
+        {% if auditd.active %}ACTIVO{% else %}INACTIVO{% endif %}
+      </span>
+    </div>
+    <div>
+      <div class="card-title">Reglas Totales</div>
+      <div class="text-bright">{{ auditd.total_rules }}</div>
+    </div>
+    <div>
+      <div class="card-title">Reglas Honey</div>
+      <div class="text-bright">{{ auditd.honey_rules }}</div>
+    </div>
+  </div>
+  {% if auditd.rules %}
+  <div class="mt-2">
+    <div class="card-title mb-1">Reglas Activas</div>
+    <div class="code-block">{% for rule in auditd.rules %}{{ rule }}
+{% endfor %}</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Raw status output -->
+{% if status.raw %}
+<div class="card">
+  <div class="section-title">Salida del Monitor</div>
+  <div class="code-block">{{ status.raw }}</div>
+</div>
+{% endif %}
+{% endblock %}

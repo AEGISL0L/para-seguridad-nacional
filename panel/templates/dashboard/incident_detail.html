@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Incidente {{ incident.incident_id }}{% endblock %}
+{% block page_title %}Incidente: {{ incident.incident_id }}{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{% url 'dashboard:incident_list' %}">Incidentes</a> / {{ incident.incident_id }}
+</div>
+
+<!-- Metadata -->
+<div class="grid grid-4 mb-2">
+  <div class="card">
+    <div class="card-title">Evento</div>
+    <div class="card-value" style="font-size:1.3rem">
+      <span class="badge {% if metadata.event == 'DELETE' %}badge-red{% elif metadata.event == 'MODIFY' %}badge-yellow{% else %}badge-blue{% endif %}">
+        {{ metadata.event|default:"N/A" }}
+      </span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Token</div>
+    <div class="card-value text-blue" style="font-size:1rem">
+      {% if metadata.canary_id %}
+      <a href="{% url 'dashboard:token_detail' metadata.canary_id %}">{{ metadata.canary_id }}</a>
+      {% else %}N/A{% endif %}
+    </div>
+    <div class="card-sub">{{ metadata.token_type|default:"" }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Timestamp</div>
+    <div class="card-value" style="font-size:.95rem" class="mono">{{ metadata.timestamp_iso|default:"N/A" }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Archivos de Evidencia</div>
+    <div class="card-value text-green">{{ files|length }}</div>
+  </div>
+</div>
+
+<!-- Incident JSON metadata -->
+<div class="card mb-2">
+  <div class="section-title">Metadata del Incidente</div>
+  <table>
+    {% for key, val in metadata.items %}
+    <tr>
+      <td class="text-muted" style="width:200px;font-size:.85rem">{{ key }}</td>
+      <td class="mono" style="font-size:.85rem">{{ val }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<!-- Integrity Verification -->
+{% if integrity %}
+<div class="card mb-2">
+  <div class="section-title">Cadena de Custodia - Verificacion de Integridad</div>
+  <table>
+    <thead><tr><th>Archivo</th><th>Estado</th></tr></thead>
+    <tbody>
+    {% for fname, status in integrity.items %}
+    <tr>
+      <td class="mono">{{ fname }}</td>
+      <td>
+        {% if status == 'ok' %}
+        <span class="badge badge-green">INTACTO</span>
+        {% elif status == 'tampered' %}
+        <span class="badge badge-red">ALTERADO</span>
+        {% else %}
+        <span class="badge badge-yellow">{{ status|upper }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Evidence Files -->
+<div class="card">
+  <div class="section-title">Archivos de Evidencia</div>
+  {% for fname, content in files.items %}
+  <div class="mb-2">
+    <div class="flex justify-between items-center mb-1">
+      <span class="mono text-blue" style="font-size:.9rem">{{ fname }}</span>
+      <a href="{% url 'dashboard:evidence_file' incident.incident_id fname %}" class="btn btn-sm btn-blue">Ver completo</a>
+    </div>
+    <div class="code-block" style="max-height:250px">{{ content|truncatechars:3000 }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

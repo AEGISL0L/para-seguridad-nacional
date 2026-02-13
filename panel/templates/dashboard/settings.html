@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Configuracion{% endblock %}
+{% block page_title %}Configuracion del Panel{% endblock %}
+
+{% block content %}
+<form method="post">
+  {% csrf_token %}
+
+  <div class="card mb-2">
+    <div class="section-title">Umbrales de Alerta</div>
+    <div class="grid grid-3">
+      <div class="form-group">
+        <label>Umbral CRITICO (alertas/hora)</label>
+        <input type="number" name="ALERT_CRITICAL_THRESHOLD" value="{{ config.ALERT_CRITICAL_THRESHOLD }}">
+      </div>
+      <div class="form-group">
+        <label>Umbral WARNING (alertas/hora)</label>
+        <input type="number" name="ALERT_WARNING_THRESHOLD" value="{{ config.ALERT_WARNING_THRESHOLD }}">
+      </div>
+      <div class="form-group">
+        <label>Intervalo de Polling (ms)</label>
+        <input type="number" name="POLL_INTERVAL_MS" value="{{ config.POLL_INTERVAL_MS }}">
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label>Max Alertas en Feed</label>
+        <input type="number" name="MAX_ALERTS_DISPLAY" value="{{ config.MAX_ALERTS_DISPLAY }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <div class="section-title">Datos de Organizacion (para reportes)</div>
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label>Nombre de Organizacion</label>
+        <input type="text" name="ORGANIZATION_NAME" value="{{ config.ORGANIZATION_NAME }}">
+      </div>
+      <div class="form-group">
+        <label>Nombre del Responsable</label>
+        <input type="text" name="REPORTER_NAME" value="{{ config.REPORTER_NAME }}">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" name="REPORTER_EMAIL" value="{{ config.REPORTER_EMAIL }}">
+      </div>
+      <div class="form-group">
+        <label>Jurisdiccion</label>
+        <input type="text" name="JURISDICTION" value="{{ config.JURISDICTION }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <div class="section-title">Rutas de Datos (solo lectura)</div>
+    <table>
+      <tr><td class="text-muted" style="width:200px">Registry</td><td class="mono">{{ config.REGISTRY_PATH }}</td></tr>
+      <tr><td class="text-muted">Alert Log</td><td class="mono">{{ config.ALERT_LOG }}</td></tr>
+      <tr><td class="text-muted">Forensic Log</td><td class="mono">{{ config.FORENSIC_LOG }}</td></tr>
+      <tr><td class="text-muted">Evidence Dir</td><td class="mono">{{ config.EVIDENCE_DIR }}</td></tr>
+      <tr><td class="text-muted">Monitor Script</td><td class="mono">{{ config.MONITOR_SCRIPT }}</td></tr>
+      <tr><td class="text-muted">Watch PID</td><td class="mono">{{ config.WATCH_PID }}</td></tr>
+      <tr><td class="text-muted">Bind</td><td class="mono">{{ config.BIND_HOST }}:{{ config.BIND_PORT }}</td></tr>
+    </table>
+  </div>
+
+  <button type="submit" class="btn btn-green">Guardar Cambios</button>
+</form>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Evidencia: {{ filename }}{% endblock %}
+{% block page_title %}Evidencia: {{ filename }}{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{% url 'dashboard:incident_list' %}">Incidentes</a> /
+  <a href="{% url 'dashboard:incident_detail' incident_id %}">{{ incident_id }}</a> /
+  {{ filename }}
+</div>
+
+<div class="card">
+  <div class="flex justify-between items-center mb-1">
+    <div class="section-title" style="border:none;margin:0;padding:0">{{ filename }}</div>
+    <div class="text-muted" style="font-size:.8rem">{{ content|length }} caracteres</div>
+  </div>
+  <div class="code-block" style="max-height:none">{{ content }}</div>
+</div>
+{% endblock %}

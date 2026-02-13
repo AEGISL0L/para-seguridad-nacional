@@ -1,0 +1,14 @@
+{% load dashboard_tags %}
+<div class="timeline">
+{% for event in events %}
+<div class="alert-item event-{{ event.event|lower }}">
+  <span class="alert-time">{{ event.time }}</span>
+  <span class="alert-event {{ event.event|event_color }}">{{ event.event }}</span>
+  <span class="mono" style="font-size:.82rem">{{ event.canary_id }}</span>
+  <span class="alert-path">{{ event.file|short_path:40 }}</span>
+  {% if event.incident_id %}
+  <a href="{% url 'dashboard:incident_detail' event.incident_id %}" class="btn btn-sm btn-blue" style="margin-left:auto">Ver</a>
+  {% endif %}
+</div>
+{% endfor %}
+</div>

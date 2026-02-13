@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informe de Incidente - {{ report.case_ref }}</title>
+<style>
+/* Self-contained report styles */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.6;color:#1a1a1a;max-width:210mm;margin:0 auto;padding:20mm 15mm;background:#fff}
+h1{font-size:18pt;text-align:center;margin-bottom:4pt;color:#1a1a1a}
+h2{font-size:13pt;margin:20pt 0 8pt;padding-bottom:4pt;border-bottom:2px solid #2563eb;color:#1e40af}
+h3{font-size:11pt;margin:12pt 0 6pt;color:#374151}
+.subtitle{text-align:center;color:#6b7280;font-size:10pt;margin-bottom:12pt}
+.case-ref{text-align:center;font-family:monospace;font-size:12pt;font-weight:700;color:#2563eb;margin-bottom:20pt}
+table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:10pt}
+th{background:#f3f4f6;text-align:left;padding:6pt 8pt;border:1px solid #d1d5db;font-weight:600;font-size:9pt;text-transform:uppercase;letter-spacing:.3px}
+td{padding:5pt 8pt;border:1px solid #d1d5db;vertical-align:top}
+tr:nth-child(even){background:#f9fafb}
+.mono{font-family:'Consolas','Liberation Mono',monospace;font-size:9pt}
+.badge{display:inline-block;padding:1pt 6pt;border-radius:3pt;font-size:8pt;font-weight:700}
+.badge-critical{background:#fef2f2;color:#dc2626;border:1px solid #fca5a5}
+.badge-warning{background:#fffbeb;color:#d97706;border:1px solid #fcd34d}
+.badge-info{background:#eff6ff;color:#2563eb;border:1px solid #93c5fd}
+.badge-ok{background:#f0fdf4;color:#16a34a;border:1px solid #86efac}
+.code{background:#f3f4f6;border:1px solid #d1d5db;border-radius:4pt;padding:8pt;font-family:monospace;font-size:8.5pt;white-space:pre-wrap;word-break:break-all;max-height:300pt;overflow-y:auto}
+.section{page-break-inside:avoid;margin-bottom:16pt}
+.no-print{margin:20pt 0;text-align:center}
+.no-print button{padding:8pt 20pt;font-size:11pt;cursor:pointer;border:1px solid #d1d5db;border-radius:6pt;background:#fff;margin:0 4pt}
+.no-print button:hover{background:#f3f4f6}
+.footer{text-align:center;color:#9ca3af;font-size:8pt;margin-top:30pt;padding-top:10pt;border-top:1px solid #e5e7eb}
+@media print{
+  .no-print{display:none}
+  body{padding:10mm;font-size:10pt}
+  h2{page-break-after:avoid}
+  .section{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <button onclick="window.print()">Imprimir</button>
+  <a href="{% url 'dashboard:europol_form' %}"><button>Volver</button></a>
+</div>
+
+<h1>INFORME DE INCIDENTE DE SEGURIDAD</h1>
+<div class="subtitle">Documento para presentacion ante autoridades competentes (Europol / FCSE)</div>
+<div class="case-ref">Referencia: {{ report.case_ref }}</div>
+
+<!-- 1. Datos del denunciante -->
+<div class="section">
+<h2>1. Datos del Denunciante</h2>
+<table>
+  <tr><td style="width:200pt;font-weight:600">Nombre</td><td>{{ report.reporter_name }}</td></tr>
+  <tr><td style="font-weight:600">Email</td><td>{{ report.reporter_email }}</td></tr>
+  <tr><td style="font-weight:600">Organizacion</td><td>{{ report.organization }}</td></tr>
+  <tr><td style="font-weight:600">Jurisdiccion</td><td>{{ report.jurisdiction }}</td></tr>
+  <tr><td style="font-weight:600">Fecha de generacion</td><td>{{ report.generated_at }}</td></tr>
+</table>
+</div>
+
+<!-- 2. Resumen ejecutivo -->
+<div class="section">
+<h2>2. Resumen Ejecutivo</h2>
+<p>Se han detectado <strong>{{ report.total_incidents }} incidente{{ report.total_incidents|pluralize:"s" }}</strong> de acceso no autorizado a
+honey tokens (archivos trampa desplegados como sistema de deteccion de intrusos). Los tokens afectados incluyen
+{{ report.affected_tokens|length }} archivo{{ report.affected_tokens|length|pluralize:"s" }} de credenciales ficticias. Se registraron un total de
+<strong>{{ report.total_alerts }} alerta{{ report.total_alerts|pluralize:"s" }}</strong> relacionadas.</p>
+</div>
+
+<!-- 3. Timeline -->
+<div class="section">
+<h2>3. Linea Temporal de Eventos</h2>
+<table>
+  <thead><tr><th>Timestamp</th><th>Evento</th><th>Token</th><th>Archivo</th><th>ID Incidente</th></tr></thead>
+  <tbody>
+  {% for ev in report.timeline %}
+  <tr>
+    <td class="mono">{{ ev.time }}</td>
+    <td><span class="badge {% if ev.event == 'DELETE' or ev.event == 'DELETED' %}badge-critical{% elif ev.event == 'MODIFY' or ev.event == 'MODIFIED' %}badge-warning{% else %}badge-info{% endif %}">{{ ev.event }}</span></td>
+    <td class="mono">{{ ev.canary_id }}</td>
+    <td class="mono">{{ ev.file }}</td>
+    <td class="mono" style="font-size:8pt">{{ ev.incident_id }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- 4. IOCs -->
+<div class="section">
+<h2>4. Indicadores de Compromiso (IOCs)</h2>
+
+{% if report.iocs.ips %}
+<h3>4.1 Direcciones IP detectadas</h3>
+<table>
+  <thead><tr><th>IP</th></tr></thead>
+  <tbody>{% for ip in report.iocs.ips %}<tr><td class="mono">{{ ip }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+{% if report.iocs.processes %}
+<h3>4.2 Procesos sospechosos</h3>
+<table>
+  <thead><tr><th>Proceso</th></tr></thead>
+  <tbody>{% for p in report.iocs.processes %}<tr><td class="mono">{{ p }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+{% if report.iocs.hashes %}
+<h3>4.3 Hashes SHA256</h3>
+<table>
+  <thead><tr><th>Hash</th></tr></thead>
+  <tbody>{% for h in report.iocs.hashes %}<tr><td class="mono" style="font-size:8pt">{{ h }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+</div>
+
+<!-- 5. Detalle por incidente -->
+<div class="section">
+<h2>5. Detalle por Incidente</h2>
+{% for inc in report.incidents %}
+<div class="section" style="margin-left:10pt">
+<h3>5.{{ forloop.counter }} Incidente: {{ inc.incident_id }}</h3>
+
+{% if inc.metadata %}
+<table>
+  {% for key, val in inc.metadata.items %}
+  <tr><td style="width:180pt;font-weight:600">{{ key }}</td><td class="mono">{{ val }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% for fname, content in inc.files.items %}
+<h3 style="font-size:10pt;color:#6b7280">{{ fname }}</h3>
+<div class="code">{{ content|truncatechars:5000 }}</div>
+{% endfor %}
+
+{% if inc.integrity %}
+<h3 style="font-size:10pt;color:#6b7280">Verificacion de Integridad</h3>
+<table>
+  <thead><tr><th>Archivo</th><th>Estado</th></tr></thead>
+  <tbody>
+  {% for fname, status in inc.integrity.items %}
+  <tr>
+    <td class="mono">{{ fname }}</td>
+    <td><span class="badge {% if status == 'ok' %}badge-ok{% elif status == 'tampered' %}badge-critical{% else %}badge-warning{% endif %}">
+      {% if status == 'ok' %}INTACTO{% elif status == 'tampered' %}ALTERADO{% else %}{{ status|upper }}{% endif %}
+    </span></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+</div>
+{% endfor %}
+</div>
+
+<!-- 6. Tokens afectados -->
+<div class="section">
+<h2>6. Tokens Afectados</h2>
+<table>
+  <thead><tr><th>ID Token</th><th>Tipo</th><th>Ruta</th><th>Creado</th><th>Alertas</th></tr></thead>
+  <tbody>
+  {% for t in report.affected_tokens %}
+  <tr>
+    <td class="mono">{{ t.canary_id }}</td>
+    <td>{{ t.type }}</td>
+    <td class="mono" style="font-size:8pt">{{ t.path }}</td>
+    <td>{{ t.created }}</td>
+    <td>{{ t.alert_count }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- 7. Notas -->
+{% if report.notes %}
+<div class="section">
+<h2>7. Notas y Contexto</h2>
+<p>{{ report.notes|linebreaksbr }}</p>
+</div>
+{% endif %}
+
+<div class="footer">
+  Informe generado automaticamente por Securizar Deception Monitor | {{ report.generated_at }}<br>
+  Referencia: {{ report.case_ref }} | Este documento contiene informacion confidencial
+</div>
+
+</body>
+</html>

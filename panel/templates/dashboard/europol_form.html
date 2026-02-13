@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Reporte Europol{% endblock %}
+{% block page_title %}Generar Reporte Europol{% endblock %}
+
+{% block content %}
+<form method="post" action="{% url 'dashboard:europol_generate' %}">
+  {% csrf_token %}
+
+  <!-- Datos del denunciante -->
+  <div class="card mb-2">
+    <div class="section-title">Datos del Denunciante</div>
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label>Nombre del Denunciante</label>
+        <input type="text" name="reporter_name" value="{{ config.REPORTER_NAME }}" required>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" name="reporter_email" value="{{ config.REPORTER_EMAIL }}" required>
+      </div>
+      <div class="form-group">
+        <label>Organizacion</label>
+        <input type="text" name="organization" value="{{ config.ORGANIZATION_NAME }}">
+      </div>
+      <div class="form-group">
+        <label>Jurisdiccion</label>
+        <input type="text" name="jurisdiction" value="{{ config.JURISDICTION }}">
+      </div>
+    </div>
+  </div>
+
+  <!-- Selección de incidentes -->
+  <div class="card mb-2">
+    <div class="section-title">Seleccionar Incidentes</div>
+    {% if incidents %}
+    <div class="mb-1">
+      <label class="checkbox-label">
+        <input type="checkbox" id="select-all"> <strong>Seleccionar todos</strong>
+      </label>
+    </div>
+    <div style="max-height:400px;overflow-y:auto">
+      {% for inc in incidents %}
+      <label class="checkbox-label incident-check">
+        <input type="checkbox" name="incidents" value="{{ inc.incident_id }}">
+        <span class="mono" style="font-size:.82rem">{{ inc.incident_id }}</span>
+        <span class="badge {% if inc.metadata.event == 'DELETE' %}badge-red{% elif inc.metadata.event == 'MODIFY' %}badge-yellow{% else %}badge-blue{% endif %}" style="margin-left:.5rem">
+          {{ inc.metadata.event|default:"?" }}
+        </span>
+        <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">{{ inc.metadata.timestamp_iso|default:"" }}</span>
+        <span class="text-muted" style="font-size:.8rem;margin-left:.5rem">{{ inc.file_count }} archivos</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No hay incidentes disponibles</div>
+    {% endif %}
+  </div>
+
+  <!-- Notas -->
+  <div class="card mb-2">
+    <div class="form-group">
+      <label>Notas y Contexto Adicional</label>
+      <textarea name="notes" rows="4" placeholder="Contexto adicional para el reporte..."></textarea>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="flex gap-2">
+    <button type="submit" name="action" value="view" class="btn btn-blue">Vista Previa</button>
+    <button type="submit" name="action" value="download" class="btn btn-green">Descargar HTML</button>
+  </div>
+</form>
+
+<script>
+document.getElementById('select-all').addEventListener('change',function(){
+  document.querySelectorAll('.incident-check input').forEach(function(cb){cb.checked=this.checked}.bind(this));
+});
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Token {{ token.canary_id }}{% endblock %}
+{% block page_title %}Token: {{ token.canary_id }}{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{% url 'dashboard:token_list' %}">Tokens</a> / {{ token.canary_id }}
+</div>
+
+<!-- Token Info -->
+<div class="grid grid-3 mb-2">
+  <div class="card">
+    <div class="card-title">Tipo</div>
+    <div class="card-value text-blue" style="font-size:1.3rem">
+      <span class="badge badge-blue">{{ token.type|token_type_icon }}</span> {{ token.type }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Estado del Archivo</div>
+    <div class="card-value" style="font-size:1.3rem">
+      {% if exists %}<span class="text-green">Existe en disco</span>{% else %}<span class="text-red">No encontrado</span>{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alertas</div>
+    <div class="card-value text-yellow">{{ alerts|length }}</div>
+  </div>
+</div>
+
+<div class="card mb-2">
+  <div class="section-title">Metadata</div>
+  <table>
+    <tr><td class="text-muted" style="width:150px">ID</td><td class="mono">{{ token.canary_id }}</td></tr>
+    <tr><td class="text-muted">Ruta</td><td class="mono">{{ token.path }}</td></tr>
+    <tr><td class="text-muted">Tipo</td><td>{{ token.type }}</td></tr>
+    <tr><td class="text-muted">Creado</td><td>{{ token.created }}</td></tr>
+    <tr><td class="text-muted">Descripcion</td><td>{{ token.desc }}</td></tr>
+  </table>
+</div>
+
+<!-- Alertas del token -->
+<div class="card mb-2">
+  <div class="section-title">Historial de Alertas ({{ alerts|length }})</div>
+  {% if alerts %}
+  <div style="max-height:400px;overflow-y:auto">
+    {% for a in alerts reversed %}
+    <div class="alert-item event-{{ a.event|lower }}">
+      <span class="alert-time">{{ a.timestamp_str }}</span>
+      <span class="alert-event {{ a.event|event_color }}">{{ a.event }}</span>
+      <span class="alert-path">{{ a.filepath }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">Sin alertas para este token</div>
+  {% endif %}
+</div>
+
+<!-- Incidentes forenses -->
+{% if incidents %}
+<div class="card">
+  <div class="section-title">Incidentes Forenses ({{ incidents|length }})</div>
+  <table>
+    <thead><tr><th>ID Incidente</th><th>Hora</th><th>Evento</th><th>Accessor</th><th>SSH Origins</th></tr></thead>
+    <tbody>
+    {% for inc in incidents %}
+    <tr>
+      <td><a href="{% url 'dashboard:incident_detail' inc.incident_id %}" class="mono">{{ inc.incident_id }}</a></td>
+      <td class="mono text-muted" style="font-size:.8rem">{{ inc.time }}</td>
+      <td><span class="badge {{ inc.event|event_color }}">{{ inc.event }}</span></td>
+      <td class="mono text-muted" style="font-size:.82rem">{{ inc.accessor|default:"N/A" }}</td>
+      <td class="mono text-muted" style="font-size:.82rem">{{ inc.ssh_origins|default:"none" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

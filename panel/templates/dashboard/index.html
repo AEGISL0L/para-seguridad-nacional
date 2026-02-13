@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Status Cards -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Tokens Desplegados</div>
+    <div class="card-value text-blue">{{ total_tokens }}</div>
+    <div class="card-sub">{{ tokens_compromised }} comprometido{{ tokens_compromised|pluralize:"s" }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alertas Totales</div>
+    <div class="card-value text-yellow">{{ total_alerts }}</div>
+    <div class="card-sub">{{ stats.recent }} en las ultimas {{ stats.hours }}h</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Incidentes Forenses</div>
+    <div class="card-value text-red">{{ total_incidents }}</div>
+    <div class="card-sub">Con captura de evidencia</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Nivel de Amenaza</div>
+    <div class="card-value {% if severity == 'CRITICO' %}text-red{% elif severity == 'WARNING' %}text-yellow{% else %}text-green{% endif %}">
+      {{ severity }}
+    </div>
+    <div class="card-sub">
+      Monitor: {% if monitor.active %}Activo{% else %}Inactivo{% endif %}
+      | Auditd: {{ monitor.auditd }}
+    </div>
+  </div>
+</div>
+
+<!-- Alertas por tipo -->
+{% if stats.by_type %}
+<div class="grid grid-4 mb-3">
+  {% for event_type, count in stats.by_type.items %}
+  <div class="card">
+    <div class="card-title">{{ event_type }}</div>
+    <div class="card-value {% if event_type == 'DELETE' or event_type == 'DELETED' %}text-red{% elif event_type == 'MODIFY' or event_type == 'MODIFIED' %}text-yellow{% else %}text-blue{% endif %}">{{ count }}</div>
+    <div class="card-sub">ultimas {{ stats.hours }}h</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid grid-2">
+  <!-- Alert Feed -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Alertas Recientes</div>
+      <a href="{% url 'dashboard:incident_list' %}" class="btn btn-sm btn-blue">Ver todas</a>
+    </div>
+    <div id="alert-feed" style="max-height:400px;overflow-y:auto">
+      {% for alert in alerts reversed %}
+      <div class="alert-item event-{{ alert.event|lower }}">
+        <span class="alert-time">{{ alert.timestamp_str }}</span>
+        <span class="alert-event {{ alert.event|event_color }}">{{ alert.event }}</span>
+        <span class="mono" style="font-size:.82rem">{{ alert.canary_id }}</span>
+        <span class="alert-path">{{ alert.filepath|short_path:40 }}</span>
+      </div>
+      {% empty %}
+      <div class="empty-state">Sin alertas recientes</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Últimos Incidentes -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Ultimos Incidentes Forenses</div>
+      <a href="{% url 'dashboard:incident_list' %}" class="btn btn-sm btn-blue">Ver todos</a>
+    </div>
+    {% for inc in incidents %}
+    <div class="alert-item" style="border-left-color:var(--red)">
+      <span class="alert-time">{{ inc.metadata.timestamp_iso|default:"N/A" }}</span>
+      <span class="alert-event text-red">{{ inc.metadata.event|default:"?" }}</span>
+      <div>
+        <a href="{% url 'dashboard:incident_detail' inc.incident_id %}" class="mono" style="font-size:.85rem">{{ inc.incident_id }}</a>
+        <div class="text-muted" style="font-size:.8rem">{{ inc.file_count }} archivos de evidencia</div>
+      </div>
+    </div>
+    {% empty %}
+    <div class="empty-state">Sin incidentes registrados</div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Tokens comprometidos -->
+{% if tokens_compromised > 0 %}
+<div class="card mt-2">
+  <div class="card-header">
+    <div class="card-title">Tokens Comprometidos</div>
+  </div>
+  <table>
+    <thead><tr><th>ID</th><th>Tipo</th><th>Estado</th><th>Alertas</th><th>Ultima Alerta</th></tr></thead>
+    <tbody>
+    {% for t in tokens %}{% if t.status != 'OK' %}
+    <tr>
+      <td><a href="{% url 'dashboard:token_detail' t.canary_id %}" class="mono">{{ t.canary_id }}</a></td>
+      <td><span class="badge badge-blue">{{ t.type|token_type_icon }}</span></td>
+      <td><span class="badge {{ t.status|status_color }}">{{ t.status }}</span></td>
+      <td>{{ t.alert_count }}</td>
+      <td class="mono text-muted" style="font-size:.8rem">{% if t.last_alert %}{{ t.last_alert.timestamp_str }}{% endif %}</td>
+    </tr>
+    {% endif %}{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* === Live alert feed via SSE with AJAX fallback === */
+(function(){
+  const feed=document.getElementById('alert-feed');
+  if(!feed)return;
+  let lastTs='';
+  const eventColors={DELETE:'event-deleted',DELETED:'event-deleted',MODIFY:'event-modified',MODIFIED:'event-modified',OPEN:'event-open',ACCESS:'event-access'};
+  const textColors={DELETE:'text-red',DELETED:'text-red',MODIFY:'text-yellow',MODIFIED:'text-yellow',OPEN:'text-blue',ACCESS:'text-blue'};
+
+  function addAlert(a){
+    const div=document.createElement('div');
+    div.className='alert-item alert-new '+(eventColors[a.event]||'');
+    div.innerHTML=
+      '<span class="alert-time">'+a.timestamp+'</span>'+
+      '<span class="alert-event '+(textColors[a.event]||'text-muted')+'">'+a.event+'</span>'+
+      '<span class="mono" style="font-size:.82rem">'+a.canary_id+'</span>'+
+      '<span class="alert-path">'+a.filepath+'</span>';
+    feed.prepend(div);
+    // Limit items
+    while(feed.children.length>50)feed.lastChild.remove();
+    if(a.timestamp>lastTs)lastTs=a.timestamp;
+  }
+
+  // Try SSE first
+  let usePolling=false;
+  try{
+    const es=new EventSource('/api/alerts/stream/');
+    es.onmessage=function(e){
+      try{const a=JSON.parse(e.data);if(a.timestamp)addAlert(a)}catch(x){}
+    };
+    es.onerror=function(){es.close();usePolling=true;startPolling()};
+  }catch(x){usePolling=true;startPolling()}
+
+  function startPolling(){
+    setInterval(function(){
+      const url=lastTs?'/api/alerts/?since='+encodeURIComponent(lastTs)+'&limit=20':'/api/alerts/?limit=20';
+      fetch(url).then(r=>r.json()).then(d=>{
+        if(d.alerts)d.alerts.forEach(addAlert);
+      }).catch(()=>{});
+    },3000);
+  }
+})();
+</script>
+{% endblock %}

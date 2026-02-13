@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Panel{% endblock %} - Securizar Deception</title>
+<style>
+/* === RESET & BASE === */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#0d1117;--bg-card:#161b22;--bg-hover:#1c2333;
+  --border:#30363d;--border-light:#484f58;
+  --text:#c9d1d9;--text-muted:#8b949e;--text-bright:#f0f6fc;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#58a6ff;
+  --orange:#d18616;--purple:#bc8cff;--cyan:#39d2c0;
+  --green-bg:rgba(63,185,80,.1);--yellow-bg:rgba(210,153,34,.1);
+  --red-bg:rgba(248,81,73,.1);--blue-bg:rgba(88,166,255,.1);
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  --font-mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+}
+html{font-size:14px}
+body{font-family:var(--font-sans);background:var(--bg-primary);color:var(--text);min-height:100vh;display:flex}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+
+/* === LAYOUT === */
+.sidebar{width:220px;background:var(--bg-card);border-right:1px solid var(--border);padding:1rem 0;position:fixed;top:0;left:0;bottom:0;overflow-y:auto;z-index:10}
+.sidebar-brand{padding:1rem 1.2rem;font-size:1.1rem;font-weight:700;color:var(--green);border-bottom:1px solid var(--border);letter-spacing:.5px}
+.sidebar-brand span{color:var(--text-muted);font-weight:400;font-size:.85rem}
+.sidebar nav{padding:.5rem 0}
+.sidebar a{display:flex;align-items:center;gap:.6rem;padding:.55rem 1.2rem;color:var(--text-muted);font-size:.9rem;transition:all .15s}
+.sidebar a:hover,.sidebar a.active{color:var(--text-bright);background:var(--bg-hover);text-decoration:none}
+.sidebar a.active{border-left:3px solid var(--green)}
+.sidebar .sep{height:1px;background:var(--border);margin:.6rem 1.2rem}
+.main{margin-left:220px;flex:1;min-height:100vh}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:.7rem 1.5rem;background:var(--bg-card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+.topbar h1{font-size:1.1rem;font-weight:600;color:var(--text-bright)}
+.topbar .status-pill{display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600}
+.status-active{background:var(--green-bg);color:var(--green)}
+.status-inactive{background:var(--red-bg);color:var(--red)}
+.status-warning{background:var(--yellow-bg);color:var(--yellow)}
+
+.content{padding:1.5rem}
+
+/* === CARDS === */
+.grid{display:grid;gap:1rem}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:1200px){.grid-4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:768px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr}.sidebar{display:none}.main{margin-left:0}}
+
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1.2rem;transition:border-color .15s}
+.card:hover{border-color:var(--border-light)}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem}
+.card-title{font-size:.85rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.card-value{font-size:2rem;font-weight:700;line-height:1.2}
+.card-sub{font-size:.8rem;color:var(--text-muted);margin-top:.3rem}
+
+/* === TABLES === */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;padding:.6rem .8rem;border-bottom:1px solid var(--border);font-weight:600}
+td{padding:.6rem .8rem;border-bottom:1px solid var(--border);font-size:.9rem;vertical-align:top}
+tr:hover td{background:var(--bg-hover)}
+
+/* === BADGES === */
+.badge{display:inline-flex;padding:.15rem .5rem;border-radius:4px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
+.badge-green{background:var(--green-bg);color:var(--green)}
+.badge-yellow{background:var(--yellow-bg);color:var(--yellow)}
+.badge-red{background:var(--red-bg);color:var(--red)}
+.badge-blue{background:var(--blue-bg);color:var(--blue)}
+.badge-orange{background:rgba(209,134,22,.1);color:var(--orange)}
+
+/* === BUTTONS === */
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .9rem;border-radius:6px;font-size:.85rem;font-weight:500;border:1px solid var(--border);background:var(--bg-card);color:var(--text);cursor:pointer;transition:all .15s}
+.btn:hover{background:var(--bg-hover);border-color:var(--border-light);text-decoration:none;color:var(--text-bright)}
+.btn-green{border-color:rgba(63,185,80,.4);color:var(--green)}.btn-green:hover{background:var(--green-bg)}
+.btn-red{border-color:rgba(248,81,73,.4);color:var(--red)}.btn-red:hover{background:var(--red-bg)}
+.btn-blue{border-color:rgba(88,166,255,.4);color:var(--blue)}.btn-blue:hover{background:var(--blue-bg)}
+.btn-sm{padding:.3rem .6rem;font-size:.78rem}
+
+/* === FORMS === */
+input[type="text"],input[type="email"],input[type="number"],input[type="password"],textarea,select{
+  background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:.5rem .7rem;color:var(--text);font-size:.9rem;font-family:var(--font-sans);width:100%}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px rgba(88,166,255,.15)}
+label{display:block;font-size:.8rem;color:var(--text-muted);margin-bottom:.3rem;font-weight:500}
+.form-group{margin-bottom:1rem}
+textarea{resize:vertical;min-height:80px}
+
+/* === ALERT FEED === */
+.alert-item{display:flex;align-items:flex-start;gap:.8rem;padding:.6rem .8rem;border-left:3px solid transparent;transition:all .3s}
+.alert-item:hover{background:var(--bg-hover)}
+.alert-item.event-delete,.alert-item.event-deleted{border-left-color:var(--red);background:var(--red-bg)}
+.alert-item.event-modify,.alert-item.event-modified{border-left-color:var(--yellow);background:var(--yellow-bg)}
+.alert-item.event-open{border-left-color:var(--blue)}
+.alert-item.event-access{border-left-color:var(--cyan)}
+.alert-time{font-family:var(--font-mono);font-size:.78rem;color:var(--text-muted);white-space:nowrap;min-width:140px}
+.alert-event{font-weight:700;font-size:.8rem;min-width:70px}
+.alert-path{font-family:var(--font-mono);font-size:.82rem;color:var(--text-muted);word-break:break-all}
+.alert-new{animation:flash .6s ease-out}
+@keyframes flash{0%{background:rgba(88,166,255,.3)}100%{background:transparent}}
+
+/* === CODE VIEWER === */
+.code-block{background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:1rem;font-family:var(--font-mono);font-size:.82rem;line-height:1.5;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:600px;overflow-y:auto;color:var(--text-muted)}
+
+/* === MONO === */
+.mono{font-family:var(--font-mono)}
+
+/* === MISC === */
+.text-green{color:var(--green)}.text-red{color:var(--red)}.text-yellow{color:var(--yellow)}.text-blue{color:var(--blue)}.text-muted{color:var(--text-muted)}.text-bright{color:var(--text-bright)}
+.mt-1{margin-top:.5rem}.mt-2{margin-top:1rem}.mt-3{margin-top:1.5rem}
+.mb-1{margin-bottom:.5rem}.mb-2{margin-bottom:1rem}.mb-3{margin-bottom:1.5rem}
+.flex{display:flex}.items-center{align-items:center}.justify-between{justify-content:space-between}.gap-1{gap:.5rem}.gap-2{gap:1rem}.flex-wrap{flex-wrap:wrap}
+.hidden{display:none}
+.breadcrumb{font-size:.85rem;color:var(--text-muted);margin-bottom:1rem}
+.breadcrumb a{color:var(--text-muted)}.breadcrumb a:hover{color:var(--blue)}
+.section-title{font-size:1rem;font-weight:600;color:var(--text-bright);margin-bottom:.8rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+.empty-state{text-align:center;padding:3rem;color:var(--text-muted);font-size:.95rem}
+.pagination{display:flex;gap:.3rem;margin-top:1rem;justify-content:center}
+.pagination a,.pagination span{padding:.35rem .7rem;border-radius:4px;font-size:.85rem;border:1px solid var(--border)}
+.pagination .current{background:var(--blue);color:#fff;border-color:var(--blue)}
+.checkbox-label{display:flex;align-items:center;gap:.5rem;cursor:pointer;padding:.3rem 0;font-size:.9rem}
+.checkbox-label input{width:16px;height:16px;accent-color:var(--blue)}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-brand">SECURIZAR<br><span>Deception Monitor</span></div>
+  <nav>
+    <a href="{% url 'dashboard:index' %}" class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}">
+      [D] Dashboard
+    </a>
+    <a href="{% url 'dashboard:token_list' %}" class="{% if 'token' in request.resolver_match.url_name %}active{% endif %}">
+      [T] Tokens
+    </a>
+    <a href="{% url 'dashboard:incident_list' %}" class="{% if 'incident' in request.resolver_match.url_name %}active{% endif %}">
+      [I] Incidentes
+    </a>
+    <div class="sep"></div>
+    <a href="{% url 'dashboard:monitor_status' %}" class="{% if 'monitor' in request.resolver_match.url_name %}active{% endif %}">
+      [M] Monitor
+    </a>
+    <a href="{% url 'dashboard:europol_form' %}" class="{% if 'europol' in request.resolver_match.url_name %}active{% endif %}">
+      [E] Europol
+    </a>
+    <div class="sep"></div>
+    <a href="{% url 'dashboard:settings_view' %}" class="{% if request.resolver_match.url_name == 'settings_view' %}active{% endif %}">
+      [C] Config
+    </a>
+  </nav>
+</aside>
+
+<main class="main">
+  <header class="topbar">
+    <h1>{% block page_title %}Dashboard{% endblock %}</h1>
+    <div class="flex items-center gap-1">
+      <div id="monitor-badge" class="status-pill status-inactive">MONITOR: ---</div>
+    </div>
+  </header>
+
+  <div class="content">
+    {% block content %}{% endblock %}
+  </div>
+</main>
+
+<script>
+/* === Global: poll monitor status and update badge === */
+(function(){
+  function updateMonitorBadge(){
+    fetch('/api/status/')
+      .then(r=>r.json())
+      .then(d=>{
+        const el=document.getElementById('monitor-badge');
+        if(d.monitor_active){
+          el.className='status-pill status-active';
+          el.textContent='MONITOR: ACTIVO (PID '+d.monitor_pid+')';
+        }else{
+          el.className='status-pill status-inactive';
+          el.textContent='MONITOR: INACTIVO';
+        }
+      })
+      .catch(()=>{});
+  }
+  updateMonitorBadge();
+  setInterval(updateMonitorBadge,10000);
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

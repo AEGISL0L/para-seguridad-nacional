@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Tokens{% endblock %}
+{% block page_title %}Honey Tokens{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-2">
+  <div class="text-muted">{{ tokens|length }} tokens desplegados</div>
+  <button onclick="document.getElementById('add-form').classList.toggle('hidden')" class="btn btn-green">+ Nuevo Token</button>
+</div>
+
+<!-- Add Token Form -->
+<div id="add-form" class="card mb-2 hidden">
+  <div class="section-title">Registrar Nuevo Token</div>
+  <form method="post" action="{% url 'dashboard:token_add' %}">
+    {% csrf_token %}
+    <div class="grid grid-4">
+      <div class="form-group">
+        <label>ID del Token</label>
+        <input type="text" name="canary_id" placeholder="AWS-20260213-a1b2c3d4" required>
+      </div>
+      <div class="form-group">
+        <label>Ruta del Archivo</label>
+        <input type="text" name="path" placeholder="/home/user/.aws/credentials.bak" required>
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select name="type">
+          <option value="aws-creds">AWS Credentials</option>
+          <option value="ssh-key">SSH Key</option>
+          <option value="db-creds">Database Creds</option>
+          <option value="env-prod">Environment File</option>
+          <option value="password-export">Password Export</option>
+          <option value="crypto-seed">Crypto Seed</option>
+          <option value="vpn-config">VPN Config</option>
+          <option value="github-auth">GitHub Auth</option>
+          <option value="docker-auth">Docker Auth</option>
+          <option value="k8s-config">K8s Config</option>
+          <option value="terraform">Terraform</option>
+          <option value="npm-auth">NPM Auth</option>
+          <option value="net-creds">Network Creds</option>
+          <option value="financial">Financial</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Descripcion</label>
+        <input type="text" name="desc" placeholder="Descripcion del token">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-green">Registrar</button>
+  </form>
+</div>
+
+<!-- Token Table -->
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Tipo</th>
+        <th>Ruta</th>
+        <th>Estado</th>
+        <th>Archivo</th>
+        <th>Alertas</th>
+        <th>Creado</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tokens %}
+      <tr>
+        <td><a href="{% url 'dashboard:token_detail' t.canary_id %}" class="mono">{{ t.canary_id }}</a></td>
+        <td><span class="badge badge-blue">{{ t.type|token_type_icon }}</span> <span class="text-muted">{{ t.type }}</span></td>
+        <td class="mono text-muted" style="font-size:.8rem">{{ t.path|short_path:45 }}</td>
+        <td><span class="badge {{ t.status|status_color }}">{{ t.status }}</span></td>
+        <td>{% if t.exists %}<span class="text-green">Existe</span>{% else %}<span class="text-red">No existe</span>{% endif %}</td>
+        <td>{{ t.alert_count }}</td>
+        <td class="text-muted">{{ t.created }}</td>
+        <td>
+          <form method="post" action="{% url 'dashboard:token_delete' t.canary_id %}" style="display:inline"
+                onsubmit="return confirm('Eliminar token {{ t.canary_id }} del registro?')">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-red">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="empty-state">No hay tokens registrados</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -185,8 +185,90 @@ securizar/
 ├── aislamiento-namespaces.sh      # Modulo 72: Aislamiento de namespaces
 ├── integridad-arranque.sh         # Modulo 73: Integridad de arranque (Secure Boot, UEFI, TPM2)
 ├── acceso-privilegiado.sh         # Modulo 74: Gestion de acceso privilegiado
-└── caza-apt-hunting.sh            # Modulo 75: Caza de APTs (YARA, IOC sweep, hunting playbooks)
+├── caza-apt-hunting.sh            # Modulo 75: Caza de APTs (YARA, IOC sweep, hunting playbooks)
+│
+└── panel/                         # Panel web Django (monitor de deception)
+    ├── manage.py
+    ├── panel/                     # Config Django (settings, urls, wsgi)
+    ├── dashboard/                 # App principal (views, parsers, monitor, europol)
+    └── templates/                 # Templates HTML con tema oscuro inline
 ```
+
+---
+
+## Panel Web - Monitor de Tecnologia de Engano (`panel/`)
+
+Panel web local para visualizar en tiempo real las alertas del sistema de deception, explorar evidencia forense y generar reportes para Europol.
+
+### Stack
+
+- **Django 5+** con SQLite, bind `127.0.0.1:3000` (solo acceso local)
+- **Python 3.13**, sin dependencias JS externas, CSS inline (tema oscuro)
+- Interfaz en espanol
+
+### Inicio rapido
+
+```bash
+cd panel
+pip install django
+python3 manage.py migrate
+python3 manage.py runserver 127.0.0.1:3000
+```
+
+### Funcionalidades
+
+| Seccion | Ruta | Descripcion |
+|---------|------|-------------|
+| **Dashboard** | `/` | Cards de estado (tokens, alertas, incidentes, nivel de amenaza), feed de alertas en vivo (SSE/AJAX), incidentes recientes, tokens comprometidos |
+| **Tokens** | `/tokens/` | Tabla de honey tokens con estado (OK/LEIDO/MODIFICADO/BORRADO), alta y baja de tokens |
+| **Detalle Token** | `/tokens/<id>/` | Metadata, historial de alertas, incidentes forenses relacionados |
+| **Incidentes** | `/incidents/` | Lista de incidentes forenses con filtros (evento, token), paginacion |
+| **Detalle Incidente** | `/incidents/<id>/` | Metadata, verificacion de integridad SHA256, todos los archivos de evidencia |
+| **Visor Evidencia** | `/incidents/<id>/evidence/<file>` | Contenido de archivo de evidencia individual (con proteccion path traversal) |
+| **Monitor** | `/monitor/` | Estado del daemon inotifywait, controles start/stop, estado de auditd |
+| **Europol** | `/europol/` | Formulario para seleccionar incidentes y generar reporte self-contained (HTML printable con timeline, IOCs, cadena de custodia) |
+| **Config** | `/settings/` | Umbrales de alerta, intervalo de polling, datos de organizacion |
+
+### APIs
+
+| Endpoint | Formato | Descripcion |
+|----------|---------|-------------|
+| `/api/alerts/` | JSON | Ultimas N alertas, filtro por timestamp (`?since=`) |
+| `/api/status/` | JSON | Estado del monitor, contadores globales |
+| `/api/alerts/stream/` | SSE | Stream en tiempo real (tail del alert log) |
+
+### Reporte Europol
+
+El reporte generado es un HTML self-contained (sin assets externos) que incluye:
+
+1. Datos del denunciante y referencia del caso
+2. Resumen ejecutivo (tokens afectados, total alertas)
+3. Timeline cronologica de eventos
+4. Indicadores de compromiso (IPs, procesos, hashes SHA256)
+5. Detalle por incidente (metadata, red, procesos, auditd)
+6. Cadena de custodia (verificacion de integridad de evidencia)
+7. Tokens afectados con metadata
+
+Incluye botones de impresion y descarga, con `@media print` para formato correcto en papel.
+
+### Data sources
+
+El panel lee directamente los archivos generados por `tecnologia-engano.sh` (modulo 53):
+
+| Archivo | Formato | Contenido |
+|---------|---------|-----------|
+| `~/.config/securizar/honey-registry.conf` | Pipe-delimited | Registro de tokens: `ID\|PATH\|TYPE\|DATE\|DESC` |
+| `~/.config/securizar/honey-alerts.log` | Texto | Alertas: `[TIMESTAMP] EVENT CANARY_ID PATH` |
+| `~/.config/securizar/honey-forensic.log` | Key-value | Incidentes: INCIDENT, TIME, EVENT, TOKEN, EVIDENCE, SSH_ORIGINS |
+| `~/.config/securizar/evidence/*/` | Directorios | 10+ archivos por incidente (incident.json, network, processes, auditd, hashes, manifest) |
+
+### Seguridad
+
+- Bind exclusivo a `127.0.0.1` (sin acceso remoto)
+- CSRF habilitado por defecto (Django)
+- Proteccion contra path traversal en visor de evidencia
+- SECRET_KEY generada aleatoriamente en primer arranque
+- DEBUG=False
 
 ---
 

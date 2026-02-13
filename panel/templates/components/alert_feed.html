@@ -1,0 +1,9 @@
+{% load dashboard_tags %}
+{% for alert in alerts %}
+<div class="alert-item event-{{ alert.event|lower }}">
+  <span class="alert-time">{{ alert.timestamp_str }}</span>
+  <span class="alert-event {{ alert.event|event_color }}">{{ alert.event }}</span>
+  <span class="mono" style="font-size:.82rem">{{ alert.canary_id }}</span>
+  <span class="alert-path">{{ alert.filepath|short_path:40 }}</span>
+</div>
+{% endfor %}
