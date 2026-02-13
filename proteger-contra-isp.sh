@@ -56,29 +56,31 @@ _isp_verificacion_exhaustiva() {
     # ── VPN (5 checks) ──
     echo -e "  ${BOLD}[VPN]${NC}"
 
-    _r="!!"; [[ -f /etc/securizar/vpn-killswitch.sh ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ -f /etc/securizar/vpn-killswitch.sh ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} Script kill switch existe"
 
-    _r="!!"; [[ -f /etc/securizar/vpn-killswitch-off.sh ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ -f /etc/securizar/vpn-killswitch-off.sh ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} Script kill switch OFF existe"
 
     _r="!!"
     if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q 'securizar-vpn-killswitch' 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     elif iptables -S 2>/dev/null | grep -q 'securizar-vpn' 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Kill switch ACTIVO (nft/iptables)"
 
     _r="!!"
     if systemctl is-enabled securizar-vpn-killswitch.service &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Servicio kill switch habilitado"
 
     _r="!!"
     if ip link show 2>/dev/null | grep -qE '(wg0|tun0|proton0|nordlynx)'; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Interfaz VPN activa"
     echo ""
@@ -88,35 +90,35 @@ _isp_verificacion_exhaustiva() {
 
     _r="!!"
     if systemctl is-active unbound &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Unbound activo"
 
     _r="!!"
     if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} DNS-over-TLS (forward-tls-upstream)"
 
     _r="!!"
     if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'val-clean-additional\|auto-trust-anchor-file' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'auto-trust-anchor-file' /etc/unbound/unbound.conf 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} DNSSEC habilitado"
 
     _r="!!"
     if grep -q '^nameserver 127\.0\.0\.1' /etc/resolv.conf 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} resolv.conf apunta a 127.0.0.1"
 
     _r="!!"
     if ! systemctl is-active avahi-daemon &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} avahi-daemon inactivo"
     echo ""
@@ -127,14 +129,14 @@ _isp_verificacion_exhaustiva() {
     _r="!!"
     if [[ -f /etc/NetworkManager/conf.d/91-securizar-mac.conf ]] || \
        [[ -f /etc/NetworkManager/conf.d/99-securizar-mac.conf ]]; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} MAC randomización configurada"
 
     _r="!!"
     if [[ -f /etc/sysctl.d/99-securizar-ipv6.conf ]] && \
        sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null | grep -q '1'; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} IPv6 deshabilitado"
     echo ""
@@ -144,23 +146,23 @@ _isp_verificacion_exhaustiva() {
 
     _r="!!"
     if command -v obfs4proxy &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} obfs4proxy disponible"
 
     _r="!!"
     if systemctl is-active securizar-traffic-pad.service &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Traffic padding activo"
 
     _r="!!"
     if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     elif command -v firewall-cmd &>/dev/null && firewall-cmd --list-ports 2>/dev/null | grep -q '853' 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     elif iptables -S 2>/dev/null | grep -q '853' 2>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Puerto 853 (DoT) en firewall"
     echo ""
@@ -170,13 +172,13 @@ _isp_verificacion_exhaustiva() {
 
     _r="!!"
     if [[ -f /etc/chrony.d/securizar-nts.conf ]] && systemctl is-active chronyd &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Chrony NTS activo"
 
     _r="!!"
     if ! systemctl is-active systemd-timesyncd &>/dev/null; then
-        _r="OK"; ((ok++))
+        _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} timesyncd inactivo"
     echo ""
@@ -188,31 +190,37 @@ _isp_verificacion_exhaustiva() {
     for ff_dir in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
         [[ -f "${ff_dir}/user.js" ]] || continue
         _ff_found=1
-        grep -q 'network.dns.echconfig.enabled.*true' "${ff_dir}/user.js" 2>/dev/null && _ech=1
-        grep -q 'media.peerconnection.enabled.*false' "${ff_dir}/user.js" 2>/dev/null && _webrtc=1
-        grep -q 'dom.security.https_only_mode.*true' "${ff_dir}/user.js" 2>/dev/null && _https=1
+        grep -q 'network.dns.echconfig.enabled.*true' "${ff_dir}/user.js" 2>/dev/null && _ech=1 || true
+        grep -q 'media.peerconnection.enabled.*false' "${ff_dir}/user.js" 2>/dev/null && _webrtc=1 || true
+        grep -q 'dom.security.https_only_mode.*true' "${ff_dir}/user.js" 2>/dev/null && _https=1 || true
     done
 
-    _r="!!"; [[ $_ech -eq 1 ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ $_ech -eq 1 ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} ECH (Encrypted Client Hello)"
 
-    _r="!!"; [[ $_webrtc -eq 1 ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ $_webrtc -eq 1 ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} WebRTC desactivado"
 
-    _r="!!"; [[ $_https -eq 1 ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ $_https -eq 1 ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} HTTPS-Only mode"
     echo ""
 
     # ── Herramientas (3 checks) ──
     echo -e "  ${BOLD}[Herramientas]${NC}"
 
-    _r="!!"; [[ -x /usr/local/bin/auditoria-isp.sh ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ -x /usr/local/bin/auditoria-isp.sh ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} auditoria-isp.sh"
 
-    _r="!!"; [[ -x /usr/local/bin/detectar-dns-leak.sh ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ -x /usr/local/bin/detectar-dns-leak.sh ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} detectar-dns-leak.sh"
 
-    _r="!!"; [[ -x /usr/local/bin/detectar-http-inseguro.sh ]] && _r="OK" && ((ok++))
+    _r="!!"
+    if [[ -x /usr/local/bin/detectar-http-inseguro.sh ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} detectar-http-inseguro.sh"
     echo ""
 
