@@ -316,3 +316,113 @@ ciberint_ensure_dirs() {
     mkdir -p "$CIBERINT_DATA"/{attack-surface,reports,alerts,credentials} 2>/dev/null
     mkdir -p "$CIBERINT_LOG" 2>/dev/null
 }
+
+# ── Scoring compuesto 0-100 para dominios ──────────────────
+ciberint_score_domain() {
+    local domain="$1"
+    local score=0
+
+    # 1. Feeds locales de dominios maliciosos (+40)
+    if [[ -f "$IOC_LISTS_DIR/malicious-domains.txt" ]]; then
+        if grep -qiF "$domain" "$IOC_LISTS_DIR/malicious-domains.txt" 2>/dev/null; then
+            score=$(( score + 40 ))
+        fi
+    fi
+
+    # 2. Buscar en feeds adicionales (+5 por feed)
+    local feed_count=0
+    if [[ -d "$IOC_LISTS_DIR" ]]; then
+        for feed in "$IOC_LISTS_DIR"/*domain*.txt "$IOC_LISTS_DIR"/*dns*.txt; do
+            [[ ! -f "$feed" ]] && continue
+            if grep -qiF "$domain" "$feed" 2>/dev/null; then
+                feed_count=$(( feed_count + 1 ))
+            fi
+        done
+        score=$(( score + feed_count * 5 ))
+    fi
+
+    # 3. Entropia alta del nombre (+15)
+    local entropy
+    entropy=$(ciberint_entropy "$domain")
+    if awk "BEGIN{exit !($entropy > 4.0)}" 2>/dev/null; then
+        score=$(( score + 15 ))
+    fi
+
+    # Cap at 100
+    [[ $score -gt 100 ]] && score=100
+    echo "$score"
+}
+
+# ── Generar indicador STIX 2.1 minimo ──────────────────────
+ciberint_stix_indicator() {
+    local ioc_type="$1"    # ipv4-addr, domain-name, url, file:hashes.'SHA-256'
+    local ioc_value="$2"
+    local name="${3:-Securizar IOC}"
+    local ts
+    ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    local id="indicator--$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$")"
+
+    cat << EOFSTIX
+{
+  "type": "indicator",
+  "spec_version": "2.1",
+  "id": "$id",
+  "created": "$ts",
+  "modified": "$ts",
+  "name": "$name",
+  "pattern": "[$ioc_type:value = '$ioc_value']",
+  "pattern_type": "stix",
+  "valid_from": "$ts"
+}
+EOFSTIX
+}
+
+# ── Normalizar IOC (defang/refang, lowercase) ──────────────
+ciberint_ioc_normalize() {
+    local ioc="$1"
+    local mode="${2:-refang}"  # refang | defang
+
+    if [[ "$mode" == "refang" ]]; then
+        echo "$ioc" | sed -e 's/\[.\]/./g' -e 's/hxxp/http/gi' -e 's/\[\:\]/:/g' | tr '[:upper:]' '[:lower:]'
+    else
+        echo "$ioc" | sed -e 's/\./[.]/g' -e 's/http/hxxp/gi' | tr '[:upper:]' '[:lower:]'
+    fi
+}
+
+# ── Rate limiter por servicio API ───────────────────────────
+ciberint_rate_limit_check() {
+    local service="$1"
+    local min_interval_ms="${2:-$CIBERINT_RATE_LIMIT_MS}"
+    local state_file="$CIBERINT_CACHE/ratelimit_${service}"
+
+    mkdir -p "$CIBERINT_CACHE" 2>/dev/null
+
+    local now
+    now=$(date +%s%N 2>/dev/null || echo "$(date +%s)000000000")
+    now=${now:0:13}
+
+    if [[ -f "$state_file" ]]; then
+        local last
+        last=$(<"$state_file")
+        local diff=$(( now - last ))
+        if [[ $diff -lt $min_interval_ms ]]; then
+            local wait_ms=$(( min_interval_ms - diff ))
+            sleep "$(awk "BEGIN{printf \"%.3f\", $wait_ms/1000}")"
+        fi
+    fi
+
+    echo "$now" > "$state_file"
+}
+
+# ── Merge shallow de objetos JSON con jq ───────────────────
+ciberint_json_merge() {
+    local base="$1"
+    local overlay="$2"
+
+    if command -v jq &>/dev/null; then
+        jq -s '.[0] * .[1]' <(echo "$base") <(echo "$overlay")
+    else
+        # Fallback: devolver overlay (sin merge real)
+        echo "$overlay"
+    fi
+}
