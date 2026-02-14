@@ -12,6 +12,21 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# --- Pre-check: verificar si ya está todo aplicado ---
+_precheck 10
+_pc true
+_pc 'check_file_exists /etc/modprobe.d/disable-bluetooth.conf'
+_pc 'check_file_exists /etc/NetworkManager/conf.d/99-no-mesh.conf'
+_pc 'check_file_exists /etc/modprobe.d/disable-zigbee.conf'
+_pc '! systemctl is-enabled avahi-daemon 2>/dev/null'
+_pc true
+_pc 'check_file_exists /etc/NetworkManager/conf.d/99-random-mac-full.conf'
+_pc 'check_executable /usr/local/bin/monitor-mesh.sh'
+_pc true
+_pc 'check_file_exists /etc/modprobe.d/disable-nfc.conf'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║       CONTRAMEDIDAS CONTRA TECH MESH                      ║"
@@ -56,7 +71,9 @@ echo ""
 echo "Bluetooth Mesh puede rastrear tu ubicación y dispositivo."
 echo ""
 
-if ask "¿Bloquear Bluetooth completamente?"; then
+if check_file_exists /etc/modprobe.d/disable-bluetooth.conf; then
+    log_already "Bluetooth bloqueado (disable-bluetooth.conf)"
+elif ask "¿Bloquear Bluetooth completamente?"; then
     # Desactivar por rfkill
     sudo rfkill block bluetooth 2>/dev/null
 
@@ -93,7 +110,9 @@ echo ""
 echo "WiFi Mesh y hotspots automáticos pueden conectarse sin permiso."
 echo ""
 
-if ask "¿Deshabilitar conexiones WiFi automáticas?"; then
+if check_file_exists /etc/NetworkManager/conf.d/99-no-mesh.conf; then
+    log_already "Conexiones WiFi automáticas deshabilitadas (99-no-mesh.conf)"
+elif ask "¿Deshabilitar conexiones WiFi automáticas?"; then
     # Deshabilitar autoconexión a redes desconocidas
     sudo nmcli general logging level INFO 2>/dev/null
 
@@ -133,7 +152,9 @@ echo ""
 echo "Dispositivos IoT pueden formar redes mesh de vigilancia."
 echo ""
 
-if ask "¿Bloquear comunicación con dispositivos IoT conocidos?"; then
+if check_file_exists /etc/modprobe.d/disable-zigbee.conf; then
+    log_already "Comunicación con dispositivos IoT bloqueada (disable-zigbee.conf)"
+elif ask "¿Bloquear comunicación con dispositivos IoT conocidos?"; then
     # Bloquear puertos comunes de IoT
     fw_add_rich_rule 'rule family="ipv4" port port="5353" protocol="udp" drop' 2>/dev/null  # mDNS
     fw_add_rich_rule 'rule family="ipv4" port port="1900" protocol="udp" drop' 2>/dev/null  # SSDP/UPnP
@@ -162,7 +183,9 @@ echo ""
 echo "mDNS permite que dispositivos te descubran automáticamente."
 echo ""
 
-if ask "¿Deshabilitar mDNS/Avahi?"; then
+if ! systemctl is-enabled avahi-daemon &>/dev/null; then
+    log_already "mDNS/Avahi deshabilitado"
+elif ask "¿Deshabilitar mDNS/Avahi?"; then
     sudo systemctl stop avahi-daemon 2>/dev/null
     log_change "Servicio" "avahi-daemon stop"
     sudo systemctl disable avahi-daemon 2>/dev/null
@@ -209,7 +232,9 @@ echo ""
 echo "Cambiar MAC frecuentemente evita rastreo por redes mesh."
 echo ""
 
-if ask "¿Configurar cambio de MAC cada reconexión?"; then
+if check_file_exists /etc/NetworkManager/conf.d/99-random-mac-full.conf; then
+    log_already "Cambio de MAC cada reconexión (99-random-mac-full.conf)"
+elif ask "¿Configurar cambio de MAC cada reconexión?"; then
     sudo tee /etc/NetworkManager/conf.d/99-random-mac-full.conf > /dev/null << 'EOF'
 [device]
 wifi.scan-rand-mac-address=yes
@@ -236,7 +261,9 @@ echo ""
 echo -e "${CYAN}═══ 8. MONITOR DE REDES MESH ═══${NC}"
 echo ""
 
-if ask "¿Crear script de monitoreo de redes mesh?"; then
+if check_executable /usr/local/bin/monitor-mesh.sh; then
+    log_already "Script de monitoreo de redes mesh (monitor-mesh.sh)"
+elif ask "¿Crear script de monitoreo de redes mesh?"; then
     cat > /usr/local/bin/monitor-mesh.sh << 'EOF'
 #!/bin/bash
 # Monitor de redes mesh y dispositivos sospechosos
@@ -315,7 +342,9 @@ echo ""
 echo -e "${CYAN}═══ 10. BLOQUEAR NFC ═══${NC}"
 echo ""
 
-if ask "¿Bloquear NFC?"; then
+if check_file_exists /etc/modprobe.d/disable-nfc.conf; then
+    log_already "NFC bloqueado (disable-nfc.conf)"
+elif ask "¿Bloquear NFC?"; then
     echo "install nfc /bin/false" | sudo tee /etc/modprobe.d/disable-nfc.conf > /dev/null
     echo "install pn533 /bin/false" | sudo tee -a /etc/modprobe.d/disable-nfc.conf > /dev/null
     log_change "Creado" "/etc/modprobe.d/disable-nfc.conf"

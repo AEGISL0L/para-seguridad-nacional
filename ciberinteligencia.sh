@@ -32,6 +32,18 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 securizar_setup_traps
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 8
+_pc 'check_executable /usr/local/bin/ciberint-enriquecer-ioc.sh'
+_pc 'check_executable /usr/local/bin/ciberint-red-inteligente.sh'
+_pc 'check_executable /usr/local/bin/ciberint-dns-inteligencia.sh'
+_pc 'check_executable /usr/local/bin/ciberint-superficie-ataque.sh'
+_pc 'check_executable /usr/local/bin/ciberint-alerta-temprana.sh'
+_pc 'check_executable /usr/local/bin/ciberint-reporte-diario.sh'
+_pc 'check_executable /usr/local/bin/ciberint-credenciales-expuestas.sh'
+_pc 'check_executable /usr/local/bin/ciberint-soar-bridge.sh'
+_precheck_result
+
 # ── Variables ────────────────────────────────────────────────
 CIBERINT_BASE="/var/lib/ciberinteligencia"
 CIBERINT_LIB_DIR="/usr/local/lib/ciberinteligencia"
@@ -117,7 +129,9 @@ echo "  ├── data/{attack-surface,reports,alerts,credentials}"
 echo "  └── log/"
 echo ""
 
-if ask "Crear estructura de directorios?"; then
+if check_dir_exists "$CIBERINT_BASE/config"; then
+    log_already "Estructura de directorios ciberinteligencia"
+elif ask "Crear estructura de directorios?"; then
     mkdir -p "$CIBERINT_BASE"/cache/{ioc,dns,geoip,cve}
     mkdir -p "$CIBERINT_BASE"/config
     mkdir -p "$CIBERINT_BASE"/data/{attack-surface,reports,alerts,credentials}
@@ -265,7 +279,9 @@ echo "Fuentes: Shodan InternetDB, ip-api.com, ipinfo.io, AbuseIPDB, VirusTotal"
 echo "Scoring compuesto 0-100 con cache TTL 24h"
 echo ""
 
-if ask "Instalar motor de enriquecimiento de IoC?"; then
+if check_executable "$CIBERINT_BIN/ciberint-enriquecer-ioc.sh"; then
+    log_already "Motor de enriquecimiento de IoC (S1)"
+elif ask "Instalar motor de enriquecimiento de IoC?"; then
 
 cat > "$CIBERINT_BIN/ciberint-enriquecer-ioc.sh" << 'EOFS1'
 #!/bin/bash
@@ -540,7 +556,9 @@ echo "Scripts: ciberint-red-inteligente.sh, ciberint-geoip-update.sh"
 echo "Timer: cada 15 minutos"
 echo ""
 
-if ask "Instalar inteligencia de red proactiva?"; then
+if check_executable "$CIBERINT_BIN/ciberint-red-inteligente.sh"; then
+    log_already "Inteligencia de red proactiva (S2)"
+elif ask "Instalar inteligencia de red proactiva?"; then
 
 # ── ciberint-red-inteligente.sh ──
 cat > "$CIBERINT_BIN/ciberint-red-inteligente.sh" << 'EOFS2A'
@@ -821,7 +839,9 @@ echo "Scripts: ciberint-dns-inteligencia.sh, ciberint-dga-avanzado.sh, ciberint-
 echo "Timer: cada 30 minutos"
 echo ""
 
-if ask "Instalar inteligencia DNS?"; then
+if check_executable "$CIBERINT_BIN/ciberint-dns-inteligencia.sh"; then
+    log_already "Inteligencia DNS (S3)"
+elif ask "Instalar inteligencia DNS?"; then
 
 # ── ciberint-dga-avanzado.sh ──
 cat > "$CIBERINT_BIN/ciberint-dga-avanzado.sh" << 'EOFS3A'
@@ -1145,7 +1165,9 @@ echo "Puertos, certificados SSL, DNS, headers HTTP, Shodan, CT logs."
 echo "Timer: cada 6h + diario 06:00"
 echo ""
 
-if ask "Instalar monitorizacion de superficie de ataque?"; then
+if check_executable "$CIBERINT_BIN/ciberint-superficie-ataque.sh"; then
+    log_already "Monitorizacion de superficie de ataque (S4)"
+elif ask "Instalar monitorizacion de superficie de ataque?"; then
 
 # ── ciberint-superficie-ataque.sh ──
 cat > "$CIBERINT_BIN/ciberint-superficie-ataque.sh" << 'EOFS4A'
@@ -1453,7 +1475,9 @@ echo "Scripts: ciberint-alerta-temprana.sh, ciberint-cve-monitor.sh"
 echo "Timer: diario 04:30 + cron.daily CVE"
 echo ""
 
-if ask "Instalar sistema de alerta temprana?"; then
+if check_executable "$CIBERINT_BIN/ciberint-alerta-temprana.sh"; then
+    log_already "Sistema de alerta temprana (S5)"
+elif ask "Instalar sistema de alerta temprana?"; then
 
 # ── ciberint-alerta-temprana.sh ──
 cat > "$CIBERINT_BIN/ciberint-alerta-temprana.sh" << 'EOFS5A'
@@ -1689,7 +1713,9 @@ echo "Scripts: ciberint-reporte-diario.sh, ciberint-reporte-semanal.sh"
 echo "Timer: diario 07:00, semanal via cron"
 echo ""
 
-if ask "Instalar informes de inteligencia automatizados?"; then
+if check_executable "$CIBERINT_BIN/ciberint-reporte-diario.sh"; then
+    log_already "Informes de inteligencia automatizados (S6)"
+elif ask "Instalar informes de inteligencia automatizados?"; then
 
 # ── ciberint-reporte-diario.sh ──
 cat > "$CIBERINT_BIN/ciberint-reporte-diario.sh" << 'EOFS6A'
@@ -2005,7 +2031,9 @@ echo "Scripts: ciberint-credenciales-expuestas.sh, ciberint-secretos-locales.sh"
 echo "Cron: semanal"
 echo ""
 
-if ask "Instalar monitorizacion de credenciales?"; then
+if check_executable "$CIBERINT_BIN/ciberint-credenciales-expuestas.sh"; then
+    log_already "Monitorizacion de credenciales expuestas (S7)"
+elif ask "Instalar monitorizacion de credenciales?"; then
 
 # ── ciberint-credenciales-expuestas.sh ──
 cat > "$CIBERINT_BIN/ciberint-credenciales-expuestas.sh" << 'EOFS7A'
@@ -2249,7 +2277,9 @@ echo "Auto-bloqueo para CRITICAL, cola SOAR para HIGH, notificacion para MEDIUM.
 echo "Timer: cada 10 minutos"
 echo ""
 
-if ask "Instalar integracion SOAR?"; then
+if check_executable "$CIBERINT_BIN/ciberint-soar-bridge.sh"; then
+    log_already "Integracion SOAR (S8)"
+elif ask "Instalar integracion SOAR?"; then
 
 # ── ciberint-soar-bridge.sh ──
 cat > "$CIBERINT_BIN/ciberint-soar-bridge.sh" << 'EOFS8'

@@ -9,8 +9,8 @@
   <a href="{% url 'dashboard:incident_list' %}">Incidentes</a> / {{ incident.incident_id }}
 </div>
 
-<!-- Metadata -->
-<div class="grid grid-4 mb-2">
+<!-- Metadata + Threat Score -->
+<div class="grid" style="grid-template-columns:repeat(5,1fr)" class="mb-2">
   <div class="card">
     <div class="card-title">Evento</div>
     <div class="card-value" style="font-size:1.3rem">
@@ -33,10 +33,173 @@
     <div class="card-value" style="font-size:.95rem" class="mono">{{ metadata.timestamp_iso|default:"N/A" }}</div>
   </div>
   <div class="card">
-    <div class="card-title">Archivos de Evidencia</div>
+    <div class="card-title">Evidencia</div>
     <div class="card-value text-green">{{ files|length }}</div>
   </div>
+  <div class="card" style="border-color:{% if threat.score >= 70 %}var(--red){% elif threat.score >= 50 %}var(--orange){% elif threat.score >= 30 %}var(--yellow){% else %}var(--green){% endif %};border-width:2px">
+    <div class="card-title">Threat Score</div>
+    <div class="card-value {{ threat.level|threat_text_color }}">{{ threat.score }}/100</div>
+    <div class="card-sub"><span class="badge {{ threat.level|threat_color }}">{{ threat.level }}</span></div>
+  </div>
 </div>
+
+<!-- MITRE ATT&CK Techniques -->
+{% if mitre %}
+<div class="card mb-2">
+  <div class="section-title">MITRE ATT&CK</div>
+  <div class="flex gap-1 flex-wrap">
+    {% for t in mitre %}
+    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:.4rem .7rem;border-left:3px solid {{ t.tactic|tactic_color }}">
+      <span class="mono" style="font-size:.78rem;color:{{ t.tactic|tactic_color }};font-weight:700">{{ t.id }}</span>
+      <span style="font-size:.82rem;color:var(--text);margin-left:.3rem">{{ t.name }}</span>
+      <div style="font-size:.72rem;color:var(--text-muted)">{{ t.tactic }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Threat Score Breakdown -->
+{% if threat.breakdown %}
+<div class="card mb-2">
+  <div class="section-title">Desglose de Puntuacion</div>
+  <div style="background:var(--bg-primary);border-radius:6px;padding:.8rem">
+    <!-- Score bar -->
+    <div style="background:var(--bg-card);border-radius:4px;height:24px;overflow:hidden;margin-bottom:.6rem">
+      <div style="background:{% if threat.score >= 70 %}var(--red){% elif threat.score >= 50 %}var(--orange){% elif threat.score >= 30 %}var(--yellow){% else %}var(--green){% endif %};height:100%;width:{{ threat.score }}%;min-width:2px;border-radius:4px;transition:width .5s"></div>
+    </div>
+    {% for line in threat.breakdown %}
+    <div class="mono text-muted" style="font-size:.82rem;padding:.2rem 0">{{ line }}</div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Accessor Info (who accessed the honey token) -->
+{% if accessor %}
+<div class="card mb-2" style="border-color:var(--red);border-width:2px">
+  <div class="section-title" style="color:var(--red)">Proceso Accesor Detectado</div>
+  <table>
+    <tr><td class="text-muted" style="width:120px">PID</td><td class="mono text-bright">{{ accessor.pid }}</td></tr>
+    <tr><td class="text-muted">Usuario</td><td class="mono text-bright">{{ accessor.user }}</td></tr>
+    <tr><td class="text-muted">Comando</td><td class="mono text-yellow" style="word-break:break-all">{{ accessor.cmd }}</td></tr>
+    <tr><td class="text-muted">Fuente</td><td><span class="badge badge-blue">{{ accessor.source }}</span></td></tr>
+  </table>
+</div>
+{% endif %}
+
+<!-- Key Findings -->
+{% if findings %}
+<div class="card mb-2">
+  <div class="section-title">Hallazgos Clave</div>
+  <div class="grid grid-2" style="gap:.6rem">
+    {% for f in findings %}
+    <div style="padding:.7rem;border-radius:6px;border:1px solid {% if f.severity == 'CRITICAL' %}var(--red){% elif f.severity == 'HIGH' %}var(--orange){% elif f.severity == 'MEDIUM' %}var(--yellow){% else %}var(--border){% endif %};background:{% if f.severity == 'CRITICAL' %}var(--red-bg){% elif f.severity == 'HIGH' %}rgba(209,134,22,.1){% elif f.severity == 'MEDIUM' %}var(--yellow-bg){% else %}var(--bg-primary){% endif %}">
+      <div class="flex items-center gap-1" style="margin-bottom:.3rem">
+        <span class="badge {% if f.severity == 'CRITICAL' %}badge-red{% elif f.severity == 'HIGH' %}badge-orange{% elif f.severity == 'MEDIUM' %}badge-yellow{% else %}badge-blue{% endif %}">{{ f.severity }}</span>
+        <span style="font-size:.8rem;color:var(--text-muted)">{{ f.category }}</span>
+      </div>
+      <div style="font-weight:600;font-size:.9rem;color:var(--text-bright)">{{ f.title }}</div>
+      <div class="mono text-muted" style="font-size:.82rem;margin-top:.2rem">{{ f.detail }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- IOCs (Indicators of Compromise) -->
+{% if iocs.external_ips or iocs.ssh_origins or iocs.arp_anomalies or iocs.vpn_active %}
+<div class="card mb-2" style="border-color:var(--orange);border-width:2px">
+  <div class="section-title" style="color:var(--orange)">Indicadores de Compromiso (IOCs)</div>
+
+  {% if iocs.external_ips %}
+  <div class="mb-2">
+    <div style="font-weight:600;font-size:.85rem;color:var(--text-bright);margin-bottom:.4rem">IPs Externas ({{ iocs.external_ips|length }})</div>
+    <table>
+      <thead><tr><th>IP</th><th>Puerto</th><th>Proceso</th></tr></thead>
+      <tbody>
+      {% for ip in iocs.external_ips %}
+      <tr>
+        <td class="mono text-yellow">{{ ip.ip }}</td>
+        <td class="mono">{{ ip.port }}</td>
+        <td class="mono text-muted">{{ ip.process }}{% if ip.pid %} (PID {{ ip.pid }}){% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if iocs.ssh_origins %}
+  <div class="mb-2">
+    <div style="font-weight:600;font-size:.85rem;color:var(--red);margin-bottom:.4rem">Origenes SSH</div>
+    {% for ssh in iocs.ssh_origins %}
+    <span class="badge badge-red" style="margin-right:.3rem">{{ ssh.ip }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if iocs.active_users %}
+  <div class="mb-2">
+    <div style="font-weight:600;font-size:.85rem;color:var(--text-bright);margin-bottom:.4rem">Usuarios Activos</div>
+    <table>
+      <thead><tr><th>Usuario</th><th>TTY</th><th>Origen</th></tr></thead>
+      <tbody>
+      {% for u in iocs.active_users %}
+      <tr>
+        <td class="mono text-blue">{{ u.user }}</td>
+        <td class="mono text-muted">{{ u.tty }}</td>
+        <td class="mono">{{ u.from }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if iocs.processes_with_net %}
+  <div class="mb-2">
+    <div style="font-weight:600;font-size:.85rem;color:var(--text-bright);margin-bottom:.4rem">Procesos con Red ({{ iocs.processes_with_net|length }})</div>
+    <table>
+      <thead><tr><th>Proceso</th><th>PID</th><th>Peer</th></tr></thead>
+      <tbody>
+      {% for p in iocs.processes_with_net %}
+      <tr>
+        <td class="mono text-cyan">{{ p.name }}</td>
+        <td class="mono">{{ p.pid }}</td>
+        <td class="mono text-muted">{{ p.peer }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="flex gap-2 flex-wrap">
+    {% if iocs.arp_anomalies %}
+    <div class="badge {% if iocs.arp_anomalies > 10 %}badge-red{% else %}badge-yellow{% endif %}">ARP FAILED: {{ iocs.arp_anomalies }}</div>
+    {% endif %}
+    {% if iocs.vpn_active %}
+    <div class="badge badge-blue">VPN ACTIVA</div>
+    {% endif %}
+    {% if iocs.dns_servers %}
+    <div class="badge badge-blue">DNS: {{ iocs.dns_servers|join:", " }}</div>
+    {% endif %}
+  </div>
+
+  {% if iocs.file_hashes %}
+  <div class="mt-1">
+    <div style="font-weight:600;font-size:.85rem;color:var(--text-bright);margin-bottom:.4rem">Hashes del Token</div>
+    {% for h in iocs.file_hashes %}
+    <div class="mono text-muted" style="font-size:.78rem;word-break:break-all">
+      <span class="badge badge-blue" style="font-size:.7rem">{{ h.algo }}</span> {{ h.hash }}
+      <span class="text-muted"> {{ h.file|short_path:40 }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <!-- Incident JSON metadata -->
 <div class="card mb-2">

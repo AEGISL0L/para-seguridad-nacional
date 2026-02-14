@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Reputacion IP{% endblock %}
+{% block page_title %}Reputacion de IPs Externas{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Total IPs</div>
+    <div class="card-value text-blue">{{ total }}</div>
+  </div>
+  <div class="card" style="border-color:var(--red);border-width:{% if critical %}2px{% else %}1px{% endif %}">
+    <div class="card-title">Criticas (>=70)</div>
+    <div class="card-value text-red">{{ critical|length }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alto Riesgo (40-69)</div>
+    <div class="card-value text-yellow">{{ high|length }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Bajo Riesgo (<10)</div>
+    <div class="card-value text-green">{{ low|length }}</div>
+  </div>
+</div>
+
+<!-- IP Table -->
+<div class="card">
+  <div class="section-title">IPs Ordenadas por Riesgo</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Score</th>
+        <th>IP</th>
+        <th>rDNS</th>
+        <th>Proveedor</th>
+        <th>Flags</th>
+        <th>Incidentes</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for ip in enriched %}
+    <tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:.4rem">
+          <div style="background:var(--bg-primary);border-radius:4px;height:10px;width:50px;overflow:hidden">
+            <div style="background:{% if ip.abuse_score >= 70 %}var(--red){% elif ip.abuse_score >= 40 %}var(--orange){% elif ip.abuse_score >= 10 %}var(--yellow){% else %}var(--green){% endif %};height:100%;width:{{ ip.abuse_score }}%;min-width:2px"></div>
+          </div>
+          <span class="mono" style="font-size:.85rem;font-weight:700;{% if ip.abuse_score >= 70 %}color:var(--red){% elif ip.abuse_score >= 40 %}color:var(--orange){% elif ip.abuse_score >= 10 %}color:var(--yellow){% else %}color:var(--green){% endif %}">{{ ip.abuse_score }}</span>
+        </div>
+      </td>
+      <td class="mono text-bright" style="font-size:.85rem">{{ ip.ip }}</td>
+      <td class="mono text-muted" style="font-size:.78rem;word-break:break-all;max-width:250px">{{ ip.rdns|default:"-" }}</td>
+      <td>
+        {% if ip.asn_hint %}
+        <span class="badge badge-orange">{{ ip.asn_hint }}</span>
+        {% elif ip.isp %}
+        <span class="badge badge-blue">{{ ip.isp|truncatechars:20 }}</span>
+        {% else %}
+        <span class="text-muted">-</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if ip.is_tor %}<span class="badge badge-red">TOR</span> {% endif %}
+        {% if ip.is_vpn %}<span class="badge badge-yellow">VPN</span> {% endif %}
+        {% if ip.country %}<span class="badge badge-blue">{{ ip.country }}</span> {% endif %}
+        {% if ip.source == 'abuseipdb' %}<span class="badge badge-green">AbuseIPDB</span>{% endif %}
+      </td>
+      <td class="mono text-muted" style="font-size:.82rem">{{ ip.incident_count }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6" class="empty-state">Sin IPs externas detectadas</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- API Key Config -->
+<div class="card mt-2">
+  <div class="section-title">Enriquecimiento</div>
+  <div class="text-muted" style="font-size:.85rem">
+    <strong>Fuente actual:</strong> Analisis local (rDNS + heuristicas de ASN)
+    <br><br>
+    Para activar AbuseIPDB (1000 consultas/dia gratis):
+    <br>1. Registrarse en <code>abuseipdb.com</code>
+    <br>2. Anadir en <code>panel/panel/settings.py</code>: <code>DECEPTION_CONFIG['ABUSEIPDB_API_KEY'] = 'tu-api-key'</code>
+    <br>3. Las IPs se enriqueceran con pais, ISP, reportes de abuso, deteccion Tor/proxy
+  </div>
+</div>
+{% endblock %}

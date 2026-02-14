@@ -254,9 +254,9 @@ elif ask "¿Aplicar hardening TLS del sistema?"; then
 # Firma minima: SHA-256
 # ============================================================
 MIN_PROTOCOL=TLSv1.2
-CIPHER_STRING="HIGH:!aNULL:!MD5:!3DES:!RC4:!DES:!eNULL:!EXPORT"
-MIN_RSA_KEY_SIZE=2048
-MIN_DH_PARAM_SIZE=2048
+CIPHER_STRING="ECDHE+AESGCM:ECDHE+CHACHA20POLY1305:!aNULL:!MD5:!3DES:!RC4:!DES:!eNULL:!EXPORT"
+MIN_RSA_KEY_SIZE=4096
+MIN_DH_PARAM_SIZE=4096
 EOF
     log_change "Creado" "/etc/securizar/tls-hardening.conf"
 
@@ -273,7 +273,7 @@ system_default = tls_defaults
 
 [tls_defaults]
 MinProtocol = TLSv1.2
-CipherString = HIGH:!aNULL:!MD5:!3DES:!RC4:!DES:!eNULL:!EXPORT
+CipherString = ECDHE+AESGCM:ECDHE+CHACHA20POLY1305:!aNULL:!MD5:!3DES:!RC4:!DES:!eNULL:!EXPORT
 Options = PrioritizeChaCha
 EOF
     log_change "Creado" "/etc/ssl/openssl-securizar.cnf"
@@ -302,7 +302,7 @@ EOF
             cat > "$apache_conf" << 'EOF'
 # Hardening TLS - securizar
 SSLProtocol -all +TLSv1.2 +TLSv1.3
-SSLCipherSuite HIGH:!aNULL:!MD5:!3DES:!RC4:!DES
+SSLCipherSuite ECDHE+AESGCM:ECDHE+CHACHA20POLY1305:!aNULL:!MD5:!3DES:!RC4:!DES
 SSLHonorCipherOrder on
 SSLCompression off
 SSLSessionTickets off
@@ -325,7 +325,7 @@ EOF
             cat > "$nginx_conf" << 'EOF'
 # Hardening TLS - securizar
 ssl_protocols TLSv1.2 TLSv1.3;
-ssl_ciphers 'HIGH:!aNULL:!MD5:!3DES:!RC4:!DES';
+ssl_ciphers 'ECDHE+AESGCM:ECDHE+CHACHA20POLY1305:!aNULL:!MD5:!3DES:!RC4:!DES';
 ssl_prefer_server_ciphers on;
 ssl_session_tickets off;
 EOF

@@ -20,6 +20,16 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 5
+_pc check_executable /usr/local/bin/soar-responder.sh
+_pc check_service_enabled soar-responder.timer
+_pc check_executable /usr/local/bin/soar-gestionar-bloqueos.sh
+_pc check_executable /usr/local/bin/soar-notificar.sh
+_pc check_file_exists /etc/security/soar-rules.conf
+_precheck_result
+
 SOAR_DIR="/var/lib/soar"
 mkdir -p "$SOAR_DIR/actions" "$SOAR_DIR/queue" "$SOAR_DIR/log"
 log_change "Creado" "$SOAR_DIR/{actions,queue,log}/"
@@ -46,7 +56,9 @@ echo "  - ALTO:     Log + notificación + bloqueo permanente + evidencia"
 echo "  - CRÍTICO:  Log + notificación + aislamiento + forense"
 echo ""
 
-if ask "¿Instalar motor de respuesta automática?"; then
+if check_executable /usr/local/bin/soar-responder.sh; then
+    log_already "Motor SOAR (soar-responder.sh)"
+elif ask "¿Instalar motor de respuesta automática?"; then
 
     cat > /usr/local/bin/soar-responder.sh << 'EOFSOAR'
 #!/bin/bash
@@ -296,7 +308,9 @@ echo "Timer systemd que ejecuta el motor SOAR periódicamente"
 echo "para procesar eventos de detección y ejecutar respuestas."
 echo ""
 
-if ask "¿Configurar procesamiento automático cada 10 minutos?"; then
+if check_service_enabled soar-responder.timer; then
+    log_already "Procesamiento automático SOAR (timer 10min)"
+elif ask "¿Configurar procesamiento automático cada 10 minutos?"; then
 
     cat > /etc/systemd/system/soar-responder.service << 'EOFSVC'
 [Unit]
@@ -345,7 +359,9 @@ echo "Herramienta para gestionar IPs bloqueadas automáticamente"
 echo "con expiración, lista blanca, y estadísticas."
 echo ""
 
-if ask "¿Instalar gestión de IPs bloqueadas?"; then
+if check_executable /usr/local/bin/soar-gestionar-bloqueos.sh; then
+    log_already "Gestión de IPs bloqueadas (soar-gestionar-bloqueos.sh)"
+elif ask "¿Instalar gestión de IPs bloqueadas?"; then
 
     cat > /usr/local/bin/soar-gestionar-bloqueos.sh << 'EOFBLOCK'
 #!/bin/bash
@@ -460,7 +476,9 @@ echo "alertas de todas las fuentes y genera un resumen"
 echo "con priorización de eventos."
 echo ""
 
-if ask "¿Instalar sistema de notificaciones consolidadas?"; then
+if check_executable /usr/local/bin/soar-notificar.sh; then
+    log_already "Notificaciones consolidadas (soar-notificar.sh)"
+elif ask "¿Instalar sistema de notificaciones consolidadas?"; then
 
     cat > /usr/local/bin/soar-notificar.sh << 'EOFNOTIFY'
 #!/bin/bash
@@ -577,7 +595,9 @@ echo "Archivo de configuración con reglas de respuesta"
 echo "automática personalizables por el administrador."
 echo ""
 
-if ask "¿Crear archivo de reglas de respuesta?"; then
+if check_file_exists /etc/security/soar-rules.conf; then
+    log_already "Reglas de respuesta SOAR (soar-rules.conf)"
+elif ask "¿Crear archivo de reglas de respuesta?"; then
 
     cat > /etc/security/soar-rules.conf << 'EOFRULES'
 # ============================================================

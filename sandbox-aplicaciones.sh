@@ -21,6 +21,19 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 8
+_pc 'check_pkg firejail'
+_pc 'check_file_exists /etc/firejail/firefox.local'
+_pc 'check_file_exists /etc/firejail/thunderbird.local'
+_pc 'check_file_exists /etc/firejail/libreoffice.local'
+_pc 'check_file_exists /etc/firejail/dolphin.local'
+_pc true  # S6 - firecfg (re-evaluar siempre)
+_pc 'check_executable /usr/local/bin/bwrap-sandbox.sh'
+_pc 'check_executable /usr/local/bin/verificar-sandbox.sh'
+_precheck_result
+
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~$REAL_USER")
 
@@ -35,7 +48,9 @@ echo "Firejail es un sandbox SUID que reduce la superficie de ataque"
 echo "de aplicaciones de escritorio usando namespaces y seccomp."
 echo ""
 
-if ask "¿Instalar Firejail?"; then
+if check_pkg firejail; then
+    log_already "Firejail (paquete ya instalado)"
+elif ask "¿Instalar Firejail?"; then
     if ! command -v firejail &>/dev/null; then
         log_info "Instalando Firejail..."
         pkg_install firejail || {
@@ -69,7 +84,9 @@ if command -v firejail &>/dev/null; then
     echo "  - Seccomp, noroot, private-dev"
     echo ""
 
-    if ask "¿Crear perfil de Firejail para Firefox?"; then
+    if check_file_exists /etc/firejail/firefox.local; then
+        log_already "Perfil Firejail para Firefox (ya existe)"
+    elif ask "¿Crear perfil de Firejail para Firefox?"; then
         mkdir -p /etc/firejail
         log_change "Creado" "/etc/firejail/"
 
@@ -118,7 +135,9 @@ EOF
     echo "  - Sin acceso a SSH, GPG, ni archivos del sistema"
     echo ""
 
-    if ask "¿Crear perfil de Firejail para Thunderbird?"; then
+    if check_file_exists /etc/firejail/thunderbird.local; then
+        log_already "Perfil Firejail para Thunderbird (ya existe)"
+    elif ask "¿Crear perfil de Firejail para Thunderbird?"; then
         cat > /etc/firejail/thunderbird.local << 'EOF'
 # Perfil local de Thunderbird para Firejail
 # Generado por sandbox-aplicaciones.sh
@@ -162,7 +181,9 @@ EOF
     echo "  - Sin acceso a red, SSH, ni config del sistema"
     echo ""
 
-    if ask "¿Crear perfil de Firejail para LibreOffice?"; then
+    if check_file_exists /etc/firejail/libreoffice.local; then
+        log_already "Perfil Firejail para LibreOffice (ya existe)"
+    elif ask "¿Crear perfil de Firejail para LibreOffice?"; then
         cat > /etc/firejail/libreoffice.local << 'EOF'
 # Perfil local de LibreOffice para Firejail
 # Generado por sandbox-aplicaciones.sh
@@ -209,7 +230,9 @@ EOF
     echo "  - Seccomp, noroot"
     echo ""
 
-    if ask "¿Crear perfil de Firejail para Dolphin?"; then
+    if check_file_exists /etc/firejail/dolphin.local; then
+        log_already "Perfil Firejail para Dolphin (ya existe)"
+    elif ask "¿Crear perfil de Firejail para Dolphin?"; then
         cat > /etc/firejail/dolphin.local << 'EOF'
 # Perfil local de Dolphin para Firejail
 # Generado por sandbox-aplicaciones.sh
@@ -272,7 +295,9 @@ echo "bubblewrap (bwrap) es un sandbox de bajo nivel sin SUID."
 echo "Se instalará y creará un script de sandbox genérico."
 echo ""
 
-if ask "¿Instalar bubblewrap y crear script de sandbox?"; then
+if check_executable /usr/local/bin/bwrap-sandbox.sh; then
+    log_already "bubblewrap sandbox (script ya instalado)"
+elif ask "¿Instalar bubblewrap y crear script de sandbox?"; then
     if ! command -v bwrap &>/dev/null; then
         log_info "Instalando bubblewrap..."
         pkg_install bubblewrap || {
@@ -354,7 +379,9 @@ fi
 # ============================================================
 log_section "S8: SCRIPT DE VERIFICACIÓN DE SANDBOX"
 
-if ask "¿Crear /usr/local/bin/verificar-sandbox.sh?"; then
+if check_executable /usr/local/bin/verificar-sandbox.sh; then
+    log_already "Script verificar-sandbox.sh (ya instalado)"
+elif ask "¿Crear /usr/local/bin/verificar-sandbox.sh?"; then
     cat > /usr/local/bin/verificar-sandbox.sh << 'EOFVERIFY'
 #!/bin/bash
 # ============================================================

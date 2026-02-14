@@ -6,7 +6,7 @@
 
 {% block content %}
 <!-- Status Cards -->
-<div class="grid grid-4 mb-3">
+<div class="grid" style="grid-template-columns:repeat(5,1fr)" class="mb-3">
   <div class="card">
     <div class="card-title">Tokens Desplegados</div>
     <div class="card-value text-blue">{{ total_tokens }}</div>
@@ -21,6 +21,11 @@
     <div class="card-title">Incidentes Forenses</div>
     <div class="card-value text-red">{{ total_incidents }}</div>
     <div class="card-sub">Con captura de evidencia</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alertas Unicas</div>
+    <div class="card-value {% if dedup.dedup_ratio > 50 %}text-yellow{% else %}text-green{% endif %}">{{ dedup.unique }}</div>
+    <div class="card-sub">{{ dedup.dedup_ratio }}% duplicadas (feedback)</div>
   </div>
   <div class="card">
     <div class="card-title">Nivel de Amenaza</div>

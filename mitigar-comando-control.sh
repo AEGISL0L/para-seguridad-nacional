@@ -30,6 +30,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-comando-control"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 6
+_pc true
+_pc check_executable /usr/local/bin/detectar-beaconing.sh
+_pc check_executable /usr/local/bin/detectar-tool-transfer.sh
+_pc check_executable /usr/local/bin/detectar-tunneling.sh
+_pc check_executable /usr/local/bin/detectar-dga.sh
+_pc check_executable /usr/local/bin/detectar-c2-completo.sh
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE COMANDO Y CONTROL - TA0011                ║"
@@ -91,7 +102,9 @@ echo "Frameworks como Cobalt Strike, Metasploit, Sliver usan"
 echo "HTTP/HTTPS para comunicación C2."
 echo ""
 
-if ask "¿Configurar detección de C2 sobre HTTP/HTTPS?"; then
+if check_executable /usr/local/bin/detectar-beaconing.sh; then
+    log_already "Detección de C2 HTTP/HTTPS (detectar-beaconing.sh)"
+elif ask "¿Configurar detección de C2 sobre HTTP/HTTPS?"; then
 
     # 2a. Configurar Suricata si está disponible
     if command -v suricata &>/dev/null; then
@@ -264,7 +277,9 @@ echo "Después de obtener acceso, atacantes descargan herramientas"
 echo "adicionales (escalada, C2, exfiltración)."
 echo ""
 
-if ask "¿Configurar control de descarga de herramientas?"; then
+if check_executable /usr/local/bin/detectar-tool-transfer.sh; then
+    log_already "Control de descarga de herramientas (detectar-tool-transfer.sh)"
+elif ask "¿Configurar control de descarga de herramientas?"; then
 
     # 3a. Auditoría de descarga de binarios
     if command -v auditctl &>/dev/null; then
@@ -418,7 +433,9 @@ echo "  - T1090: Uso de proxies internos/externos"
 echo "  - T1572: Protocol tunneling (SSH, DNS, ICMP)"
 echo ""
 
-if ask "¿Configurar detección de proxies y túneles?"; then
+if check_executable /usr/local/bin/detectar-tunneling.sh; then
+    log_already "Detección de proxy/tunneling (detectar-tunneling.sh)"
+elif ask "¿Configurar detección de proxies y túneles?"; then
 
     cat > /usr/local/bin/detectar-tunneling.sh << 'EOFTUNNEL'
 #!/bin/bash
@@ -563,7 +580,9 @@ echo "Malware avanzado genera dominios aleatorios para localizar"
 echo "servidores C2, evitando bloqueos estáticos."
 echo ""
 
-if ask "¿Configurar detección de DGA?"; then
+if check_executable /usr/local/bin/detectar-dga.sh; then
+    log_already "Detección de DGA (detectar-dga.sh)"
+elif ask "¿Configurar detección de DGA?"; then
 
     cat > /usr/local/bin/detectar-dga.sh << 'EOFDGA'
 #!/bin/bash
@@ -663,7 +682,9 @@ log_section "6. DETECCIÓN CONSOLIDADA DE C2 (TA0011)"
 echo "Script consolidado que ejecuta todas las detecciones C2."
 echo ""
 
-if ask "¿Crear script de detección consolidada de C2?"; then
+if check_executable /usr/local/bin/detectar-c2-completo.sh; then
+    log_already "Detección consolidada C2 (detectar-c2-completo.sh)"
+elif ask "¿Crear script de detección consolidada de C2?"; then
 
     cat > /usr/local/bin/detectar-c2-completo.sh << 'EOFC2'
 #!/bin/bash

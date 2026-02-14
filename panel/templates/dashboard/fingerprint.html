@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Fingerprint{% endblock %}
+{% block page_title %}Fingerprint del Atacante{% endblock %}
+
+{% block content %}
+<!-- Sophistication Score -->
+<div class="grid grid-4 mb-3">
+  <div class="card" style="border-color:{% if sophistication >= 60 %}var(--red){% elif sophistication >= 40 %}var(--orange){% elif sophistication >= 20 %}var(--yellow){% else %}var(--green){% endif %};border-width:2px">
+    <div class="card-title">Sofisticacion</div>
+    <div class="card-value {% if sophistication >= 60 %}text-red{% elif sophistication >= 40 %}text-yellow{% else %}text-green{% endif %}">{{ sophistication }}/100</div>
+    <div class="card-sub">
+      <div style="background:var(--bg-primary);border-radius:4px;height:8px;margin-top:.3rem">
+        <div style="background:{% if sophistication >= 60 %}var(--red){% elif sophistication >= 40 %}var(--orange){% else %}var(--green){% endif %};height:100%;width:{{ sophistication }}%;border-radius:4px"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Clasificacion</div>
+    <div class="card-value {% if classification == 'APT / Profesional' %}text-red{% elif classification == 'Experimentado' %}text-yellow{% else %}text-blue{% endif %}" style="font-size:1.1rem">{{ classification }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Patron Temporal</div>
+    <div class="card-value text-blue" style="font-size:1rem">{{ timing.pattern|default:"N/A" }}</div>
+    <div class="card-sub">Intervalo medio: {{ timing.avg_interval|default:"?" }}s</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Patron de Acceso</div>
+    <div class="card-value text-blue" style="font-size:1rem">{{ patterns.repeat_pattern|default:"N/A" }}</div>
+    <div class="card-sub">Escalacion: {{ patterns.escalation|default:"?" }}</div>
+  </div>
+</div>
+
+<!-- Sophistication Breakdown -->
+{% if reasons %}
+<div class="card mb-2">
+  <div class="section-title">Factores de Sofisticacion</div>
+  {% for reason in reasons %}
+  <div class="mono text-muted" style="font-size:.85rem;padding:.3rem 0">{{ reason }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Timing Analysis -->
+{% if timing %}
+<div class="card mb-2">
+  <div class="section-title">Analisis Temporal</div>
+  <div class="grid grid-4" style="gap:.5rem">
+    <div style="background:var(--bg-primary);padding:.6rem;border-radius:6px;text-align:center">
+      <div class="card-title">Min Intervalo</div>
+      <div class="mono text-bright" style="font-size:1.1rem">{{ timing.min_interval }}s</div>
+    </div>
+    <div style="background:var(--bg-primary);padding:.6rem;border-radius:6px;text-align:center">
+      <div class="card-title">Max Intervalo</div>
+      <div class="mono text-bright" style="font-size:1.1rem">{{ timing.max_interval }}s</div>
+    </div>
+    <div style="background:var(--bg-primary);padding:.6rem;border-radius:6px;text-align:center">
+      <div class="card-title">Mediana</div>
+      <div class="mono text-bright" style="font-size:1.1rem">{{ timing.median_interval }}s</div>
+    </div>
+    <div style="background:var(--bg-primary);padding:.6rem;border-radius:6px;text-align:center">
+      <div class="card-title">Desv. Estandar</div>
+      <div class="mono text-bright" style="font-size:1.1rem">{{ timing.stddev }}s</div>
+    </div>
+  </div>
+  <div class="mt-1 text-muted" style="font-size:.85rem">
+    {% if timing.pattern == 'automated' %}
+    Patron: <span class="text-red" style="font-weight:700">AUTOMATIZADO</span> - Intervalos regulares y rapidos indican scripting o herramienta automatizada.
+    {% elif timing.pattern == 'scripted_fast' %}
+    Patron: <span class="text-yellow" style="font-weight:700">SCRIPTED RAPIDO</span> - Acceso extremadamente rapido, probable script automatizado.
+    {% elif timing.pattern == 'scripted_regular' %}
+    Patron: <span class="text-yellow" style="font-weight:700">SCRIPTED REGULAR</span> - Intervalos muy consistentes, probable bucle programatico.
+    {% elif timing.pattern == 'manual_slow' %}
+    Patron: <span class="text-blue" style="font-weight:700">MANUAL LENTO</span> - Intervalos largos, el atacante explora manualmente con paciencia.
+    {% elif timing.pattern == 'manual_interactive' %}
+    Patron: <span class="text-blue" style="font-weight:700">MANUAL INTERACTIVO</span> - Mezcla de intervalos, interaccion humana directa.
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Access Patterns -->
+{% if patterns %}
+<div class="card mb-2">
+  <div class="section-title">Patrones de Acceso</div>
+  <table>
+    <tr>
+      <td class="text-muted" style="width:200px">Total eventos</td>
+      <td class="mono text-bright">{{ patterns.total_events }}</td>
+    </tr>
+    <tr>
+      <td class="text-muted">Diversidad de tokens</td>
+      <td class="mono text-bright">{{ patterns.token_diversity }} tipos distintos</td>
+    </tr>
+    <tr>
+      <td class="text-muted">Max repeticion</td>
+      <td class="mono {% if patterns.max_token_repeat > 10 %}text-red{% else %}text-bright{% endif %}">{{ patterns.max_token_repeat }} veces sobre un mismo token</td>
+    </tr>
+    <tr>
+      <td class="text-muted">Escalacion</td>
+      <td>
+        {% if patterns.escalation == 'progressive' %}
+        <span class="badge badge-red">Progresiva</span> Empieza por bajo valor, escala a alto
+        {% elif patterns.escalation == 'targeted_first' %}
+        <span class="badge badge-orange">Dirigida</span> Va directo a tokens de alto valor
+        {% else %}
+        <span class="badge badge-blue">Uniforme</span> Sin patron de escalacion claro
+        {% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td class="text-muted">Patron repeticion</td>
+      <td>
+        {% if patterns.repeat_pattern == 'obsessive' %}
+        <span class="badge badge-red">Obsesivo</span> Accede repetidamente al mismo token (>5 veces)
+        {% elif patterns.repeat_pattern == 'thorough' %}
+        <span class="badge badge-yellow">Minucioso</span> Revisita tokens (2-5 veces)
+        {% else %}
+        <span class="badge badge-green">Barrido</span> Un solo paso, sin revisitar
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+</div>
+{% endif %}
+
+<!-- Tools & Processes -->
+<div class="grid grid-2">
+  <!-- Tools detected -->
+  <div class="card">
+    <div class="section-title">Herramientas Detectadas</div>
+    {% if tools %}
+    <table>
+      <thead><tr><th>Herramienta</th><th>Categoria</th><th>Veces</th></tr></thead>
+      <tbody>
+      {% for t in tools %}
+      <tr>
+        <td class="mono text-yellow">{{ t.name }}</td>
+        <td><span class="badge {% if t.category == 'c2' %}badge-red{% elif t.category == 'credential' %}badge-orange{% elif t.category == 'scanner' %}badge-yellow{% else %}badge-blue{% endif %}">{{ t.category }}</span>
+        <span class="text-muted" style="font-size:.8rem">{{ t.desc }}</span></td>
+        <td class="mono">{{ t.count }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state" style="padding:1.5rem">Sin herramientas de ataque conocidas detectadas en los accesores</div>
+    {% endif %}
+  </div>
+
+  <!-- Suspicious processes -->
+  <div class="card">
+    <div class="section-title">Procesos Sospechosos</div>
+    {% if processes %}
+    <table>
+      <thead><tr><th>Proceso</th><th>Categoria</th><th>Linea</th></tr></thead>
+      <tbody>
+      {% for p in processes %}
+      <tr>
+        <td class="mono text-red">{{ p.name }}</td>
+        <td><span class="badge badge-red">{{ p.category }}</span></td>
+        <td class="mono text-muted" style="font-size:.78rem;word-break:break-all">{{ p.full_line }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state" style="padding:1.5rem">Sin procesos sospechosos detectados en capturas forenses</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -15,13 +15,28 @@
 #   S10 - Auditoria y scoring integral
 # ============================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc check_executable /usr/local/bin/auditar-kernel.sh
+_pc check_file_exists /etc/securizar/livepatch.conf
+_pc check_file_exists /etc/sysctl.d/99-securizar-kernel-exploit.conf
+_pc check_file_exists /etc/modprobe.d/securizar-blacklist.conf
+_pc check_executable /usr/local/bin/validar-kernel-params.sh
+_pc check_executable /usr/local/bin/monitorizar-cves-kernel.sh
+_pc check_executable /usr/local/bin/gestionar-kernel-updates.sh
+_pc check_executable /usr/local/bin/verificar-secure-boot.sh
+_pc check_executable /usr/local/bin/kernel-rollback.sh
+_pc check_executable /usr/local/bin/auditoria-livepatch.sh
+_precheck_result
+
 init_backup "kernel-livepatch"
 
 echo ""
@@ -57,7 +72,9 @@ echo "  - Parametros de seguridad del kernel"
 echo "  - Puntuacion de seguridad"
 echo ""
 
-if ask "¿Crear herramienta de auditoria de seguridad del kernel?"; then
+if check_executable /usr/local/bin/auditar-kernel.sh; then
+    log_already "Auditoria de seguridad del kernel (auditar-kernel.sh existe)"
+elif ask "¿Crear herramienta de auditoria de seguridad del kernel?"; then
 
     cat > /usr/local/bin/auditar-kernel.sh << 'EOFAUDITKERNEL'
 #!/bin/bash
@@ -411,7 +428,9 @@ echo "  - Habilita servicio de live patching"
 echo "  - Crea configuracion en /etc/securizar/livepatch.conf"
 echo ""
 
-if ask "¿Configurar live patching del kernel?"; then
+if check_file_exists /etc/securizar/livepatch.conf; then
+    log_already "Live patching del kernel (livepatch.conf existe)"
+elif ask "¿Configurar live patching del kernel?"; then
 
     LIVEPATCH_METHOD="none"
     LIVEPATCH_SERVICE="none"
@@ -624,7 +643,9 @@ echo "  - unprivileged_userfaultfd=0, sysrq=0"
 echo "  - protected_hardlinks/symlinks/fifos/regular"
 echo ""
 
-if ask "¿Aplicar mitigaciones de exploits del kernel via sysctl?"; then
+if check_file_exists /etc/sysctl.d/99-securizar-kernel-exploit.conf; then
+    log_already "Mitigaciones sysctl (99-securizar-kernel-exploit.conf existe)"
+elif ask "¿Aplicar mitigaciones de exploits del kernel via sysctl?"; then
 
     # Backup de configuracion existente
     if [[ -f /etc/sysctl.d/99-securizar-kernel-exploit.conf ]]; then
@@ -771,7 +792,9 @@ echo "  - USB storage (opcional)"
 echo "  - Opcion de bloquear carga de modulos"
 echo ""
 
-if ask "¿Aplicar hardening de modulos del kernel?"; then
+if check_file_exists /etc/modprobe.d/securizar-blacklist.conf; then
+    log_already "Hardening de modulos (securizar-blacklist.conf existe)"
+elif ask "¿Aplicar hardening de modulos del kernel?"; then
 
     # Backup
     if [[ -f /etc/modprobe.d/securizar-blacklist.conf ]]; then
@@ -959,7 +982,9 @@ echo "  - /usr/local/bin/validar-kernel-params.sh - validador con deteccion de d
 echo "  - Soporte de auto-remediacion"
 echo ""
 
-if ask "¿Crear sistema de validacion de parametros del kernel?"; then
+if check_executable /usr/local/bin/validar-kernel-params.sh; then
+    log_already "Validacion de parametros del kernel (validar-kernel-params.sh existe)"
+elif ask "¿Crear sistema de validacion de parametros del kernel?"; then
 
     # Crear baseline de parametros
     cat > /etc/securizar/kernel-baseline.conf << 'EOFBASELINE'
@@ -1245,7 +1270,9 @@ echo "  - Reporta: CVE ID, severidad, versiones afectadas"
 echo "  - Salida en /var/log/securizar/kernel-cves.json"
 echo ""
 
-if ask "¿Crear sistema de monitorizacion de CVEs del kernel?"; then
+if check_executable /usr/local/bin/monitorizar-cves-kernel.sh; then
+    log_already "Monitorizacion de CVEs del kernel (monitorizar-cves-kernel.sh existe)"
+elif ask "¿Crear sistema de monitorizacion de CVEs del kernel?"; then
 
     cat > /usr/local/bin/monitorizar-cves-kernel.sh << 'EOFCVE'
 #!/bin/bash
@@ -1619,7 +1646,9 @@ echo "  - Auto-update, notificaciones, exclusiones"
 echo "  - Integracion con gestor de paquetes de la distro"
 echo ""
 
-if ask "¿Crear politica de actualizacion del kernel?"; then
+if check_executable /usr/local/bin/gestionar-kernel-updates.sh; then
+    log_already "Politica de actualizacion del kernel (gestionar-kernel-updates.sh existe)"
+elif ask "¿Crear politica de actualizacion del kernel?"; then
 
     # Crear archivo de politica
     cat > /etc/securizar/kernel-update-policy.conf << 'EOFPOLICY'
@@ -1969,7 +1998,9 @@ echo "  - /usr/local/bin/verificar-secure-boot.sh"
 echo "  - Guia para enrollar claves personalizadas"
 echo ""
 
-if ask "¿Crear herramienta de verificacion de Secure Boot?"; then
+if check_executable /usr/local/bin/verificar-secure-boot.sh; then
+    log_already "Verificacion de Secure Boot (verificar-secure-boot.sh existe)"
+elif ask "¿Crear herramienta de verificacion de Secure Boot?"; then
 
     # Instalar mokutil si no esta
     if ! command -v mokutil &>/dev/null; then
@@ -2293,7 +2324,9 @@ echo "  - Test opcional con kexec"
 echo "  - Historial de rollbacks"
 echo ""
 
-if ask "¿Crear herramienta de rollback de kernel?"; then
+if check_executable /usr/local/bin/kernel-rollback.sh; then
+    log_already "Rollback de kernel (kernel-rollback.sh existe)"
+elif ask "¿Crear herramienta de rollback de kernel?"; then
 
     cat > /usr/local/bin/kernel-rollback.sh << 'EOFROLLBACK'
 #!/bin/bash
@@ -2759,7 +2792,9 @@ echo "  - CVE exposure, Secure Boot, frescura del kernel"
 echo "  - Puntuacion: BUENO / MEJORABLE / DEFICIENTE"
 echo ""
 
-if ask "¿Crear herramienta de auditoria integral de live patching?"; then
+if check_executable /usr/local/bin/auditoria-livepatch.sh; then
+    log_already "Auditoria integral de live patching (auditoria-livepatch.sh existe)"
+elif ask "¿Crear herramienta de auditoria integral de live patching?"; then
 
     cat > /usr/local/bin/auditoria-livepatch.sh << 'EOFAUDIT'
 #!/bin/bash

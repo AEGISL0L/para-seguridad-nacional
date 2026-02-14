@@ -28,6 +28,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-movimiento-lateral"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 6
+_pc check_file_exists /etc/ssh/sshd_config.d/06-lateral-movement.conf
+_pc check_file_exists /etc/profile.d/ssh-agent-protection.sh
+_pc true
+_pc check_executable /usr/local/bin/segmentacion-red.sh
+_pc check_executable /usr/local/bin/detectar-lateral.sh
+_pc 'check_file_contains /etc/audit/rules.d/64-lateral-movement.rules deploy-tool'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE MOVIMIENTO LATERAL - TA0008               ║"
@@ -49,7 +60,9 @@ echo "  - T1021.005: VNC (si existe)"
 echo "  - T1021.002: SMB/Samba (si existe)"
 echo ""
 
-if ask "¿Endurecer servicios remotos contra movimiento lateral?"; then
+if check_file_exists /etc/ssh/sshd_config.d/06-lateral-movement.conf; then
+    log_already "Hardening de servicios remotos (06-lateral-movement.conf)"
+elif ask "¿Endurecer servicios remotos contra movimiento lateral?"; then
 
     # 1a. Hardening SSH adicional contra lateral movement
     echo ""
@@ -191,7 +204,9 @@ echo "Un atacante con acceso root puede secuestrar el SSH agent"
 echo "de otro usuario para moverse lateralmente."
 echo ""
 
-if ask "¿Proteger contra SSH session hijacking?"; then
+if check_file_exists /etc/profile.d/ssh-agent-protection.sh; then
+    log_already "Protección SSH hijacking (ssh-agent-protection.sh)"
+elif ask "¿Proteger contra SSH session hijacking?"; then
 
     # 2a. Proteger SSH agent sockets
     echo ""
@@ -332,7 +347,9 @@ echo "  - Restricción de tráfico entre segmentos"
 echo "  - Microsegmentación con zonas de firewalld"
 echo ""
 
-if ask "¿Configurar segmentación de red host-based?"; then
+if check_executable /usr/local/bin/segmentacion-red.sh; then
+    log_already "Segmentación de red (segmentacion-red.sh)"
+elif ask "¿Configurar segmentación de red host-based?"; then
 
     if fw_is_active &>/dev/null; then
         echo ""
@@ -419,7 +436,9 @@ log_section "5. DETECCIÓN DE MOVIMIENTO LATERAL (M1031)"
 echo "Configurar detección activa de intentos de movimiento lateral."
 echo ""
 
-if ask "¿Configurar detección de movimiento lateral?"; then
+if check_executable /usr/local/bin/detectar-lateral.sh; then
+    log_already "Detección de movimiento lateral (detectar-lateral.sh)"
+elif ask "¿Configurar detección de movimiento lateral?"; then
 
     cat > /usr/local/bin/detectar-lateral.sh << 'EOFLAT'
 #!/bin/bash
@@ -544,7 +563,9 @@ echo "Controlar herramientas de deployment que pueden usarse"
 echo "para propagar malware a múltiples sistemas."
 echo ""
 
-if ask "¿Restringir herramientas de software deployment?"; then
+if check_file_contains /etc/audit/rules.d/64-lateral-movement.rules "deploy-tool"; then
+    log_already "Restricción de herramientas de deployment (audit rules)"
+elif ask "¿Restringir herramientas de software deployment?"; then
 
     # Monitorear herramientas de deployment
     if command -v auditctl &>/dev/null; then

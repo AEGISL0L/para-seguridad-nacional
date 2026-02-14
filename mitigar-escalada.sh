@@ -22,6 +22,18 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-escalada"
 securizar_setup_traps
+
+_precheck 8
+_pc true  # S1: auditoría SUID/SGID (detección)
+_pc true  # S2: auditoría capabilities (detección)
+_pc 'check_file_exists /etc/sudoers.d/99-hardening'
+_pc 'check_file_exists /etc/sysctl.d/99-anti-privesc.conf'
+_pc 'check_file_exists /etc/audit/rules.d/privesc-injection.rules'
+_pc true  # S6: auditoría cron privesc (detección)
+_pc true  # S7: archivos world-writable (detección)
+_pc 'check_executable /usr/local/bin/detectar-escalada.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE ESCALADA DE PRIVILEGIOS - TA0004          ║"
@@ -183,7 +195,9 @@ if [[ -f /etc/sudoers ]]; then
 fi
 
 echo ""
-if ask "¿Crear configuración de sudo segura en sudoers.d/?"; then
+if check_file_exists /etc/sudoers.d/99-hardening; then
+    log_already "Hardening de sudo (99-hardening)"
+elif ask "¿Crear configuración de sudo segura en sudoers.d/?"; then
     mkdir -p /etc/sudoers.d
     cat > /etc/sudoers.d/99-hardening << 'EOF'
 # ============================================================
@@ -269,7 +283,9 @@ done
 
 if [[ $KERNEL_ISSUES -gt 0 ]]; then
     echo ""
-    if ask "¿Aplicar protecciones de kernel faltantes?"; then
+    if check_file_exists /etc/sysctl.d/99-anti-privesc.conf; then
+        log_already "Protecciones de kernel (99-anti-privesc.conf)"
+    elif ask "¿Aplicar protecciones de kernel faltantes?"; then
         cat > /etc/sysctl.d/99-anti-privesc.conf << 'EOF'
 # ============================================================
 # ANTI-ESCALADA DE PRIVILEGIOS - T1068 (TA0004)
@@ -342,7 +358,9 @@ done
 [[ $PTRACED -eq 0 ]] && echo -e "  ${GREEN}OK${NC} No hay procesos siendo trazados"
 
 echo ""
-if ask "¿Configurar reglas de auditoría para inyección de procesos?"; then
+if check_file_exists /etc/audit/rules.d/privesc-injection.rules; then
+    log_already "Reglas de auditoría para inyección de procesos (privesc-injection.rules)"
+elif ask "¿Configurar reglas de auditoría para inyección de procesos?"; then
     if command -v auditctl &>/dev/null; then
         mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/privesc-injection.rules << 'EOF'
@@ -469,7 +487,9 @@ fi
 log_section "8. SCRIPT DE DETECCIÓN DE ESCALADA"
 # ============================================================
 
-if ask "¿Crear script de detección periódica de vectores de escalada?"; then
+if check_executable /usr/local/bin/detectar-escalada.sh; then
+    log_already "Script de detección de escalada (/usr/local/bin/detectar-escalada.sh)"
+elif ask "¿Crear script de detección periódica de vectores de escalada?"; then
     cat > /usr/local/bin/detectar-escalada.sh << 'ESCEOF'
 #!/bin/bash
 # ============================================================
@@ -546,7 +566,9 @@ ESCEOF
     log_change "Permisos" "/usr/local/bin/detectar-escalada.sh -> +x"
     log_info "Script creado: /usr/local/bin/detectar-escalada.sh"
 
-    if ask "¿Programar detección semanal de vectores de escalada?"; then
+    if check_executable /etc/cron.weekly/detectar-escalada; then
+        log_already "Detección semanal de escalada (cron)"
+    elif ask "¿Programar detección semanal de vectores de escalada?"; then
         cat > /etc/cron.weekly/detectar-escalada << 'WEOF'
 #!/bin/bash
 /usr/local/bin/detectar-escalada.sh > /dev/null 2>&1

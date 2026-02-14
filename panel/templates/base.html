@@ -137,6 +137,44 @@ textarea{resize:vertical;min-height:80px}
     <a href="{% url 'dashboard:incident_list' %}" class="{% if 'incident' in request.resolver_match.url_name %}active{% endif %}">
       [I] Incidentes
     </a>
+    <a href="{% url 'dashboard:correlation' %}" class="{% if request.resolver_match.url_name == 'correlation' %}active{% endif %}">
+      [X] Correlacion
+    </a>
+    <a href="{% url 'dashboard:timeline' %}" class="{% if request.resolver_match.url_name == 'timeline' %}active{% endif %}">
+      [L] Timeline
+    </a>
+    <div class="sep"></div>
+    <a href="{% url 'dashboard:attack_map' %}" class="{% if request.resolver_match.url_name == 'attack_map' %}active{% endif %}">
+      [A] ATT&CK Map
+    </a>
+    <a href="{% url 'dashboard:threat_overview' %}" class="{% if request.resolver_match.url_name == 'threat_overview' %}active{% endif %}">
+      [H] Amenazas
+    </a>
+    <a href="{% url 'dashboard:fingerprint' %}" class="{% if request.resolver_match.url_name == 'fingerprint' %}active{% endif %}">
+      [F] Fingerprint
+    </a>
+    <a href="{% url 'dashboard:ip_reputation' %}" class="{% if request.resolver_match.url_name == 'ip_reputation' %}active{% endif %}">
+      [R] Reputacion IP
+    </a>
+    <a href="{% url 'dashboard:playbook' %}" class="{% if request.resolver_match.url_name == 'playbook' %}active{% endif %}">
+      [P] Playbook
+    </a>
+    <div class="sep"></div>
+    <a href="{% url 'dashboard:deception_graph' %}" class="{% if request.resolver_match.url_name == 'deception_graph' %}active{% endif %}">
+      [G] Deception Graph
+    </a>
+    <a href="{% url 'dashboard:lateral_movement' %}" class="{% if request.resolver_match.url_name == 'lateral_movement' %}active{% endif %}">
+      [V] Mov. Lateral
+    </a>
+    <a href="{% url 'dashboard:threat_feed' %}" class="{% if request.resolver_match.url_name == 'threat_feed' %}active{% endif %}">
+      [W] Threat Feed
+    </a>
+    <a href="{% url 'dashboard:analytics' %}" class="{% if request.resolver_match.url_name == 'analytics' %}active{% endif %}">
+      [Y] Analytics
+    </a>
+    <a href="{% url 'dashboard:ttp_catalog' %}" class="{% if request.resolver_match.url_name == 'ttp_catalog' %}active{% endif %}">
+      [Z] TTP Catalog
+    </a>
     <div class="sep"></div>
     <a href="{% url 'dashboard:monitor_status' %}" class="{% if 'monitor' in request.resolver_match.url_name %}active{% endif %}">
       [M] Monitor

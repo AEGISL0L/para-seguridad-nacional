@@ -15,7 +15,7 @@
 #   S10 - Auditoria de backup y DR
 # ============================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
@@ -23,6 +23,20 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 securizar_setup_traps
 init_backup "backup-recuperacion"
+
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 10
+_pc 'check_executable "/usr/local/bin/verificar-estrategia-321.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-backup-borg.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-backup-restic.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-backup-inmutable.sh"'
+_pc 'check_executable "/usr/local/bin/verificar-backups.sh"'
+_pc 'check_executable "/usr/local/bin/backup-sistema-completo.sh"'
+_pc 'check_executable "/usr/local/bin/validar-rto-rpo.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-backup-offsite.sh"'
+_pc 'check_executable "/usr/local/bin/proteger-backups-ransomware.sh"'
+_pc 'check_executable "/usr/local/bin/auditoria-backup-dr.sh"'
+_precheck_result
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -52,7 +66,9 @@ echo "  - Archivo de configuracion centralizado"
 echo "  - Script de validacion de cumplimiento"
 echo ""
 
-if ask "¿Configurar la estrategia de backup 3-2-1?"; then
+if check_executable "/usr/local/bin/verificar-estrategia-321.sh"; then
+    log_already "Estrategia 3-2-1 (verificar-estrategia-321.sh ya instalado)"
+elif ask "¿Configurar la estrategia de backup 3-2-1?"; then
 
     # Crear configuracion de estrategia de backup
     STRATEGY_CONF="${SECURIZAR_BACKUP_CONF_DIR}/backup-strategy.conf"
@@ -365,7 +381,9 @@ echo "  - Politica de retencion (7d/4w/12m/2y)"
 echo "  - Script automatizado de backup"
 echo ""
 
-if ask "¿Configurar backup cifrado con Borg?"; then
+if check_executable "/usr/local/bin/securizar-backup-borg.sh"; then
+    log_already "Backup Borg (securizar-backup-borg.sh ya instalado)"
+elif ask "¿Configurar backup cifrado con Borg?"; then
 
     # Instalar borg
     log_info "Instalando BorgBackup..."
@@ -647,7 +665,9 @@ echo "  - Politica de retencion alineada con borg"
 echo "  - Health check automatico"
 echo ""
 
-if ask "¿Configurar backup cifrado con Restic?"; then
+if check_executable "/usr/local/bin/securizar-backup-restic.sh"; then
+    log_already "Backup Restic (securizar-backup-restic.sh ya instalado)"
+elif ask "¿Configurar backup cifrado con Restic?"; then
 
     # Instalar restic
     log_info "Instalando Restic..."
@@ -953,7 +973,9 @@ echo "  - Guia para S3 Object Lock"
 echo "  - Timer para aplicar inmutabilidad tras backup"
 echo ""
 
-if ask "¿Configurar backups inmutables (WORM)?"; then
+if check_executable "/usr/local/bin/securizar-backup-inmutable.sh"; then
+    log_already "Backups inmutables (securizar-backup-inmutable.sh ya instalado)"
+elif ask "¿Configurar backups inmutables (WORM)?"; then
 
     cat > /usr/local/bin/securizar-backup-inmutable.sh << 'EOFWORM'
 #!/bin/bash
@@ -1285,7 +1307,9 @@ echo "  - Cron semanal de verificacion"
 echo "  - Script interactivo de restauracion"
 echo ""
 
-if ask "¿Configurar verificacion y restauracion automatica?"; then
+if check_executable "/usr/local/bin/verificar-backups.sh"; then
+    log_already "Verificacion backups (verificar-backups.sh ya instalado)"
+elif ask "¿Configurar verificacion y restauracion automatica?"; then
 
     # Script de verificacion
     cat > /usr/local/bin/verificar-backups.sh << 'EOFVERIFY'
@@ -1715,7 +1739,9 @@ echo "  - Configuracion GRUB"
 echo "  - Todo cifrado en un archivo"
 echo ""
 
-if ask "¿Crear script de backup de sistema completo (bare metal)?"; then
+if check_executable "/usr/local/bin/backup-sistema-completo.sh"; then
+    log_already "Bare metal (backup-sistema-completo.sh ya instalado)"
+elif ask "¿Crear script de backup de sistema completo (bare metal)?"; then
 
     cat > /usr/local/bin/backup-sistema-completo.sh << 'EOFBAREMETAL'
 #!/bin/bash
@@ -2059,7 +2085,9 @@ echo "  - Informacion de contacto"
 echo "  - Script de validacion RTO/RPO"
 echo ""
 
-if ask "¿Configurar RTO/RPO y plan de recuperacion?"; then
+if check_executable "/usr/local/bin/validar-rto-rpo.sh"; then
+    log_already "RTO/RPO (validar-rto-rpo.sh ya instalado)"
+elif ask "¿Configurar RTO/RPO y plan de recuperacion?"; then
 
     DR_PLAN_CONF="${SECURIZAR_BACKUP_CONF_DIR}/dr-plan.conf"
     if [[ -f "$DR_PLAN_CONF" ]]; then
@@ -2381,7 +2409,9 @@ echo "  - Verificacion de integridad post-transferencia"
 echo "  - Timer systemd para ejecucion nocturna"
 echo ""
 
-if ask "¿Configurar backup offsite automatizado?"; then
+if check_executable "/usr/local/bin/securizar-backup-offsite.sh"; then
+    log_already "Backup offsite (securizar-backup-offsite.sh ya instalado)"
+elif ask "¿Configurar backup offsite automatizado?"; then
 
     # Configuracion offsite
     OFFSITE_CONF="${SECURIZAR_BACKUP_CONF_DIR}/offsite-backup.conf"
@@ -2689,7 +2719,9 @@ echo "  - Flags de inmutabilidad en archivos completados"
 echo "  - Monitor de cambios masivos (indicador de cifrado)"
 echo ""
 
-if ask "¿Configurar proteccion anti-ransomware de backups?"; then
+if check_executable "/usr/local/bin/proteger-backups-ransomware.sh"; then
+    log_already "Anti-ransomware (proteger-backups-ransomware.sh ya instalado)"
+elif ask "¿Configurar proteccion anti-ransomware de backups?"; then
 
     # Crear usuario dedicado para backups
     BACKUP_USER="securizar-backup"
@@ -2989,7 +3021,9 @@ echo "  - Plan DR existente"
 echo "  - Score: BUENO / MEJORABLE / DEFICIENTE"
 echo ""
 
-if ask "¿Crear script de auditoria de backup y DR?"; then
+if check_executable "/usr/local/bin/auditoria-backup-dr.sh"; then
+    log_already "Auditoria backup/DR (auditoria-backup-dr.sh ya instalado)"
+elif ask "¿Crear script de auditoria de backup y DR?"; then
 
     cat > /usr/local/bin/auditoria-backup-dr.sh << 'EOFAUDIT'
 #!/bin/bash

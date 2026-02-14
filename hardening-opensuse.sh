@@ -12,6 +12,24 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-opensuse"
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 13
+_pc check_file_exists /etc/sysctl.d/50-hardening-base.conf
+_pc true  # S2: deshabilitar FTP (condicional)
+_pc true  # S3: servicios innecesarios (condicional)
+_pc true  # S4: firewall (condicional)
+_pc check_file_exists /etc/ssh/sshd_config.d/50-hardening-base.conf
+_pc check_file_contains /etc/security/pwquality.conf "minlen = 12"
+_pc check_perm /etc/shadow "640"
+_pc check_file_exists /etc/fail2ban/jail.local
+_pc true  # S9: actualizaciones seguridad (siempre re-evaluar)
+_pc true  # S10: auditd (condicional)
+_pc check_file_exists /etc/ssh/sshd_config.d/91-mfa.conf
+_pc check_executable /usr/local/bin/clamav-escanear.sh
+_pc check_executable /usr/local/bin/openscap-auditar.sh
+_precheck_result
+
 echo ""
 echo "=========================================="
 echo " Hardening base del sistema"
@@ -26,7 +44,9 @@ log_info "=== 1. HARDENING DEL KERNEL (sysctl) ==="
 echo "Mejora protecciones de red y kernel sin afectar rendimiento."
 echo ""
 
-if ask "¿Aplicar hardening del kernel?"; then
+if check_file_exists /etc/sysctl.d/50-hardening-base.conf; then
+    log_already "Hardening del kernel (sysctl)"
+elif ask "¿Aplicar hardening del kernel?"; then
     # Backup
     cp /etc/sysctl.conf "$BACKUP_DIR/" 2>/dev/null || true
     log_change "Backup" "/etc/sysctl.conf"
@@ -217,7 +237,9 @@ echo "      por esta configuración (sshd_config solo afecta conexiones ENTRANTE
 echo ""
 
 if [[ -f /etc/ssh/sshd_config ]]; then
-    if ask "¿Aplicar configuración segura de SSH?"; then
+    if check_file_exists /etc/ssh/sshd_config.d/50-hardening-base.conf; then
+        log_already "Configuración segura de SSH"
+    elif ask "¿Aplicar configuración segura de SSH?"; then
         cp /etc/ssh/sshd_config "$BACKUP_DIR/"
         log_change "Backup" "/etc/ssh/sshd_config"
 
@@ -328,7 +350,9 @@ echo "Configura requisitos mínimos para contraseñas."
 echo ""
 
 if [[ -f /etc/security/pwquality.conf ]]; then
-    if ask "¿Fortalecer política de contraseñas?"; then
+    if check_file_contains /etc/security/pwquality.conf "minlen = 12"; then
+        log_already "Política de contraseñas"
+    elif ask "¿Fortalecer política de contraseñas?"; then
         cp /etc/security/pwquality.conf "$BACKUP_DIR/"
         log_change "Backup" "/etc/security/pwquality.conf"
 
@@ -363,7 +387,9 @@ echo ""
 log_info "=== 7. PERMISOS DE ARCHIVOS SENSIBLES ==="
 echo ""
 
-if ask "¿Verificar y corregir permisos de archivos críticos?"; then
+if check_perm /etc/shadow "640"; then
+    log_already "Permisos de archivos críticos"
+elif ask "¿Verificar y corregir permisos de archivos críticos?"; then
     # /etc/passwd y /etc/group deben ser legibles
     chmod 644 /etc/passwd 2>/dev/null || true
     log_change "Permisos" "/etc/passwd -> 644"
@@ -399,7 +425,9 @@ log_info "=== 8. FAIL2BAN (Protección contra fuerza bruta) ==="
 echo "Bloquea IPs que intentan ataques de fuerza bruta."
 echo ""
 
-if ! command -v fail2ban-client &>/dev/null; then
+if check_file_exists /etc/fail2ban/jail.local; then
+    log_already "Fail2ban configurado"
+elif ! command -v fail2ban-client &>/dev/null; then
     if ask "¿Instalar fail2ban?"; then
         pkg_install fail2ban
 
@@ -509,7 +537,9 @@ echo "  - NO modifica PAM: usa AuthenticationMethods nativo de OpenSSH"
 echo ""
 
 if [[ -f /etc/ssh/sshd_config ]]; then
-    if ask "¿Activar MFA para SSH (llave + contraseña)?"; then
+    if check_file_exists /etc/ssh/sshd_config.d/91-mfa.conf; then
+        log_already "MFA para SSH"
+    elif ask "¿Activar MFA para SSH (llave + contraseña)?"; then
         cp /etc/ssh/sshd_config.d/50-hardening-base.conf "$BACKUP_DIR/" 2>/dev/null || true
         log_change "Backup" "/etc/ssh/sshd_config.d/50-hardening-base.conf"
 
@@ -678,7 +708,9 @@ echo "  - Actualización automática de firmas"
 echo "  - Protección contra phishing y malware en archivos"
 echo ""
 
-if ask "¿Instalar y configurar ClamAV?"; then
+if check_executable /usr/local/bin/clamav-escanear.sh; then
+    log_already "ClamAV antimalware"
+elif ask "¿Instalar y configurar ClamAV?"; then
     # Instalar ClamAV si no está presente
     if ! command -v clamscan &>/dev/null; then
         log_info "Instalando ClamAV..."
@@ -881,7 +913,9 @@ echo "  - Informes HTML detallados"
 echo "  - Escaneo periódico automatizado"
 echo ""
 
-if ask "¿Instalar y configurar OpenSCAP?"; then
+if check_executable /usr/local/bin/openscap-auditar.sh; then
+    log_already "OpenSCAP auditoría de vulnerabilidades"
+elif ask "¿Instalar y configurar OpenSCAP?"; then
     # Instalar OpenSCAP y guías de seguridad
     if ! command -v oscap &>/dev/null; then
         log_info "Instalando OpenSCAP..."

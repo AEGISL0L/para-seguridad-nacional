@@ -90,3 +90,46 @@ def token_type_icon(token_type):
         'financial': 'FIN',
     }
     return icons.get(str(token_type), token_type[:3].upper())
+
+
+@register.filter
+def threat_color(level):
+    """Return badge class for threat level."""
+    colors = {
+        'CRITICAL': 'badge-red',
+        'HIGH': 'badge-orange',
+        'MEDIUM': 'badge-yellow',
+        'LOW': 'badge-blue',
+        'INFO': 'badge-green',
+    }
+    return colors.get(str(level).upper(), 'badge-blue')
+
+
+@register.filter
+def threat_text_color(level):
+    """Return text color class for threat level."""
+    colors = {
+        'CRITICAL': 'text-red',
+        'HIGH': 'text-yellow',
+        'MEDIUM': 'text-yellow',
+        'LOW': 'text-blue',
+        'INFO': 'text-green',
+    }
+    return colors.get(str(level).upper(), 'text-muted')
+
+
+@register.filter
+def tactic_color(tactic):
+    """Return CSS color for ATT&CK tactic."""
+    colors = {
+        'Initial Access': '#f85149',
+        'Execution': '#d29922',
+        'Credential Access': '#d18616',
+        'Discovery': '#58a6ff',
+        'Lateral Movement': '#bc8cff',
+        'Collection': '#39d2c0',
+        'Exfiltration': '#f85149',
+        'Impact': '#f85149',
+        'Defense Evasion': '#d29922',
+    }
+    return colors.get(str(tactic), '#8b949e')

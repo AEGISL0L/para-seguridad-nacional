@@ -12,6 +12,24 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-final"
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 13
+_pc check_service_active auditd
+_pc true  # S2: deshabilitar bluetooth (condicional)
+_pc true  # S3: securizar GRUB (condicional)
+_pc true  # S4: deshabilitar Ctrl+Alt+Del (condicional)
+_pc check_sysctl kernel.dmesg_restrict 1
+_pc check_file_exists /etc/tmpfiles.d/tmp-clean.conf
+_pc check_file_exists /etc/sudoers.d/99-hardening
+_pc true  # S8: deshabilitar servicios innecesarios (condicional)
+_pc true  # S9: USBGuard (condicional)
+_pc check_file_exists /etc/sysctl.d/99-hide-kernel.conf
+_pc check_file_exists /etc/sysctl.d/99-memory-hardening.conf
+_pc check_file_exists /etc/logrotate.d/security-logs
+_pc true  # S13: verificacion final (siempre informacional)
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║         HARDENING FINAL - Correcciones                    ║"
@@ -126,14 +144,14 @@ fi
 log_section "3. SECURIZAR GRUB"
 # ============================================================
 
-if [[ -f $GRUB_CFG ]]; then
-    GRUB_PERMS=$(stat -c %a $GRUB_CFG 2>/dev/null)
+if [[ -f "$GRUB_CFG" ]]; then
+    GRUB_PERMS=$(stat -c %a "$GRUB_CFG" 2>/dev/null)
     if [[ "$GRUB_PERMS" != "600" ]]; then
         log_warn "GRUB tiene permisos inseguros: $GRUB_PERMS"
         if ask "¿Securizar permisos de GRUB?"; then
-            chmod 600 $GRUB_CFG
+            chmod 600 "$GRUB_CFG"
             log_change "Permisos" "$GRUB_CFG -> 600"
-            chown root:root $GRUB_CFG
+            chown root:root "$GRUB_CFG"
             log_change "Permisos" "$GRUB_CFG -> root:root"
             log_info "GRUB securizado (600)"
         else
@@ -194,7 +212,9 @@ else
 fi
 
 # Limpiar /tmp en cada boot
-if ask "¿Configurar limpieza automática de /tmp en cada boot?"; then
+if check_file_exists /etc/tmpfiles.d/tmp-clean.conf; then
+    log_already "Limpieza automática de /tmp"
+elif ask "¿Configurar limpieza automática de /tmp en cada boot?"; then
     cat > /etc/tmpfiles.d/tmp-clean.conf << 'EOF'
 # Limpiar /tmp en cada boot
 D /tmp 1777 root root 0
@@ -211,7 +231,9 @@ log_section "7. FORTALECER SUDO"
 # ============================================================
 
 if [[ -f /etc/sudoers ]]; then
-    if ! grep -q "Defaults.*timestamp_timeout" /etc/sudoers; then
+    if check_file_exists /etc/sudoers.d/99-hardening; then
+        log_already "Fortalecimiento de sudo"
+    elif ! grep -q "Defaults.*timestamp_timeout" /etc/sudoers; then
         if ask "¿Fortalecer configuración de sudo?"; then
             cp /etc/sudoers "$BACKUP_DIR/"
             log_change "Backup" "/etc/sudoers"
@@ -305,7 +327,9 @@ fi
 log_section "10. LIMITAR INFORMACIÓN DEL SISTEMA"
 # ============================================================
 
-if ask "¿Ocultar información del sistema (kernel, OS)?"; then
+if check_file_exists /etc/sysctl.d/99-hide-kernel.conf; then
+    log_already "Ocultar información del sistema"
+elif ask "¿Ocultar información del sistema (kernel, OS)?"; then
     # /etc/issue ya tiene banner personalizado
 
     # Ocultar versión del kernel en /proc
@@ -325,7 +349,9 @@ fi
 log_section "11. PROTECCIÓN DE MEMORIA ADICIONAL"
 # ============================================================
 
-if ask "¿Aplicar protecciones de memoria adicionales?"; then
+if check_file_exists /etc/sysctl.d/99-memory-hardening.conf; then
+    log_already "Protecciones de memoria adicionales"
+elif ask "¿Aplicar protecciones de memoria adicionales?"; then
     cat > /etc/sysctl.d/99-memory-hardening.conf << 'EOF'
 # Protección contra buffer overflows
 kernel.exec-shield = 1
@@ -360,7 +386,9 @@ fi
 log_section "12. CONFIGURAR LOGROTATE SEGURO"
 # ============================================================
 
-if ask "¿Configurar retención de logs extendida (1 año)?"; then
+if check_file_exists /etc/logrotate.d/security-logs; then
+    log_already "Retención de logs extendida (1 año)"
+elif ask "¿Configurar retención de logs extendida (1 año)?"; then
     cat > /etc/logrotate.d/security-logs << 'EOF'
 /var/log/secure
 /var/log/auth.log

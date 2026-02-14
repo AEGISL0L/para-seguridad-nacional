@@ -20,6 +20,16 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# --- Pre-check: verificar si ya está todo aplicado ---
+_precheck 5
+_pc 'check_executable /usr/local/bin/security-dashboard.sh'
+_pc 'check_executable /usr/local/bin/correlacionar-alertas.sh'
+_pc 'check_executable /usr/local/bin/security-baseline.sh'
+_pc 'check_executable /usr/local/bin/security-healthcheck.sh'
+_pc 'check_executable /usr/local/bin/security-digest.sh'
+_precheck_result
+
 MON_DIR="/var/lib/security-monitoring"
 mkdir -p "$MON_DIR"
 
@@ -44,7 +54,9 @@ echo "  - Alertas recientes de todas las fuentes"
 echo "  - Estado de integridad del sistema"
 echo ""
 
-if ask "¿Instalar dashboard de estado de seguridad?"; then
+if check_executable /usr/local/bin/security-dashboard.sh; then
+    log_already "Dashboard de estado de seguridad (security-dashboard.sh)"
+elif ask "¿Instalar dashboard de estado de seguridad?"; then
 
     cat > /usr/local/bin/security-dashboard.sh << 'EOFDASH'
 #!/bin/bash
@@ -285,7 +297,9 @@ echo "  - Descarga herramienta + ejecución sospechosa = malware"
 echo "  - Conexiones C2 + transferencia datos = exfiltración"
 echo ""
 
-if ask "¿Instalar motor de correlación de alertas?"; then
+if check_executable /usr/local/bin/correlacionar-alertas.sh; then
+    log_already "Motor de correlación de alertas (correlacionar-alertas.sh)"
+elif ask "¿Instalar motor de correlación de alertas?"; then
 
     cat > /usr/local/bin/correlacionar-alertas.sh << 'EOFCORR'
 #!/bin/bash
@@ -503,7 +517,9 @@ echo "  - Binarios SUID/SGID legítimos"
 echo "  - Conexiones salientes normales"
 echo ""
 
-if ask "¿Instalar baseline de comportamiento?"; then
+if check_executable /usr/local/bin/security-baseline.sh; then
+    log_already "Baseline de comportamiento del sistema (security-baseline.sh)"
+elif ask "¿Instalar baseline de comportamiento?"; then
 
     mkdir -p /var/lib/security-monitoring/baselines
     log_change "Creado" "/var/lib/security-monitoring/baselines/"
@@ -709,7 +725,9 @@ echo "Script que verifica periódicamente que todos los controles"
 echo "de seguridad están operativos y configurados correctamente."
 echo ""
 
-if ask "¿Instalar health check de controles?"; then
+if check_executable /usr/local/bin/security-healthcheck.sh; then
+    log_already "Health check de controles de seguridad (security-healthcheck.sh)"
+elif ask "¿Instalar health check de controles?"; then
 
     cat > /usr/local/bin/security-healthcheck.sh << 'EOFHC'
 #!/bin/bash
@@ -935,7 +953,9 @@ echo "la información de alertas, healthcheck, y estado del sistema"
 echo "en un único reporte legible."
 echo ""
 
-if ask "¿Instalar digest de seguridad periódico?"; then
+if check_executable /usr/local/bin/security-digest.sh; then
+    log_already "Digest de seguridad periódico (security-digest.sh)"
+elif ask "¿Instalar digest de seguridad periódico?"; then
 
     cat > /usr/local/bin/security-digest.sh << 'EOFDIGEST'
 #!/bin/bash

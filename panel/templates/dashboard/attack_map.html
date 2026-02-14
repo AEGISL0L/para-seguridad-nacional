@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}MITRE ATT&CK Map{% endblock %}
+{% block page_title %}MITRE ATT&CK - Mapa de Tecnicas Detectadas{% endblock %}
+
+{% block content %}
+<!-- Summary -->
+<div class="grid grid-3 mb-3">
+  <div class="card">
+    <div class="card-title">Tecnicas Detectadas</div>
+    <div class="card-value text-red">{{ total_techniques }}</div>
+    <div class="card-sub">Tecnicas ATT&CK unicas activadas</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Incidentes Analizados</div>
+    <div class="card-value text-blue">{{ total_incidents }}</div>
+    <div class="card-sub">Total de incidentes forenses</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Top Tecnica</div>
+    {% if top_techniques %}
+    <div class="card-value text-yellow" style="font-size:1rem">{{ top_techniques.0.0 }}</div>
+    <div class="card-sub">{{ top_techniques.0.1 }} detecciones</div>
+    {% else %}
+    <div class="card-value text-muted">-</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ATT&CK Heatmap -->
+{% for tactic, techniques in heatmap.items %}
+<div class="card mb-2">
+  <div class="section-title" style="color:{{ tactic|tactic_color }};border-bottom-color:{{ tactic|tactic_color }}">
+    {{ tactic }}
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:.6rem">
+    {% for t in techniques %}
+    <div style="flex:1 1 280px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:.8rem;border-left:3px solid {{ tactic|tactic_color }};position:relative">
+      <div class="flex justify-between items-center">
+        <div>
+          <span class="mono" style="font-size:.8rem;color:{{ tactic|tactic_color }};font-weight:700">{{ t.id }}</span>
+          <div style="font-size:.85rem;color:var(--text-bright);margin-top:.1rem">{{ t.name }}</div>
+        </div>
+        <div style="background:{{ tactic|tactic_color }};color:#0d1117;font-weight:700;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:.85rem">
+          {{ t.count }}
+        </div>
+      </div>
+      <!-- Heat bar -->
+      <div style="margin-top:.5rem;background:var(--bg-card);border-radius:3px;height:6px;overflow:hidden">
+        <div style="background:{{ tactic|tactic_color }};height:100%;width:{% widthratio t.count total_incidents 100 %}%;min-width:3px;border-radius:3px"></div>
+      </div>
+      {% if t.incidents %}
+      <div style="margin-top:.4rem;font-size:.75rem;color:var(--text-muted)">
+        {% for iid in t.incidents %}
+        <a href="{% url 'dashboard:incident_detail' iid %}" class="mono" style="margin-right:.4rem">{{ iid|truncatechars:25 }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% empty %}
+<div class="card">
+  <div class="empty-state">Sin tecnicas ATT&CK detectadas. Los incidentes se mapean automaticamente al framework MITRE.</div>
+</div>
+{% endfor %}
+
+<!-- Top Techniques Table -->
+{% if top_techniques %}
+<div class="card mt-2">
+  <div class="section-title">Top 10 Tecnicas por Frecuencia</div>
+  <table>
+    <thead><tr><th>Tecnica</th><th>Detecciones</th><th>Proporcion</th></tr></thead>
+    <tbody>
+    {% for tid, count in top_techniques %}
+    <tr>
+      <td class="mono text-blue">{{ tid }}</td>
+      <td class="text-yellow">{{ count }}</td>
+      <td>
+        <div style="background:var(--bg-primary);border-radius:4px;height:18px;width:100%;position:relative">
+          <div style="background:var(--red);border-radius:4px;height:100%;width:{% widthratio count total_incidents 100 %}%;min-width:3px"></div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

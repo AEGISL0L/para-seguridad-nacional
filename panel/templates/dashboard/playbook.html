@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Playbook{% endblock %}
+{% block page_title %}Playbook de Respuesta a Incidentes{% endblock %}
+
+{% block content %}
+<!-- Threat Level Banner -->
+<div class="card mb-3" style="border-color:{% if threat_level == 'CRITICAL' %}var(--red){% elif threat_level == 'HIGH' %}var(--orange){% elif threat_level == 'MEDIUM' %}var(--yellow){% else %}var(--green){% endif %};border-width:3px;text-align:center;padding:2rem">
+  <div class="card-title">Nivel de Amenaza Actual</div>
+  <div style="font-size:3rem;font-weight:800;color:{% if threat_level == 'CRITICAL' %}var(--red){% elif threat_level == 'HIGH' %}var(--orange){% elif threat_level == 'MEDIUM' %}var(--yellow){% else %}var(--green){% endif %}">{{ threat_level }}</div>
+  <div class="card-sub">Playbook generado: {{ playbook.generated }}</div>
+</div>
+
+<!-- Phase 1: Immediate Actions -->
+{% if immediate %}
+<div class="card mb-2" style="border-color:var(--red);border-width:2px">
+  <div class="section-title" style="color:var(--red)">1. Acciones Inmediatas</div>
+  {% for a in immediate %}
+  <div style="background:var(--red-bg);border-radius:6px;padding:.8rem;margin-bottom:.6rem">
+    <div style="font-weight:700;color:var(--text-bright)">{{ a.action }}</div>
+    <div class="text-muted" style="font-size:.85rem;margin:.3rem 0">{{ a.detail }}</div>
+    {% if a.command %}
+    <div class="code-block" style="max-height:none;padding:.5rem;font-size:.8rem;margin-top:.4rem">{{ a.command }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Phase 2: Containment -->
+{% if containment %}
+<div class="card mb-2" style="border-color:var(--orange);border-width:2px">
+  <div class="section-title" style="color:var(--orange)">2. Contencion</div>
+  {% for a in containment %}
+  <div style="background:rgba(209,134,22,.08);border-radius:6px;padding:.8rem;margin-bottom:.6rem">
+    <div style="font-weight:700;color:var(--text-bright)">{{ a.action }}</div>
+    <div class="text-muted" style="font-size:.85rem;margin:.3rem 0">{{ a.detail }}</div>
+    {% if a.command %}
+    <div class="code-block" style="max-height:none;padding:.5rem;font-size:.8rem;margin-top:.4rem">{{ a.command }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Phase 3: Investigation -->
+{% if investigation %}
+<div class="card mb-2" style="border-color:var(--blue);border-width:2px">
+  <div class="section-title" style="color:var(--blue)">3. Investigacion</div>
+  {% for a in investigation %}
+  <div style="background:var(--blue-bg);border-radius:6px;padding:.8rem;margin-bottom:.6rem">
+    <div style="font-weight:700;color:var(--text-bright)">{{ a.action }}</div>
+    <div class="text-muted" style="font-size:.85rem;margin:.3rem 0">{{ a.detail }}</div>
+    {% if a.command %}
+    <div class="code-block" style="max-height:none;padding:.5rem;font-size:.8rem;margin-top:.4rem">{{ a.command }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Phase 4: Hardening -->
+{% if hardening %}
+<div class="card mb-2" style="border-color:var(--green);border-width:2px">
+  <div class="section-title" style="color:var(--green)">4. Endurecimiento</div>
+  {% for a in hardening %}
+  <div style="background:var(--green-bg);border-radius:6px;padding:.8rem;margin-bottom:.6rem">
+    <div style="font-weight:700;color:var(--text-bright)">{{ a.action }}</div>
+    <div class="text-muted" style="font-size:.85rem;margin:.3rem 0">{{ a.detail }}</div>
+    {% if a.command %}
+    <div class="code-block" style="max-height:none;padding:.5rem;font-size:.8rem;margin-top:.4rem">{{ a.command }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Phase 5: Monitoring -->
+{% if monitoring %}
+<div class="card mb-2" style="border-color:var(--cyan);border-width:2px">
+  <div class="section-title" style="color:var(--cyan)">5. Monitorizacion Continua</div>
+  {% for a in monitoring %}
+  <div style="background:rgba(57,210,192,.08);border-radius:6px;padding:.8rem;margin-bottom:.6rem">
+    <div style="font-weight:700;color:var(--text-bright)">{{ a.action }}</div>
+    <div class="text-muted" style="font-size:.85rem;margin:.3rem 0">{{ a.detail }}</div>
+    {% if a.command %}
+    <div class="code-block" style="max-height:none;padding:.5rem;font-size:.8rem;margin-top:.4rem">{{ a.command }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card mt-2" style="text-align:center">
+  <div class="text-muted" style="font-size:.85rem">
+    Playbook generado automaticamente basado en el analisis de {{ playbook.threat_level }} incidentes forenses.
+    <br>Para compartir: <a href="{% url 'dashboard:api_export' %}?download=1" class="btn btn-sm btn-blue mt-1">Exportar JSON</a>
+    o via CLI: <code class="mono">honey-monitor.sh stix-export</code>
+  </div>
+</div>
+{% endblock %}

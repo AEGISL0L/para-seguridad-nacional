@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Django
+panel/db.sqlite3
+panel/.secret_key
+
+# Honeypot data (normally in ~/.config/securizar/, but just in case)
+honey-registry.conf
+honey-alerts.log
+honey-forensic.log
+honey-network.log
+evidence/
+
+# Sysctl generated config
+99-securizar-hardening.conf
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

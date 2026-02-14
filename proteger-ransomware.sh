@@ -23,6 +23,20 @@ require_root
 securizar_setup_traps
 init_backup "anti-ransomware"
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /usr/local/bin/desplegar-canary-ransomware.sh'
+_pc 'check_file_exists /usr/local/bin/gestionar-snapshot-ransomware.sh'
+_pc 'check_file_exists /usr/local/bin/verificar-whitelisting-ransomware.sh'
+_pc 'check_file_exists /usr/local/bin/analizar-cambios-masivos.sh'
+_pc 'check_file_exists /usr/local/bin/escanear-ransomware.sh'
+_pc 'check_file_exists /usr/local/bin/verificar-shares-ransomware.sh'
+_pc 'check_file_exists /usr/local/bin/gestionar-inmutabilidad-backup.sh'
+_pc 'check_file_exists /usr/local/bin/analizar-comportamiento-procesos.sh'
+_pc 'check_file_exists /usr/local/bin/respuesta-emergencia-ransomware.sh'
+_pc 'check_file_exists /usr/local/bin/auditar-anti-ransomware.sh'
+_precheck_result
+
 log_section "MODULO 60: PROTECCION ANTI-RANSOMWARE"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
@@ -59,7 +73,9 @@ log_info "  - Script de alerta con syslog + email + bloqueo"
 log_info "  - Configuracion en /etc/securizar/ransomware-canary.conf"
 log_info ""
 
-if ask "¿Desplegar archivos canary anti-ransomware?"; then
+if check_file_exists /usr/local/bin/desplegar-canary-ransomware.sh; then
+    log_already "Canary files anti-ransomware (desplegar-canary-ransomware.sh existe)"
+elif ask "¿Desplegar archivos canary anti-ransomware?"; then
 
     # Instalar inotify-tools si no esta disponible
     if ! command -v inotifywait &>/dev/null; then
@@ -743,7 +759,9 @@ log_info "  - Script de recuperacion desde snapshot"
 log_info "  - Timer systemd para ejecucion programada"
 log_info ""
 
-if ask "¿Configurar proteccion LVM snapshot anti-ransomware?"; then
+if check_file_exists /usr/local/bin/gestionar-snapshot-ransomware.sh; then
+    log_already "Proteccion LVM snapshot (gestionar-snapshot-ransomware.sh existe)"
+elif ask "¿Configurar proteccion LVM snapshot anti-ransomware?"; then
 
     # Verificar si hay LVM disponible
     LVM_AVAILABLE=false
@@ -1150,7 +1168,9 @@ log_info "  - Mount options noexec en directorios temporales"
 log_info "  - Reglas de ejecucion basadas en politicas"
 log_info ""
 
-if ask "¿Configurar whitelisting de ejecutables anti-ransomware?"; then
+if check_file_exists /usr/local/bin/verificar-whitelisting-ransomware.sh; then
+    log_already "Whitelisting de ejecutables (verificar-whitelisting-ransomware.sh existe)"
+elif ask "¿Configurar whitelisting de ejecutables anti-ransomware?"; then
 
     # --- Bloqueo de ejecucion desde /tmp, /dev/shm, /var/tmp ---
     log_info "Configurando bloqueo de ejecucion en directorios temporales..."
@@ -1472,7 +1492,9 @@ log_info "  - Script de analisis en tiempo real"
 log_info "  - Respuesta automatica ante deteccion"
 log_info ""
 
-if ask "¿Configurar monitoreo de cambios masivos de archivos?"; then
+if check_file_exists /usr/local/bin/analizar-cambios-masivos.sh; then
+    log_already "Monitoreo de cambios masivos (analizar-cambios-masivos.sh existe)"
+elif ask "¿Configurar monitoreo de cambios masivos de archivos?"; then
 
     # Verificar auditd
     if ! command -v auditctl &>/dev/null; then
@@ -1853,7 +1875,9 @@ log_info "  - Integracion con inotify para deteccion en tiempo real"
 log_info "  - Actualizacion de firmas"
 log_info ""
 
-if ask "¿Configurar deteccion por extensiones y YARA anti-ransomware?"; then
+if check_file_exists /usr/local/bin/escanear-ransomware.sh; then
+    log_already "Deteccion por extensiones y YARA (escanear-ransomware.sh existe)"
+elif ask "¿Configurar deteccion por extensiones y YARA anti-ransomware?"; then
 
     # Instalar YARA si no esta disponible
     if ! command -v yara &>/dev/null; then
@@ -2530,7 +2554,9 @@ log_info "  - Bloqueo de extensiones ransomware en shares"
 log_info "  - Restriccion de permisos en exports"
 log_info ""
 
-if ask "¿Configurar proteccion de shares de red anti-ransomware?"; then
+if check_file_exists /usr/local/bin/verificar-shares-ransomware.sh; then
+    log_already "Proteccion de shares de red (verificar-shares-ransomware.sh existe)"
+elif ask "¿Configurar proteccion de shares de red anti-ransomware?"; then
 
     # --- Proteccion SMB/Samba ---
     SMB_CONF="/etc/samba/smb.conf"
@@ -2805,7 +2831,9 @@ log_info "  - Script de verificacion de integridad de backups"
 log_info "  - Proteccion contra eliminacion accidental o maliciosa"
 log_info ""
 
-if ask "¿Configurar inmutabilidad de backups anti-ransomware?"; then
+if check_file_exists /usr/local/bin/gestionar-inmutabilidad-backup.sh; then
+    log_already "Inmutabilidad de backups (gestionar-inmutabilidad-backup.sh existe)"
+elif ask "¿Configurar inmutabilidad de backups anti-ransomware?"; then
 
     # --- Configuracion de inmutabilidad ---
     IMMUTABLE_CONF="${RANSOMWARE_CONF_DIR}/backup-immutability.conf"
@@ -3211,7 +3239,9 @@ log_info "  - Analisis de patrones de I/O de disco"
 log_info "  - Perfilado de comportamiento normal vs anomalo"
 log_info ""
 
-if ask "¿Configurar analisis de comportamiento de procesos anti-ransomware?"; then
+if check_file_exists /usr/local/bin/analizar-comportamiento-procesos.sh; then
+    log_already "Analisis de comportamiento de procesos (analizar-comportamiento-procesos.sh existe)"
+elif ask "¿Configurar analisis de comportamiento de procesos anti-ransomware?"; then
 
     # --- Configuracion de analisis de comportamiento ---
     BEHAVIOR_CONF="${RANSOMWARE_CONF_DIR}/process-behavior.conf"
@@ -3664,7 +3694,9 @@ log_info "  - Notificacion a administradores"
 log_info "  - Playbook de contencion completo"
 log_info ""
 
-if ask "¿Configurar respuesta de emergencia automatizada anti-ransomware?"; then
+if check_file_exists /usr/local/bin/respuesta-emergencia-ransomware.sh; then
+    log_already "Respuesta de emergencia (respuesta-emergencia-ransomware.sh existe)"
+elif ask "¿Configurar respuesta de emergencia automatizada anti-ransomware?"; then
 
     # --- Configuracion de respuesta de emergencia ---
     EMERGENCY_CONF="${RANSOMWARE_CONF_DIR}/emergency-response.conf"
@@ -4218,7 +4250,9 @@ log_info "  - Scoring: EXCELENTE/BUENO/MEJORABLE/DEFICIENTE"
 log_info "  - Cron semanal de auditoria"
 log_info ""
 
-if ask "¿Crear sistema de auditoria integral anti-ransomware?"; then
+if check_file_exists /usr/local/bin/auditar-anti-ransomware.sh; then
+    log_already "Auditoria integral anti-ransomware (auditar-anti-ransomware.sh existe)"
+elif ask "¿Crear sistema de auditoria integral anti-ransomware?"; then
 
     # --- Script de auditoria de controles ---
     log_info "Creando /usr/local/bin/auditar-anti-ransomware.sh..."

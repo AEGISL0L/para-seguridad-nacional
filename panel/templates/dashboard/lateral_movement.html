@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Movimiento Lateral{% endblock %}
+{% block page_title %}Deteccion de Movimiento Lateral{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{% url 'dashboard:index' %}">Dashboard</a> / Movimiento Lateral</div>
+
+<!-- Summary Cards -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Riesgo Lateral</div>
+    <div class="card-value {% if risk_score >= 60 %}text-red{% elif risk_score >= 30 %}text-yellow{% else %}text-green{% endif %}">{{ risk_score }}/100</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Actores Laterales</div>
+    <div class="card-value">{{ lateral_actors }}</div>
+    <div class="card-sub">de {{ total_actors }} actores totales</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Cadenas Detectadas</div>
+    <div class="card-value">{{ chains|length }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Patron Observado</div>
+    <div class="card-value" style="font-size:1.2rem">
+      {% if observed_pattern == 'lateral_movement' %}<span class="text-red">Mov. Lateral</span>
+      {% elif observed_pattern == 'credential_harvesting' %}<span class="text-yellow">Recoleccion</span>
+      {% elif observed_pattern == 'initial_access' %}<span class="text-blue">Acceso Inicial</span>
+      {% else %}<span class="text-muted">{{ observed_pattern }}</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if recommendations %}
+<!-- Recommendations -->
+<div class="section-title">Recomendaciones</div>
+<div class="card mb-3">
+  {% for r in recommendations %}
+  <div style="display:flex;gap:.8rem;padding:.5rem 0;{% if not forloop.last %}border-bottom:1px solid var(--border);{% endif %}">
+    <span class="badge {% if r.priority == 'CRITICAL' %}badge-red{% elif r.priority == 'HIGH' %}badge-orange{% elif r.priority == 'MEDIUM' %}badge-yellow{% else %}badge-blue{% endif %}" style="min-width:70px;justify-content:center">{{ r.priority }}</span>
+    <div>
+      <div style="font-weight:600;color:var(--text-bright)">{{ r.action }}</div>
+      <div class="text-muted" style="font-size:.85rem">{{ r.reason }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if predictions %}
+<!-- Predictions -->
+<div class="section-title">Predicciones: Proximo Objetivo</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>Tipo de Token</th><th>Confianza</th><th>Tactica</th><th>Barra</th></tr>
+    </thead>
+    <tbody>
+    {% for p in predictions %}
+      <tr>
+        <td><span class="badge badge-blue">{{ p.type }}</span></td>
+        <td class="{% if p.confidence >= 70 %}text-red{% elif p.confidence >= 40 %}text-yellow{% else %}text-muted{% endif %}" style="font-weight:700">{{ p.confidence }}%</td>
+        <td class="text-muted">{{ p.tactic }}</td>
+        <td style="width:200px">
+          <div style="background:var(--bg-primary);border-radius:4px;height:18px;overflow:hidden">
+            <div style="width:{{ p.confidence }}%;height:100%;background:{% if p.confidence >= 70 %}var(--red){% elif p.confidence >= 40 %}var(--yellow){% else %}var(--blue){% endif %};border-radius:4px;transition:width .3s"></div>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if compromised_sequence %}
+<!-- Compromised Sequence -->
+<div class="section-title">Secuencia de Compromiso</div>
+<div class="card mb-3">
+  <div class="flex flex-wrap gap-1" style="align-items:center">
+    {% for t in compromised_sequence %}
+    <span class="badge badge-red">{{ t }}</span>
+    {% if not forloop.last %}<span style="color:var(--text-muted)">&rarr;</span>{% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if cross_token_actors %}
+<!-- Cross-Token Actors -->
+<div class="section-title">Actores Multi-Token</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>Actor</th><th>Tokens</th><th>Accesos</th><th>Primera Vez</th><th>Ultima Vez</th><th>Duracion</th></tr>
+    </thead>
+    <tbody>
+    {% for a in cross_token_actors %}
+      <tr>
+        <td class="mono">{{ a.actor }}</td>
+        <td><span class="badge badge-red">{{ a.tokens_touched }}</span></td>
+        <td>{{ a.total_accesses }}</td>
+        <td class="mono text-muted">{{ a.first_seen|truncatechars:19 }}</td>
+        <td class="mono text-muted">{{ a.last_seen|truncatechars:19 }}</td>
+        <td class="mono">{{ a.duration_seconds|floatformat:0 }}s</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if chains %}
+<!-- Attack Chains -->
+<div class="section-title">Cadenas de Movimiento Lateral</div>
+{% for chain in chains %}
+<div class="card mb-2" style="border-left:3px solid var(--red)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+    <span style="font-weight:600;color:var(--text-bright)">{{ chain.actor }}</span>
+    <span class="badge badge-red">{{ chain.length }} pasos, {{ chain.unique_tokens }} tokens</span>
+  </div>
+  <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>#</th><th>Token</th><th>Tipo</th><th>Evento</th><th>Timestamp</th></tr></thead>
+      <tbody>
+      {% for step in chain.steps %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td class="mono"><a href="{% url 'dashboard:incident_detail' step.incident_id %}">{{ step.canary_id|truncatechars:12 }}</a></td>
+          <td><span class="badge badge-blue">{{ step.token_type }}</span></td>
+          <td>{{ step.event }}</td>
+          <td class="mono text-muted">{{ step.timestamp }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if not chains and not cross_token_actors %}
+<div class="empty-state">No se ha detectado movimiento lateral entre tokens.</div>
+{% endif %}
+
+{% endblock %}

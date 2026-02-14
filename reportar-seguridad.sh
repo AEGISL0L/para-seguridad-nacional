@@ -20,6 +20,16 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 5
+_pc 'check_file_exists "/usr/local/bin/reporte-mitre.sh"'
+_pc 'check_file_exists "/usr/local/bin/exportar-navigator.sh"'
+_pc 'check_file_exists "/usr/local/bin/reporte-cumplimiento.sh"'
+_pc 'check_file_exists "/usr/local/bin/inventario-seguridad.sh"'
+_pc 'check_file_exists "/usr/local/bin/resumen-ejecutivo.sh"'
+_precheck_result
+
 REPORT_DIR="/var/lib/security-reports"
 mkdir -p "$REPORT_DIR"
 
@@ -38,7 +48,9 @@ echo "Genera un reporte detallado de la cobertura del framework"
 echo "MITRE ATT&CK con el estado de cada técnica mitigada."
 echo ""
 
-if ask "¿Instalar generador de reporte MITRE ATT&CK?"; then
+if check_file_exists "/usr/local/bin/reporte-mitre.sh"; then
+    log_already "Reporte MITRE (reporte-mitre.sh ya instalado)"
+elif ask "¿Instalar generador de reporte MITRE ATT&CK?"; then
 
     cat > /usr/local/bin/reporte-mitre.sh << 'EOFMITRE'
 #!/bin/bash
@@ -256,7 +268,9 @@ echo "El archivo JSON se puede cargar en:"
 echo "  https://mitre-attack.github.io/attack-navigator/"
 echo ""
 
-if ask "¿Instalar exportador ATT&CK Navigator?"; then
+if check_file_exists "/usr/local/bin/exportar-navigator.sh"; then
+    log_already "Exportador Navigator (exportar-navigator.sh ya instalado)"
+elif ask "¿Instalar exportador ATT&CK Navigator?"; then
 
     cat > /usr/local/bin/exportar-navigator.sh << 'EOFNAV'
 #!/bin/bash
@@ -443,7 +457,9 @@ echo "Genera un reporte de cumplimiento evaluando cada control"
 echo "de seguridad contra su estado esperado."
 echo ""
 
-if ask "¿Instalar generador de reporte de cumplimiento?"; then
+if check_file_exists "/usr/local/bin/reporte-cumplimiento.sh"; then
+    log_already "Reporte cumplimiento (reporte-cumplimiento.sh ya instalado)"
+elif ask "¿Instalar generador de reporte de cumplimiento?"; then
 
     cat > /usr/local/bin/reporte-cumplimiento.sh << 'EOFCOMP'
 #!/bin/bash
@@ -573,7 +589,9 @@ echo "Genera un inventario completo de todos los scripts,"
 echo "reglas, timers y configuraciones de seguridad instalados."
 echo ""
 
-if ask "¿Instalar generador de inventario?"; then
+if check_file_exists "/usr/local/bin/inventario-seguridad.sh"; then
+    log_already "Inventario seguridad (inventario-seguridad.sh ya instalado)"
+elif ask "¿Instalar generador de inventario?"; then
 
     cat > /usr/local/bin/inventario-seguridad.sh << 'EOFINV'
 #!/bin/bash
@@ -769,7 +787,9 @@ echo "Genera un resumen ejecutivo de una página con el estado"
 echo "general de la postura de seguridad del sistema."
 echo ""
 
-if ask "¿Instalar generador de resumen ejecutivo?"; then
+if check_file_exists "/usr/local/bin/resumen-ejecutivo.sh"; then
+    log_already "Resumen ejecutivo (resumen-ejecutivo.sh ya instalado)"
+elif ask "¿Instalar generador de resumen ejecutivo?"; then
 
     cat > /usr/local/bin/resumen-ejecutivo.sh << 'EOFEXEC'
 #!/bin/bash
@@ -943,3 +963,4 @@ echo ""
 echo -e "${BOLD}Reportes guardados en:${NC} /var/lib/security-reports/"
 echo ""
 log_info "Módulo de reportes de seguridad completado"
+show_changes_summary

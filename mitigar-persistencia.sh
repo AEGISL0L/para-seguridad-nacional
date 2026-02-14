@@ -23,6 +23,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-persistencia"
 securizar_setup_traps
+
+_precheck 7
+_pc 'check_file_exists /etc/audit/rules.d/persistence-cron.rules'
+_pc 'check_file_exists /etc/audit/rules.d/persistence-systemd.rules'
+_pc 'check_file_exists /etc/audit/rules.d/persistence-autostart.rules'
+_pc 'check_file_exists /etc/audit/rules.d/persistence-accounts.rules'
+_pc 'check_file_exists /etc/audit/rules.d/persistence-auth.rules'
+_pc true  # S6: hijack execution flow (detección)
+_pc 'check_executable /usr/local/bin/detectar-persistencia.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE PERSISTENCIA - TA0003                     ║"
@@ -73,7 +84,9 @@ systemctl list-unit-files --type=timer 2>/dev/null | grep -v "^$" | grep -vE "^U
     fi
 done || true
 
-if ask "¿Configurar monitoreo de cambios en tareas programadas?"; then
+if check_file_exists /etc/audit/rules.d/persistence-cron.rules; then
+    log_already "Monitoreo de tareas programadas (persistence-cron.rules)"
+elif ask "¿Configurar monitoreo de cambios en tareas programadas?"; then
     if command -v auditctl &>/dev/null; then
         mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-cron.rules << 'EOF'
@@ -140,7 +153,9 @@ if [[ $CUSTOM_SERVICES -eq 0 ]]; then
 fi
 
 echo ""
-if ask "¿Configurar monitoreo de cambios en servicios systemd?"; then
+if check_file_exists /etc/audit/rules.d/persistence-systemd.rules; then
+    log_already "Monitoreo de servicios systemd (persistence-systemd.rules)"
+elif ask "¿Configurar monitoreo de cambios en servicios systemd?"; then
     if command -v auditctl &>/dev/null; then
         mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-systemd.rules << 'EOF'
@@ -226,7 +241,9 @@ if [[ -f /etc/rc.local ]] && [[ -s /etc/rc.local ]]; then
 fi
 
 echo ""
-if ask "¿Configurar monitoreo de scripts de autostart?"; then
+if check_file_exists /etc/audit/rules.d/persistence-autostart.rules; then
+    log_already "Monitoreo de scripts de autostart (persistence-autostart.rules)"
+elif ask "¿Configurar monitoreo de scripts de autostart?"; then
     if command -v auditctl &>/dev/null; then
         mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-autostart.rules << 'EOF'
@@ -299,7 +316,9 @@ done < /etc/shadow 2>/dev/null
 [[ $EMPTY_PASS -eq 0 ]] && echo -e "  ${GREEN}OK${NC} No se detectan cuentas con contraseñas débiles"
 
 echo ""
-if ask "¿Configurar monitoreo de creación/modificación de cuentas?"; then
+if check_file_exists /etc/audit/rules.d/persistence-accounts.rules; then
+    log_already "Monitoreo de cuentas (persistence-accounts.rules)"
+elif ask "¿Configurar monitoreo de creación/modificación de cuentas?"; then
     if command -v auditctl &>/dev/null; then
         mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-accounts.rules << 'EOF'
@@ -375,7 +394,9 @@ for home_dir in /root /home/*; do
 done
 
 echo ""
-if ask "¿Configurar monitoreo de autenticación?"; then
+if check_file_exists /etc/audit/rules.d/persistence-auth.rules; then
+    log_already "Monitoreo de autenticación (persistence-auth.rules)"
+elif ask "¿Configurar monitoreo de autenticación?"; then
     if command -v auditctl &>/dev/null; then
         mkdir -p /etc/audit/rules.d
         cat > /etc/audit/rules.d/persistence-auth.rules << 'EOF'
@@ -463,7 +484,9 @@ done || echo -e "  ${DIM}readelf no disponible${NC}"
 log_section "7. SCRIPT DE DETECCIÓN DE PERSISTENCIA"
 # ============================================================
 
-if ask "¿Crear script de detección periódica de persistencia?"; then
+if check_executable /usr/local/bin/detectar-persistencia.sh; then
+    log_already "Script de detección de persistencia (/usr/local/bin/detectar-persistencia.sh)"
+elif ask "¿Crear script de detección periódica de persistencia?"; then
     cat > /usr/local/bin/detectar-persistencia.sh << 'PERSIST_EOF'
 #!/bin/bash
 # ============================================================
@@ -542,7 +565,9 @@ PERSIST_EOF
     log_info "Script creado: /usr/local/bin/detectar-persistencia.sh"
 
     # Programar ejecución diaria
-    if ask "¿Programar detección de persistencia diaria (cron)?"; then
+    if check_executable /etc/cron.daily/detectar-persistencia; then
+        log_already "Detección diaria de persistencia (cron)"
+    elif ask "¿Programar detección de persistencia diaria (cron)?"; then
         cat > /etc/cron.daily/detectar-persistencia << 'DCRON_EOF'
 #!/bin/bash
 /usr/local/bin/detectar-persistencia.sh > /dev/null 2>&1

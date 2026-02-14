@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+{% block title %}Analytics{% endblock %}
+{% block page_title %}Deception Platform Analytics{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{% url 'dashboard:index' %}">Dashboard</a> / Analytics</div>
+
+<!-- Health & Effectiveness -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Salud Plataforma</div>
+    <div class="card-value {% if health >= 80 %}text-green{% elif health >= 50 %}text-yellow{% else %}text-red{% endif %}">{{ health }}/100</div>
+    <div class="card-sub">Puntuacion global de salud</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Efectividad</div>
+    <div class="card-value {% if effectiveness >= 60 %}text-green{% elif effectiveness >= 30 %}text-yellow{% else %}text-red{% endif %}">{{ effectiveness }}/100</div>
+    <div class="card-sub">{{ roi.unique_actors }} actores, {{ roi.mitre_techniques }} tecnicas MITRE</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tendencia 7d</div>
+    <div class="card-value {% if trend_direction == 'up' %}text-red{% elif trend_direction == 'down' %}text-green{% else %}text-muted{% endif %}">
+      {% if trend_direction == 'up' %}&uarr;{% elif trend_direction == 'down' %}&darr;{% else %}&harr;{% endif %} {{ trend_pct }}%
+    </div>
+    <div class="card-sub">{{ summary.last_7d }} esta semana vs {{ summary.prev_7d }} anterior</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alerta Temprana</div>
+    <div class="card-value" style="font-size:1.1rem">
+      <span class="badge {% if warning_level == 'CRITICAL' %}badge-red{% elif warning_level == 'HIGH' %}badge-orange{% elif warning_level == 'MEDIUM' %}badge-yellow{% else %}badge-blue{% endif %}">{{ warning_level }}</span>
+    </div>
+    <div class="card-sub" style="font-size:.78rem">{{ warning_desc|truncatechars:80 }}</div>
+  </div>
+</div>
+
+<!-- Key Metrics Row -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Incidentes Hoy</div>
+    <div class="card-value">{{ summary.last_24h }}</div>
+    <div class="card-sub">{{ summary.daily_rate }}/dia (media)</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Threat Score Medio</div>
+    <div class="card-value" style="color:{{ summary.mean_threat_score|threat_color }}">{{ summary.mean_threat_score }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Hit Rate</div>
+    <div class="card-value">{{ summary.hit_rate_pct }}%</div>
+    <div class="card-sub">{{ roi.tokens_deployed }} tokens desplegados</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Ratio Alerta/Incidente</div>
+    <div class="card-value {% if summary.alert_incident_ratio > 10 %}text-yellow{% else %}text-green{% endif %}">{{ summary.alert_incident_ratio }}:1</div>
+    <div class="card-sub">{% if summary.alert_incident_ratio > 10 %}Ruido alto{% else %}Ratio saludable{% endif %}</div>
+  </div>
+</div>
+
+<!-- Dwell Time Analysis -->
+<div class="section-title">Analisis de Dwell Time (Tiempo de Permanencia)</div>
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Dwell Minimo</div>
+    <div class="card-value text-green">{{ dwell_overall.min_human }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Dwell Medio</div>
+    <div class="card-value text-yellow">{{ dwell_overall.mean_human }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Dwell Mediana</div>
+    <div class="card-value text-blue">{{ dwell_overall.median_human }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Dwell Maximo</div>
+    <div class="card-value text-red">{{ dwell_overall.max_human }}</div>
+  </div>
+</div>
+
+{% if detection_latency %}
+<!-- Detection Latency -->
+<div class="section-title">Latencia de Deteccion</div>
+<div class="card mb-3">
+  <p class="text-muted mb-2">Tiempo desde el despliegue del token hasta la primera deteccion de acceso.</p>
+  <div class="grid grid-3">
+    <div>
+      <div class="card-title">Media</div>
+      <div style="font-size:1.3rem;font-weight:700">{{ detection_latency.mean_human }}</div>
+    </div>
+    <div>
+      <div class="card-title">Mediana</div>
+      <div style="font-size:1.3rem;font-weight:700">{{ detection_latency.median_human }}</div>
+    </div>
+    <div>
+      <div class="card-title">Muestras</div>
+      <div style="font-size:1.3rem;font-weight:700">{{ detection_latency.samples }} tokens</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Threat Level Distribution -->
+{% if threat_levels %}
+<div class="grid grid-2 mb-3">
+  <div class="card">
+    <div class="section-title">Distribucion de Amenazas</div>
+    {% for level, count in threat_levels.items %}
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+      <span class="badge {% if level == 'CRITICAL' %}badge-red{% elif level == 'HIGH' %}badge-orange{% elif level == 'MEDIUM' %}badge-yellow{% else %}badge-blue{% endif %}" style="min-width:70px;justify-content:center">{{ level }}</span>
+      <div style="flex:1;background:var(--bg-primary);border-radius:4px;height:18px;overflow:hidden">
+        <div style="width:{% widthratio count summary.total_incidents 100 %}%;height:100%;background:{% if level == 'CRITICAL' %}var(--red){% elif level == 'HIGH' %}var(--orange){% elif level == 'MEDIUM' %}var(--yellow){% else %}var(--blue){% endif %};border-radius:4px"></div>
+      </div>
+      <span class="text-muted mono" style="min-width:40px;text-align:right">{{ count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card">
+    <div class="section-title">Top Tipos de Token Atacados</div>
+    {% for type, count in type_hits.items %}
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+      <span class="badge badge-blue" style="min-width:100px">{{ type }}</span>
+      <div style="flex:1;background:var(--bg-primary);border-radius:4px;height:18px;overflow:hidden">
+        <div style="width:{% widthratio count summary.total_incidents 100 %}%;height:100%;background:var(--blue);border-radius:4px"></div>
+      </div>
+      <span class="text-muted mono" style="min-width:40px;text-align:right">{{ count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Top Actors by Dwell Time -->
+{% if top_actors %}
+<div class="section-title">Top Actores por Dwell Time</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>Actor</th><th>Dwell Time</th><th>Eventos</th><th>Primera Vez</th><th>Ultima Vez</th></tr>
+    </thead>
+    <tbody>
+    {% for a in top_actors %}
+      <tr>
+        <td class="mono">{{ a.actor|truncatechars:40 }}</td>
+        <td style="font-weight:700;{% if a.dwell_seconds > 3600 %}color:var(--red){% elif a.dwell_seconds > 600 %}color:var(--yellow){% else %}color:var(--green){% endif %}">{{ a.dwell_human }}</td>
+        <td>{{ a.event_count }}</td>
+        <td class="mono text-muted">{{ a.first_seen|truncatechars:19 }}</td>
+        <td class="mono text-muted">{{ a.last_seen|truncatechars:19 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Event Distribution -->
+{% if event_dist %}
+<div class="section-title">Distribucion de Eventos</div>
+<div class="card mb-3">
+  <div class="flex flex-wrap gap-2">
+    {% for event, count in event_dist.items %}
+    <div style="text-align:center;padding:.5rem 1rem;background:var(--bg-primary);border-radius:6px;border:1px solid var(--border)">
+      <div style="font-size:1.5rem;font-weight:700;{% if 'DELETE' in event %}color:var(--red){% elif 'MODIFY' in event %}color:var(--yellow){% elif 'ACCESS' in event or 'OPEN' in event %}color:var(--blue){% else %}color:var(--text){% endif %}">{{ count }}</div>
+      <div class="text-muted" style="font-size:.8rem">{{ event }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ROI Summary -->
+<div class="section-title">ROI de la Plataforma</div>
+<div class="card mb-3">
+  <div class="grid grid-3">
+    <div style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--green)">{{ roi.unique_actors }}</div>
+      <div class="text-muted">Actores unicos detectados</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--blue)">{{ roi.unique_ips }}</div>
+      <div class="text-muted">IPs unicas capturadas</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--purple)">{{ roi.total_evidence_files }}</div>
+      <div class="text-muted">Archivos de evidencia</div>
+    </div>
+  </div>
+  <div class="mt-2" style="padding-top:.8rem;border-top:1px solid var(--border)">
+    <div class="text-muted" style="font-size:.85rem">
+      MITRE ATT&CK: {{ roi.mitre_techniques }} tecnicas detectadas
+      {% if roi.technique_list %} ({{ roi.technique_list|join:", " }}){% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

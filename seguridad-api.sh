@@ -24,6 +24,20 @@ require_root
 securizar_setup_traps
 init_backup "api-security"
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /etc/securizar/api-rate-limits.conf'
+_pc 'check_file_exists /etc/securizar/api-auth-policy.conf'
+_pc 'check_file_exists /etc/securizar/api-input-validation.conf'
+_pc 'check_file_exists /usr/local/bin/auditar-headers-api.sh'
+_pc 'check_file_exists /etc/securizar/api-gateway/nginx-api-gateway.conf'
+_pc 'check_file_exists /usr/local/bin/auditar-graphql.sh'
+_pc 'check_file_exists /usr/local/bin/verificar-webhooks.sh'
+_pc 'check_file_exists /usr/local/bin/gestionar-mtls.sh'
+_pc 'check_file_exists /usr/local/bin/analizar-logs-api.sh'
+_pc 'check_file_exists /usr/local/bin/auditar-seguridad-api.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 63 - SEGURIDAD DE APIs                          ║"
@@ -102,7 +116,9 @@ log_info "  - Config centralizada en /etc/securizar/api-rate-limits.conf"
 log_info "  - Script /usr/local/bin/configurar-rate-limit.sh"
 echo ""
 
-if ask "¿Configurar rate limiting y throttling para APIs?"; then
+if check_file_exists /etc/securizar/api-rate-limits.conf; then
+    log_already "Rate limiting y throttling (api-rate-limits.conf existe)"
+elif ask "¿Configurar rate limiting y throttling para APIs?"; then
 
     # ── Config centralizada de rate limits ────────────────────
     RATE_CONF="/etc/securizar/api-rate-limits.conf"
@@ -648,7 +664,9 @@ log_info "  - Gestion de API keys (rotacion, hashing)"
 log_info "  - Politica de autenticacion en /etc/securizar/api-auth-policy.conf"
 echo ""
 
-if ask "¿Configurar hardening de autenticacion de APIs?"; then
+if check_file_exists /etc/securizar/api-auth-policy.conf; then
+    log_already "API authentication hardening (api-auth-policy.conf existe)"
+elif ask "¿Configurar hardening de autenticacion de APIs?"; then
 
     # ── Politica de autenticacion ────────────────────────────
     AUTH_POLICY="/etc/securizar/api-auth-policy.conf"
@@ -993,7 +1011,9 @@ log_info "  - Template OpenAPI/Swagger"
 log_info "  - Limites de tamano y content-type"
 echo ""
 
-if ask "¿Configurar input validation y schema enforcement?"; then
+if check_file_exists /etc/securizar/api-input-validation.conf; then
+    log_already "Input validation y schema enforcement (api-input-validation.conf existe)"
+elif ask "¿Configurar input validation y schema enforcement?"; then
 
     # ── Configuracion de validacion ──────────────────────────
     VALIDATION_CONF="/etc/securizar/api-input-validation.conf"
@@ -1485,7 +1505,9 @@ log_info "  - X-Content-Type-Options, X-Frame-Options, HSTS"
 log_info "  - Script de auditoria de cabeceras"
 echo ""
 
-if ask "¿Configurar CORS y security headers para APIs?"; then
+if check_file_exists /usr/local/bin/auditar-headers-api.sh; then
+    log_already "CORS y security headers (auditar-headers-api.sh existe)"
+elif ask "¿Configurar CORS y security headers para APIs?"; then
 
     # ── Nginx CORS y headers ─────────────────────────────────
     if [[ "$NGINX_INSTALLED" == true ]]; then
@@ -1866,7 +1888,9 @@ log_info "  - HAProxy: health checks, connection limits, SSL offloading"
 log_info "  - Templates en /etc/securizar/api-gateway/"
 echo ""
 
-if ask "¿Configurar hardening de API gateway?"; then
+if check_file_exists /etc/securizar/api-gateway/nginx-api-gateway.conf; then
+    log_already "API gateway hardening (nginx-api-gateway.conf existe)"
+elif ask "¿Configurar hardening de API gateway?"; then
 
     mkdir -p /etc/securizar/api-gateway
 
@@ -2073,14 +2097,14 @@ global
 
     # SSL hardening
     ssl-default-bind-ciphers ECDHE+AESGCM:ECDHE+CHACHA20POLY1305:!aNULL:!MD5:!3DES:!RC4
-    ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-bind-ciphersuites TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256
     ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
     ssl-default-server-ciphers ECDHE+AESGCM:ECDHE+CHACHA20POLY1305:!aNULL:!MD5
     ssl-default-server-options ssl-min-ver TLSv1.2 no-tls-tickets
 
     # Tuning
     maxconn 10000
-    tune.ssl.default-dh-param 2048
+    tune.ssl.default-dh-param 4096
 
 defaults
     log     global
@@ -2207,7 +2231,9 @@ log_info "  - Persisted queries enforcement"
 log_info "  - Script de auditoria GraphQL"
 echo ""
 
-if ask "¿Configurar seguridad GraphQL?"; then
+if check_file_exists /usr/local/bin/auditar-graphql.sh; then
+    log_already "GraphQL security (auditar-graphql.sh existe)"
+elif ask "¿Configurar seguridad GraphQL?"; then
 
     # ── Politica GraphQL ─────────────────────────────────────
     GQL_POLICY="/etc/securizar/graphql-policy.conf"
@@ -2496,7 +2522,9 @@ log_info "  - IP whitelist para webhook sources"
 log_info "  - Ejemplos para GitHub, Stripe, Slack"
 echo ""
 
-if ask "¿Configurar verificacion de webhooks?"; then
+if check_file_exists /usr/local/bin/verificar-webhooks.sh; then
+    log_already "Webhook signature verification (verificar-webhooks.sh existe)"
+elif ask "¿Configurar verificacion de webhooks?"; then
 
     # ── Script de verificacion de webhooks ────────────────────
     WEBHOOK_SCRIPT="/usr/local/bin/verificar-webhooks.sh"
@@ -2855,7 +2883,9 @@ log_info "  - CRL (Certificate Revocation List)"
 log_info "  - Templates de configuracion nginx/HAProxy"
 echo ""
 
-if ask "¿Configurar mTLS para microservicios?"; then
+if check_file_exists /usr/local/bin/gestionar-mtls.sh; then
+    log_already "mTLS para microservicios (gestionar-mtls.sh existe)"
+elif ask "¿Configurar mTLS para microservicios?"; then
 
     # ── Politica mTLS ────────────────────────────────────────
     MTLS_POLICY="/etc/securizar/mtls-policy.conf"
@@ -3334,7 +3364,9 @@ log_info "  - Rotacion de logs"
 log_info "  - Script de analisis de anomalias"
 echo ""
 
-if ask "¿Configurar API logging y audit trails?"; then
+if check_file_exists /usr/local/bin/analizar-logs-api.sh; then
+    log_already "API logging y audit trails (analizar-logs-api.sh existe)"
+elif ask "¿Configurar API logging y audit trails?"; then
 
     # ── Configuracion de logging ─────────────────────────────
     LOG_CONF="/etc/securizar/api-logging.conf"
@@ -3678,7 +3710,9 @@ log_info "  - Cron semanal"
 log_info "  - Politica global /etc/securizar/api-security-policy.conf"
 echo ""
 
-if ask "¿Configurar auditoria integral de seguridad API?"; then
+if check_file_exists /usr/local/bin/auditar-seguridad-api.sh; then
+    log_already "Auditoria integral de seguridad API (auditar-seguridad-api.sh existe)"
+elif ask "¿Configurar auditoria integral de seguridad API?"; then
 
     # ── Politica global ──────────────────────────────────────
     GLOBAL_POLICY="/etc/securizar/api-security-policy.conf"

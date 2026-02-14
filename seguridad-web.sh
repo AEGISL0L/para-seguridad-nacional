@@ -15,13 +15,28 @@
 #   S10 - Auditoria de seguridad web
 # ============================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /etc/nginx/conf.d/securizar-hardening.conf'
+_pc true  # S2 - Apache hardening (depende de distro_family)
+_pc 'check_executable /usr/local/bin/verificar-headers-seguridad.sh'
+_pc 'check_executable /usr/local/bin/gestionar-modsecurity.sh'
+_pc 'check_executable /usr/local/bin/verificar-tls-web.sh'
+_pc 'check_executable /usr/local/bin/detectar-ddos-web.sh'
+_pc 'check_dir_exists /etc/securizar/waf-custom-rules'
+_pc 'check_executable /usr/local/bin/configurar-acceso-web.sh'
+_pc 'check_executable /usr/local/bin/monitorizar-web.sh'
+_pc 'check_executable /usr/local/bin/auditoria-seguridad-web.sh'
+_precheck_result
+
 init_backup "seguridad-web"
 
 echo ""
@@ -84,7 +99,9 @@ echo "  - DH params 4096-bit"
 echo ""
 
 if [[ "$NGINX_INSTALLED" == true ]]; then
-    if ask "¿Aplicar hardening de nginx?"; then
+    if check_file_exists /etc/nginx/conf.d/securizar-hardening.conf; then
+        log_already "Hardening de nginx (configuracion ya existe)"
+    elif ask "¿Aplicar hardening de nginx?"; then
 
         # Backup de configuracion actual
         if [[ -d "$NGINX_CONF_DIR" ]]; then
@@ -236,7 +253,9 @@ echo "  - Deshabilitar mod_info/mod_status en produccion"
 echo ""
 
 if [[ "$APACHE_INSTALLED" == true ]]; then
-    if ask "¿Aplicar hardening de Apache?"; then
+    if check_file_exists /etc/apache2/conf-available/securizar-hardening.conf || check_file_exists /etc/httpd/conf.d/securizar-hardening.conf; then
+        log_already "Hardening de Apache (configuracion ya existe)"
+    elif ask "¿Aplicar hardening de Apache?"; then
 
         # Backup de configuracion
         if [[ -d "$APACHE_CONF_DIR" ]]; then
@@ -423,7 +442,9 @@ echo "  - Permissions-Policy (camera, microphone, geolocation)"
 echo "  - Script verificador de cabeceras"
 echo ""
 
-if ask "¿Configurar cabeceras de seguridad HTTP?"; then
+if check_executable /usr/local/bin/verificar-headers-seguridad.sh; then
+    log_already "Cabeceras de seguridad HTTP (verificador ya instalado)"
+elif ask "¿Configurar cabeceras de seguridad HTTP?"; then
 
     # Snippet para nginx
     if [[ "$NGINX_INSTALLED" == true ]]; then
@@ -637,7 +658,9 @@ echo "  - Configuracion de exclusiones de falsos positivos"
 echo "  - Script de gestion de ModSecurity"
 echo ""
 
-if ask "¿Instalar y configurar ModSecurity WAF?"; then
+if check_executable /usr/local/bin/gestionar-modsecurity.sh; then
+    log_already "ModSecurity WAF (script gestion ya instalado)"
+elif ask "¿Instalar y configurar ModSecurity WAF?"; then
 
     MODSEC_CONF_DIR="/etc/modsecurity"
     MODSEC_CRS_DIR="/etc/modsecurity/crs"
@@ -1080,7 +1103,9 @@ echo "  - Rotacion de session tickets"
 echo "  - Script verificador de TLS"
 echo ""
 
-if ask "¿Optimizar y verificar TLS/SSL?"; then
+if check_executable /usr/local/bin/verificar-tls-web.sh; then
+    log_already "Optimizacion TLS/SSL (verificador ya instalado)"
+elif ask "¿Optimizar y verificar TLS/SSL?"; then
 
     mkdir -p /etc/securizar/tls
 
@@ -1353,7 +1378,9 @@ echo "  - Proteccion SYN flood (sysctl)"
 echo "  - Script detector de DDoS"
 echo ""
 
-if ask "¿Configurar rate limiting y proteccion DDoS?"; then
+if check_executable /usr/local/bin/detectar-ddos-web.sh; then
+    log_already "Rate limiting y proteccion DDoS (script ya instalado)"
+elif ask "¿Configurar rate limiting y proteccion DDoS?"; then
 
     mkdir -p /etc/securizar
 
@@ -1680,7 +1707,9 @@ echo "  - Bloquear rutas de exploits comunes (.env, .git, wp-admin...)"
 echo "  - Plantilla de restricciones geograficas"
 echo ""
 
-if ask "¿Configurar reglas WAF personalizadas?"; then
+if check_dir_exists /etc/securizar/waf-custom-rules; then
+    log_already "Reglas WAF personalizadas (directorio ya existe)"
+elif ask "¿Configurar reglas WAF personalizadas?"; then
 
     WAF_RULES_DIR="/etc/securizar/waf-custom-rules"
     mkdir -p "$WAF_RULES_DIR"
@@ -1909,7 +1938,9 @@ echo "  - Plantilla de autenticacion con certificado cliente"
 echo "  - Script de configuracion de acceso"
 echo ""
 
-if ask "¿Configurar control de acceso y autenticacion web?"; then
+if check_executable /usr/local/bin/configurar-acceso-web.sh; then
+    log_already "Control de acceso y autenticacion web (script ya instalado)"
+elif ask "¿Configurar control de acceso y autenticacion web?"; then
 
     mkdir -p /etc/securizar/web-auth
 
@@ -2242,7 +2273,9 @@ echo "  - Analizador de logs: fuerza bruta, SQLi, XSS, LFI/RFI"
 echo "  - Deteccion de patrones de ataque"
 echo ""
 
-if ask "¿Configurar monitorizacion y analisis de logs web?"; then
+if check_executable /usr/local/bin/monitorizar-web.sh; then
+    log_already "Monitorizacion y analisis de logs web (script ya instalado)"
+elif ask "¿Configurar monitorizacion y analisis de logs web?"; then
 
     # Script de monitorizacion web
     cat > /usr/local/bin/monitorizar-web.sh << 'EOFSCRIPT'
@@ -2658,7 +2691,9 @@ echo "  - Cumplimiento OWASP"
 echo "  - Puntuacion: BUENO/MEJORABLE/DEFICIENTE"
 echo ""
 
-if ask "¿Crear herramienta de auditoria de seguridad web?"; then
+if check_executable /usr/local/bin/auditoria-seguridad-web.sh; then
+    log_already "Auditoria de seguridad web (script ya instalado)"
+elif ask "¿Crear herramienta de auditoria de seguridad web?"; then
 
     cat > /usr/local/bin/auditoria-seguridad-web.sh << 'EOFSCRIPT'
 #!/bin/bash

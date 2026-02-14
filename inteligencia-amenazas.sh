@@ -26,6 +26,19 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# --- Pre-check: verificar si ya está todo aplicado ---
+_precheck 8
+_pc 'command -v ipset &>/dev/null && command -v jq &>/dev/null && command -v curl &>/dev/null && command -v wget &>/dev/null'
+_pc 'check_dir_exists /etc/threat-intelligence/config'
+_pc 'check_file_exists /etc/threat-intelligence/lists/malicious-ips.txt'
+_pc 'check_file_exists /etc/threat-intelligence/lists/malicious-domains.txt'
+_pc 'check_file_exists /etc/systemd/system/threat-intel-ipset.service'
+_pc true
+_pc 'check_executable /usr/local/bin/ioc-lookup.sh'
+_pc 'check_executable /usr/local/bin/threat-intel-update.sh'
+_precheck_result
+
 IOC_DIR="/etc/threat-intelligence"
 IOC_FEEDS_DIR="$IOC_DIR/feeds"
 IOC_LISTS_DIR="$IOC_DIR/lists"
@@ -98,7 +111,9 @@ echo "  ├── lists/        (listas procesadas para uso)"
 echo "  └── config/       (configuración de feeds)"
 echo ""
 
-if ask "¿Crear estructura de directorios para IoC?"; then
+if check_dir_exists /etc/threat-intelligence/config; then
+    log_already "Estructura de directorios para IoC (/etc/threat-intelligence/)"
+elif ask "¿Crear estructura de directorios para IoC?"; then
     mkdir -p "$IOC_FEEDS_DIR"
     mkdir -p "$IOC_LISTS_DIR"
     mkdir -p "$IOC_DIR/config"
@@ -166,7 +181,9 @@ echo "  - Redes secuestradas (hijacked)"
 echo "  - Nodos de salida Tor (opcional)"
 echo ""
 
-if ask "¿Descargar feeds de IPs maliciosas?"; then
+if check_file_exists /etc/threat-intelligence/lists/malicious-ips.txt; then
+    log_already "Feeds de IPs maliciosas (malicious-ips.txt)"
+elif ask "¿Descargar feeds de IPs maliciosas?"; then
     mkdir -p "$IOC_FEEDS_DIR" "$IOC_LISTS_DIR"
     IP_COUNT=0
 
@@ -295,7 +312,9 @@ echo "  - Phishing"
 echo "  - Command & Control"
 echo ""
 
-if ask "¿Descargar feeds de dominios/URLs maliciosos?"; then
+if check_file_exists /etc/threat-intelligence/lists/malicious-domains.txt; then
+    log_already "Feeds de dominios/URLs maliciosos (malicious-domains.txt)"
+elif ask "¿Descargar feeds de dominios/URLs maliciosos?"; then
     mkdir -p "$IOC_FEEDS_DIR" "$IOC_LISTS_DIR"
 
     # URLhaus - URLs de malware activas
@@ -335,7 +354,9 @@ echo -e "${YELLOW}Nota:${NC} Solo se bloquearán IPs de fuentes verificadas (DRO
 echo "No se bloquearán automáticamente nodos Tor (decisión del usuario)."
 echo ""
 
-if ask "¿Configurar bloqueo automático con firewalld/ipset?"; then
+if check_file_exists /etc/systemd/system/threat-intel-ipset.service; then
+    log_already "Bloqueo automático con firewalld/ipset (threat-intel-ipset.service)"
+elif ask "¿Configurar bloqueo automático con firewalld/ipset?"; then
     if ! command -v ipset &>/dev/null; then
         log_error "ipset no instalado. Ejecuta primero la sección S1."
     elif ! fw_is_active &>/dev/null; then
@@ -453,7 +474,9 @@ if command -v suricata &>/dev/null; then
     echo -e "  ${GREEN}OK${NC} Suricata detectado"
     echo ""
 
-    if ask "¿Crear reglas de Suricata basadas en feeds de IoC?"; then
+    if check_file_exists /var/lib/suricata/rules/threat-intel-ioc.rules; then
+        log_already "Reglas de Suricata basadas en feeds de IoC (threat-intel-ioc.rules)"
+    elif ask "¿Crear reglas de Suricata basadas en feeds de IoC?"; then
         SURICATA_RULES_DIR="/var/lib/suricata/rules"
         mkdir -p "$SURICATA_RULES_DIR"
         log_change "Creado" "$SURICATA_RULES_DIR/"
@@ -541,7 +564,9 @@ echo "Se creará un script para consultar rápidamente si una IP"
 echo "o dominio aparece en las listas de IoC descargadas."
 echo ""
 
-if ask "¿Crear herramienta de consulta de IoC?"; then
+if check_executable /usr/local/bin/ioc-lookup.sh; then
+    log_already "Herramienta de consulta de IoC (ioc-lookup.sh)"
+elif ask "¿Crear herramienta de consulta de IoC?"; then
     cat > /usr/local/bin/ioc-lookup.sh << 'EOFLOOKUP'
 #!/bin/bash
 # ============================================================
@@ -773,7 +798,9 @@ echo "Se creará un cron job diario para mantener los feeds"
 echo "de IoC actualizados automáticamente."
 echo ""
 
-if ask "¿Crear cron diario de actualización de feeds de IoC?"; then
+if check_executable /usr/local/bin/threat-intel-update.sh; then
+    log_already "Cron diario de actualización de feeds de IoC (threat-intel-update.sh)"
+elif ask "¿Crear cron diario de actualización de feeds de IoC?"; then
     # Script de actualización
     cat > /usr/local/bin/threat-intel-update.sh << 'EOFUPDATE'
 #!/bin/bash

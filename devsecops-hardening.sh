@@ -24,6 +24,20 @@ require_root
 securizar_setup_traps
 init_backup "devsecops"
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_file_exists /etc/securizar/devsecops-policy.conf'
+_pc 'check_executable /usr/local/bin/auditar-cicd.sh'
+_pc 'check_executable /usr/local/bin/escanear-imagenes-contenedor.sh'
+_pc 'check_executable /usr/local/bin/sast-scanner.sh'
+_pc 'check_executable /usr/local/bin/detectar-secretos-codigo.sh'
+_pc 'check_executable /usr/local/bin/auditar-artefactos.sh'
+_pc 'check_executable /usr/local/bin/verificar-firmas-codigo.sh'
+_pc 'check_executable /usr/local/bin/crear-sandbox-dev.sh'
+_pc 'check_executable /usr/local/bin/instalar-precommit-hooks.sh'
+_pc 'check_executable /usr/local/bin/auditar-devsecops.sh'
+_precheck_result
+
 log_section "MODULO 62: DEVSECOPS HARDENING"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
@@ -33,7 +47,9 @@ log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 log_section "S1: Git repository security"
 log_info "Configura politicas de seguridad para repositorios Git: permisos, hooks globales y auditoria de configuracion."
 
-if ask "Aplicar hardening de repositorios Git?"; then
+if check_file_exists /etc/securizar/devsecops-policy.conf; then
+    log_already "Git repository security (devsecops-policy.conf existe)"
+elif ask "Aplicar hardening de repositorios Git?"; then
 
     mkdir -p /etc/securizar /usr/local/bin
 
@@ -264,7 +280,9 @@ fi
 log_section "S2: CI/CD pipeline hardening"
 log_info "Audita y asegura herramientas CI/CD instaladas: Jenkins, GitLab Runner, GitHub Actions runner, etc."
 
-if ask "Aplicar hardening de pipelines CI/CD?"; then
+if check_executable /usr/local/bin/auditar-cicd.sh; then
+    log_already "CI/CD pipeline hardening (auditar-cicd.sh existe)"
+elif ask "Aplicar hardening de pipelines CI/CD?"; then
 
     cat > /usr/local/bin/auditar-cicd.sh << 'CICDEOF'
 #!/bin/bash
@@ -520,7 +538,9 @@ fi
 log_section "S3: Container image scanning"
 log_info "Instala y configura Trivy para escaneo de vulnerabilidades en imagenes de contenedores."
 
-if ask "Configurar escaneo de imagenes de contenedores?"; then
+if check_executable /usr/local/bin/escanear-imagenes-contenedor.sh; then
+    log_already "Container image scanning (escanear-imagenes-contenedor.sh existe)"
+elif ask "Configurar escaneo de imagenes de contenedores?"; then
 
     # Install Trivy if not present
     if ! command -v trivy &>/dev/null; then
@@ -718,7 +738,9 @@ fi
 log_section "S4: SAST (Static Application Security Testing)"
 log_info "Configura herramientas de analisis estatico: bandit (Python), npm audit (Node), gosec (Go), cppcheck (C/C++)."
 
-if ask "Configurar herramientas SAST?"; then
+if check_executable /usr/local/bin/sast-scanner.sh; then
+    log_already "SAST (sast-scanner.sh existe)"
+elif ask "Configurar herramientas SAST?"; then
 
     # Install SAST tools based on what's available
     log_info "Instalando herramientas SAST disponibles..."
@@ -982,7 +1004,9 @@ fi
 log_section "S5: Secrets detection in code"
 log_info "Configura deteccion de secretos en codigo fuente: API keys, tokens, passwords, claves privadas."
 
-if ask "Configurar deteccion de secretos en codigo?"; then
+if check_executable /usr/local/bin/detectar-secretos-codigo.sh; then
+    log_already "Secrets detection in code (detectar-secretos-codigo.sh existe)"
+elif ask "Configurar deteccion de secretos en codigo?"; then
 
     # Create secret patterns config
     cat > /etc/securizar/secret-patterns.conf << 'PATEOF'
@@ -1214,7 +1238,9 @@ fi
 log_section "S6: Artifact repository security"
 log_info "Audita repositorios de artefactos: Nexus, Artifactory, registros de paquetes locales."
 
-if ask "Configurar auditoria de repositorios de artefactos?"; then
+if check_executable /usr/local/bin/auditar-artefactos.sh; then
+    log_already "Artifact repository security (auditar-artefactos.sh existe)"
+elif ask "Configurar auditoria de repositorios de artefactos?"; then
 
     cat > /usr/local/bin/auditar-artefactos.sh << 'ARTEOF'
 #!/bin/bash
@@ -1440,7 +1466,9 @@ fi
 log_section "S7: Code signing and verification"
 log_info "Configura verificacion de firmas GPG en commits y tags, y validacion de integridad de codigo."
 
-if ask "Configurar verificacion de firmas de codigo?"; then
+if check_executable /usr/local/bin/verificar-firmas-codigo.sh; then
+    log_already "Code signing and verification (verificar-firmas-codigo.sh existe)"
+elif ask "Configurar verificacion de firmas de codigo?"; then
 
     # Ensure GPG is installed
     if ! command -v gpg &>/dev/null; then
@@ -1669,7 +1697,9 @@ fi
 log_section "S8: Development environment isolation"
 log_info "Configura aislamiento de entornos de desarrollo con Firejail para IDEs y herramientas."
 
-if ask "Configurar aislamiento de entornos de desarrollo?"; then
+if check_executable /usr/local/bin/crear-sandbox-dev.sh; then
+    log_already "Development environment isolation (crear-sandbox-dev.sh existe)"
+elif ask "Configurar aislamiento de entornos de desarrollo?"; then
 
     # Install firejail if available
     if ! command -v firejail &>/dev/null; then
@@ -1992,7 +2022,9 @@ fi
 log_section "S9: Pre-commit security hooks"
 log_info "Instala hooks de pre-commit para deteccion de secretos, linting de seguridad y validacion automatica."
 
-if ask "Configurar pre-commit security hooks?"; then
+if check_executable /usr/local/bin/instalar-precommit-hooks.sh; then
+    log_already "Pre-commit security hooks (instalar-precommit-hooks.sh existe)"
+elif ask "Configurar pre-commit security hooks?"; then
 
     # Install pre-commit if available
     if command -v pip3 &>/dev/null && ! command -v pre-commit &>/dev/null; then
@@ -2297,7 +2329,9 @@ fi
 log_section "S10: Auditoria integral DevSecOps"
 log_info "Herramienta de auditoria integral que evalua todos los aspectos DevSecOps y genera un scoring global."
 
-if ask "Crear herramienta de auditoria integral DevSecOps?"; then
+if check_executable /usr/local/bin/auditar-devsecops.sh; then
+    log_already "Auditoria integral DevSecOps (auditar-devsecops.sh existe)"
+elif ask "Crear herramienta de auditoria integral DevSecOps?"; then
 
     cat > /usr/local/bin/auditar-devsecops.sh << 'AUDITEOF'
 #!/bin/bash

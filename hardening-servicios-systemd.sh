@@ -21,6 +21,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-servicios-systemd"
 securizar_setup_traps
+
+_precheck 7
+_pc true  # S1: análisis/detección, siempre re-evaluar
+_pc 'check_file_exists "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/hardening.conf"'
+_pc 'check_file_exists /etc/systemd/system/fail2ban.service.d/hardening.conf'
+_pc 'check_file_exists /etc/systemd/system/firewalld.service.d/hardening.conf'
+_pc 'check_file_exists /etc/systemd/system/NetworkManager.service.d/hardening.conf'
+_pc 'check_file_exists /etc/systemd/system/security-monitor.service.d/hardening.conf'
+_pc 'check_executable /usr/local/bin/analizar-servicios-seguridad.sh'
+_precheck_result
+
 log_section "S1: ANÁLISIS DE SEGURIDAD DE SERVICIOS"
 
 log_info "Ejecutando systemd-analyze security..."
@@ -65,7 +76,9 @@ echo "  RestrictSUIDSGID=yes"
 echo ""
 
 if systemctl list-unit-files "${SSH_SERVICE_NAME}.service" &>/dev/null 2>&1; then
-    if ask "¿Aplicar sandboxing a sshd?"; then
+    if check_file_exists "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/hardening.conf"; then
+        log_already "Sandboxing de sshd (drop-in hardening.conf presente)"
+    elif ask "¿Aplicar sandboxing a sshd?"; then
         mkdir -p "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/"
         log_change "Creado" "/etc/systemd/system/${SSH_SERVICE_NAME}.service.d/"
 
@@ -107,7 +120,9 @@ if systemctl list-unit-files fail2ban.service &>/dev/null 2>&1; then
     echo "  Incluye CapabilityBoundingSet para operaciones de red"
     echo ""
 
-    if ask "¿Aplicar sandboxing a fail2ban?"; then
+    if check_file_exists /etc/systemd/system/fail2ban.service.d/hardening.conf; then
+        log_already "Sandboxing de fail2ban (drop-in hardening.conf presente)"
+    elif ask "¿Aplicar sandboxing a fail2ban?"; then
         mkdir -p /etc/systemd/system/fail2ban.service.d/
         log_change "Creado" "/etc/systemd/system/fail2ban.service.d/"
 
@@ -150,7 +165,9 @@ if systemctl list-unit-files firewalld.service &>/dev/null 2>&1; then
     echo "  (firewalld necesita acceso a kernel para reglas de red)"
     echo ""
 
-    if ask "¿Aplicar sandboxing conservador a firewalld?"; then
+    if check_file_exists /etc/systemd/system/firewalld.service.d/hardening.conf; then
+        log_already "Sandboxing de firewalld (drop-in hardening.conf presente)"
+    elif ask "¿Aplicar sandboxing conservador a firewalld?"; then
         mkdir -p /etc/systemd/system/firewalld.service.d/
         log_change "Creado" "/etc/systemd/system/firewalld.service.d/"
 
@@ -185,7 +202,9 @@ if systemctl list-unit-files NetworkManager.service &>/dev/null 2>&1; then
     echo "  (NM necesita acceso amplio al sistema para gestionar red)"
     echo ""
 
-    if ask "¿Aplicar sandboxing conservador a NetworkManager?"; then
+    if check_file_exists /etc/systemd/system/NetworkManager.service.d/hardening.conf; then
+        log_already "Sandboxing de NetworkManager (drop-in hardening.conf presente)"
+    elif ask "¿Aplicar sandboxing conservador a NetworkManager?"; then
         mkdir -p /etc/systemd/system/NetworkManager.service.d/
         log_change "Creado" "/etc/systemd/system/NetworkManager.service.d/"
 
@@ -218,7 +237,9 @@ if systemctl list-unit-files security-monitor.service &>/dev/null 2>&1; then
     echo "security-monitor.service detectado."
     echo ""
 
-    if ask "¿Aplicar sandboxing a security-monitor?"; then
+    if check_file_exists /etc/systemd/system/security-monitor.service.d/hardening.conf; then
+        log_already "Sandboxing de security-monitor (drop-in hardening.conf presente)"
+    elif ask "¿Aplicar sandboxing a security-monitor?"; then
         mkdir -p /etc/systemd/system/security-monitor.service.d/
         log_change "Creado" "/etc/systemd/system/security-monitor.service.d/"
 
@@ -255,7 +276,9 @@ fi
 # ============================================================
 log_section "S7: SCRIPT DE ANÁLISIS DE SERVICIOS"
 
-if ask "¿Crear /usr/local/bin/analizar-servicios-seguridad.sh?"; then
+if check_executable /usr/local/bin/analizar-servicios-seguridad.sh; then
+    log_already "Script de análisis de servicios (/usr/local/bin/analizar-servicios-seguridad.sh)"
+elif ask "¿Crear /usr/local/bin/analizar-servicios-seguridad.sh?"; then
     cat > /usr/local/bin/analizar-servicios-seguridad.sh << 'EOFANALYZE'
 #!/bin/bash
 # ============================================================

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Deception Graph{% endblock %}
+{% block page_title %}Deception Graph{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{% url 'dashboard:index' %}">Dashboard</a> / Deception Graph</div>
+
+<!-- Coverage & Risk Cards -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Nodos (Tokens)</div>
+    <div class="card-value">{{ total_nodes }}</div>
+    <div class="card-sub">{{ compromised }} comprometidos</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Enlaces</div>
+    <div class="card-value">{{ total_edges }}</div>
+    <div class="card-sub">Conexiones entre tokens</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Cobertura</div>
+    <div class="card-value {% if coverage.coverage_pct >= 80 %}text-green{% elif coverage.coverage_pct >= 50 %}text-yellow{% else %}text-red{% endif %}">{{ coverage.coverage_pct }}%</div>
+    <div class="card-sub">{{ coverage.deployed_types }}/{{ coverage.total_types }} tipos</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Riesgo Lateral</div>
+    <div class="card-value {% if lateral_risk >= 60 %}text-red{% elif lateral_risk >= 30 %}text-yellow{% else %}text-green{% endif %}">{{ lateral_risk }}</div>
+    <div class="card-sub">Puntuacion 0-100</div>
+  </div>
+</div>
+
+{% if coverage.missing_types %}
+<div class="card mb-3" style="border-left:3px solid var(--yellow)">
+  <div class="card-title">Tipos de Token Sin Cobertura</div>
+  <div class="flex flex-wrap gap-1 mt-1">
+    {% for t in coverage.missing_types %}
+    <span class="badge badge-yellow">{{ t }}</span>
+    {% endfor %}
+  </div>
+  <div class="card-sub mt-1">Considerar desplegar tokens de estos tipos para mejorar la cobertura de la malla</div>
+</div>
+{% endif %}
+
+<!-- Token Node Graph (text representation) -->
+<div class="section-title">Malla de Tokens</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>Token ID</th><th>Tipo</th><th>Incidentes</th><th>Ultimo Acceso</th><th>Estado</th></tr>
+    </thead>
+    <tbody>
+    {% for node in nodes %}
+      <tr>
+        <td class="mono">
+          {% if node.incidents > 0 %}
+          <a href="{% url 'dashboard:token_detail' node.id %}">{{ node.id|truncatechars:16 }}</a>
+          {% else %}
+          {{ node.id|truncatechars:16 }}
+          {% endif %}
+        </td>
+        <td><span class="badge badge-blue">{{ node.type }}</span></td>
+        <td>{{ node.incidents }}</td>
+        <td class="mono text-muted">{{ node.last_access|default:"-" }}</td>
+        <td>
+          {% if node.compromised %}
+          <span class="badge badge-red">COMPROMETIDO</span>
+          {% else %}
+          <span class="badge badge-green">INTACTO</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Edges -->
+<div class="section-title">Conexiones entre Tokens</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>Origen</th><th>Tipo</th><th></th><th>Destino</th><th>Tipo</th><th>Atacado</th></tr>
+    </thead>
+    <tbody>
+    {% for edge in edges %}
+      <tr>
+        <td class="mono">{{ edge.source|truncatechars:12 }}</td>
+        <td><span class="badge badge-blue">{{ edge.source_type }}</span></td>
+        <td style="text-align:center;color:var(--text-muted)">&rarr;</td>
+        <td class="mono">{{ edge.target|truncatechars:12 }}</td>
+        <td><span class="badge badge-blue">{{ edge.target_type }}</span></td>
+        <td>
+          {% if edge.attacked %}
+          <span class="badge badge-red">SI</span>
+          {% else %}
+          <span class="text-muted">-</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if attack_paths %}
+<!-- Attack Paths -->
+<div class="section-title">Rutas de Ataque Observadas</div>
+{% for path in attack_paths %}
+<div class="card mb-2" style="border-left:3px solid var(--red)">
+  <div class="card-title">Actor: {{ path.actor }} ({{ path.length }} saltos)</div>
+  <div class="flex flex-wrap gap-1 mt-1">
+    {% for edge in path.edges %}
+    <div style="display:flex;align-items:center;gap:.3rem">
+      <span class="badge badge-orange">{{ edge.from_type }}</span>
+      <span style="color:var(--red)">&rarr;</span>
+      <span class="badge badge-red">{{ edge.to_type }}</span>
+      <span class="text-muted mono" style="font-size:.75rem">({{ edge.timestamp }})</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

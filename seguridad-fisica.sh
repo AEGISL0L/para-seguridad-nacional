@@ -37,6 +37,20 @@ echo ""
 log_section "MODULO 58: SEGURIDAD FISICA AVANZADA"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc check_executable /usr/local/bin/gestionar-usbguard.sh
+_pc check_executable /usr/local/bin/verificar-bios-uefi.sh
+_pc true  # S3: GRUB protection (depende de configuracion, siempre re-evaluar)
+_pc check_executable /usr/local/bin/configurar-screen-lock.sh
+_pc check_executable /usr/local/bin/verificar-tpm.sh
+_pc check_executable /usr/local/bin/securizar-thunderbolt.sh
+_pc check_executable /usr/local/bin/auditar-cifrado-disco.sh
+_pc check_executable /usr/local/bin/gestionar-perifericos.sh
+_pc check_executable /usr/local/bin/verificar-integridad-boot.sh
+_pc check_executable /usr/local/bin/auditar-seguridad-fisica.sh
+_precheck_result
+
 # ── Variables globales del modulo ─────────────────────────────
 SECURIZAR_LOG_DIR="/var/log/securizar"
 SECURIZAR_BIN_DIR="/usr/local/bin"
@@ -387,7 +401,9 @@ USBGUARD_RULES_EOF
     fi
 
     # --- 1.5: Crear script de gestion de USBGuard ---
-    if ask "Crear script de gestion de USBGuard en ${SECURIZAR_BIN_DIR}/?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/gestionar-usbguard.sh"; then
+        log_already "Script de gestion USBGuard (gestionar-usbguard.sh existe)"
+    elif ask "Crear script de gestion de USBGuard en ${SECURIZAR_BIN_DIR}/?"; then
         local gestionar_usbguard="${SECURIZAR_BIN_DIR}/gestionar-usbguard.sh"
 
         cat > "$gestionar_usbguard" << 'GESTIONAR_USB_EOF'
@@ -845,7 +861,9 @@ check_bios_uefi_protection() {
     fi
 
     # --- 2.8: Crear script de verificacion BIOS/UEFI ---
-    if ask "Crear script de verificacion BIOS/UEFI en ${SECURIZAR_BIN_DIR}/?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/verificar-bios-uefi.sh"; then
+        log_already "Script de verificacion BIOS/UEFI (verificar-bios-uefi.sh existe)"
+    elif ask "Crear script de verificacion BIOS/UEFI en ${SECURIZAR_BIN_DIR}/?"; then
         local verificar_bios="${SECURIZAR_BIN_DIR}/verificar-bios-uefi.sh"
 
         cat > "$verificar_bios" << 'VERIFICAR_BIOS_EOF'
@@ -1239,7 +1257,6 @@ GRUB_PASS_EOF
                 "debugfs=off"
                 "oops=panic"
                 "module.sig_enforce=1"
-                "lockdown=confidentiality"
                 "random.trust_cpu=off"
                 "random.trust_bootloader=off"
             )
@@ -1638,7 +1655,7 @@ XFCE_LOCK_EOF
                 cat > "$tmout_file" << TMOUT_EOF
 # Timeout de sesion de consola - securizar (Modulo 58)
 # Cierra sesiones inactivas despues de ${tmout_value} segundos
-readonly TMOUT=${tmout_value}
+TMOUT=${tmout_value}
 export TMOUT
 TMOUT_EOF
                 chmod 644 "$tmout_file"
@@ -1703,7 +1720,9 @@ TMOUT_EOF
     esac
 
     # --- 4.3: Crear script unificado de configuracion ---
-    if ask "Crear script unificado de configuracion de screen lock?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/configurar-screen-lock.sh"; then
+        log_already "Script unificado de screen lock (configurar-screen-lock.sh existe)"
+    elif ask "Crear script unificado de configuracion de screen lock?"; then
         local configurar_lock="${SECURIZAR_BIN_DIR}/configurar-screen-lock.sh"
 
         cat > "$configurar_lock" << 'SCREEN_LOCK_MAIN_EOF'
@@ -2013,7 +2032,9 @@ configure_tpm_protection() {
     fi
 
     # --- 5.6: Crear script de verificacion TPM ---
-    if ask "Crear script de verificacion TPM en ${SECURIZAR_BIN_DIR}/?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/verificar-tpm.sh"; then
+        log_already "Script de verificacion TPM (verificar-tpm.sh existe)"
+    elif ask "Crear script de verificacion TPM en ${SECURIZAR_BIN_DIR}/?"; then
         local verificar_tpm="${SECURIZAR_BIN_DIR}/verificar-tpm.sh"
 
         cat > "$verificar_tpm" << 'VERIFICAR_TPM_EOF'
@@ -2448,7 +2469,9 @@ DMA_MODPROBE_EOF
     fi
 
     # --- 6.5: Crear script de securizacion Thunderbolt ---
-    if ask "Crear script de securizacion Thunderbolt en ${SECURIZAR_BIN_DIR}/?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/securizar-thunderbolt.sh"; then
+        log_already "Script de securizacion Thunderbolt (securizar-thunderbolt.sh existe)"
+    elif ask "Crear script de securizacion Thunderbolt en ${SECURIZAR_BIN_DIR}/?"; then
         local securizar_tb="${SECURIZAR_BIN_DIR}/securizar-thunderbolt.sh"
 
         cat > "$securizar_tb" << 'SECURIZAR_TB_EOF'
@@ -2905,7 +2928,9 @@ audit_disk_encryption() {
     fi
 
     # --- 7.6: Crear script de auditoria de cifrado ---
-    if ask "Crear script de auditoria de cifrado de disco en ${SECURIZAR_BIN_DIR}/?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/auditar-cifrado-disco.sh"; then
+        log_already "Script de auditoria de cifrado (auditar-cifrado-disco.sh existe)"
+    elif ask "Crear script de auditoria de cifrado de disco en ${SECURIZAR_BIN_DIR}/?"; then
         local auditar_cifrado="${SECURIZAR_BIN_DIR}/auditar-cifrado-disco.sh"
 
         cat > "$auditar_cifrado" << 'AUDITAR_CIFRADO_EOF'
@@ -3402,7 +3427,9 @@ UDEV_LOGGER_EOF
     fi
 
     # --- 8.4: Crear script de gestion de perifericos ---
-    if ask "Crear script de gestion de perifericos en ${SECURIZAR_BIN_DIR}/?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/gestionar-perifericos.sh"; then
+        log_already "Script de gestion de perifericos (gestionar-perifericos.sh existe)"
+    elif ask "Crear script de gestion de perifericos en ${SECURIZAR_BIN_DIR}/?"; then
         local gestionar_perifericos="${SECURIZAR_BIN_DIR}/gestionar-perifericos.sh"
 
         cat > "$gestionar_perifericos" << 'GESTIONAR_PERIF_EOF'
@@ -3860,7 +3887,9 @@ configure_evil_maid_protection() {
     fi
 
     # --- 9.4: Crear script de verificacion de integridad de boot ---
-    if ask "Crear script de verificacion de integridad de boot?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/verificar-integridad-boot.sh"; then
+        log_already "Script de integridad de boot (verificar-integridad-boot.sh existe)"
+    elif ask "Crear script de verificacion de integridad de boot?"; then
         local verificar_boot="${SECURIZAR_BIN_DIR}/verificar-integridad-boot.sh"
 
         cat > "$verificar_boot" << 'VERIFICAR_BOOT_EOF'
@@ -4166,7 +4195,9 @@ configure_physical_security_audit() {
     log_info "Configurando auditoria integral de seguridad fisica..."
 
     # --- 10.1: Crear script de auditoria completa ---
-    if ask "Crear script de auditoria integral de seguridad fisica?"; then
+    if check_executable "${SECURIZAR_BIN_DIR}/auditar-seguridad-fisica.sh"; then
+        log_already "Auditoria integral de seguridad fisica (auditar-seguridad-fisica.sh existe)"
+    elif ask "Crear script de auditoria integral de seguridad fisica?"; then
         local auditar_fisica="${SECURIZAR_BIN_DIR}/auditar-seguridad-fisica.sh"
 
         cat > "$auditar_fisica" << 'AUDITAR_FISICA_EOF'

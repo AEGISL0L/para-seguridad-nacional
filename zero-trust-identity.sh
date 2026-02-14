@@ -24,6 +24,20 @@ require_root
 securizar_setup_traps
 init_backup "zero-trust-identity"
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_executable /usr/local/bin/evaluar-zero-trust.sh'
+_pc 'check_file_exists /etc/securizar/zero-trust-policy.conf'
+_pc 'check_executable /usr/local/bin/auth-continua.sh'
+_pc 'check_executable /usr/local/bin/verificar-device-trust.sh'
+_pc 'check_executable /usr/local/bin/configurar-iap.sh'
+_pc 'check_executable /usr/local/bin/segmentar-por-identidad.sh'
+_pc 'check_executable /usr/local/bin/auditar-privilegios-zt.sh'
+_pc 'check_executable /usr/local/bin/gestionar-sesiones-zt.sh'
+_pc 'check_executable /usr/local/bin/verificar-sso-mfa.sh'
+_pc 'check_executable /usr/local/bin/auditoria-zero-trust.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 59 - ZERO TRUST IDENTITY                        ║"
@@ -80,7 +94,9 @@ service_exists() {
 ###############################################################################
 log_section "S1: Evaluacion de madurez Zero Trust"
 
-if ask "Crear herramienta de evaluacion Zero Trust (/usr/local/bin/evaluar-zero-trust.sh)?"; then
+if check_executable /usr/local/bin/evaluar-zero-trust.sh; then
+    log_already "Evaluacion de madurez Zero Trust (evaluar-zero-trust.sh existe)"
+elif ask "Crear herramienta de evaluacion Zero Trust (/usr/local/bin/evaluar-zero-trust.sh)?"; then
 
     ensure_dirs /usr/local/bin /var/log/securizar
 
@@ -444,7 +460,9 @@ fi
 ###############################################################################
 log_section "S2: Politica Zero Trust"
 
-if ask "Crear configuracion de politica Zero Trust (/etc/securizar/zero-trust-policy.conf)?"; then
+if check_file_exists /etc/securizar/zero-trust-policy.conf; then
+    log_already "Politica Zero Trust (zero-trust-policy.conf existe)"
+elif ask "Crear configuracion de politica Zero Trust (/etc/securizar/zero-trust-policy.conf)?"; then
 
     ensure_dirs /etc/securizar
 
@@ -758,7 +776,9 @@ fi
 ###############################################################################
 log_section "S3: Autenticacion continua"
 
-if ask "Configurar autenticacion continua y re-verificacion?"; then
+if check_executable /usr/local/bin/auth-continua.sh; then
+    log_already "Autenticacion continua (auth-continua.sh existe)"
+elif ask "Configurar autenticacion continua y re-verificacion?"; then
 
     ensure_dirs /usr/local/bin /var/log/securizar
 
@@ -997,7 +1017,9 @@ fi
 ###############################################################################
 log_section "S4: Device trust y compliance"
 
-if ask "Crear verificacion de confianza de dispositivos (/usr/local/bin/verificar-device-trust.sh)?"; then
+if check_executable /usr/local/bin/verificar-device-trust.sh; then
+    log_already "Device trust y compliance (verificar-device-trust.sh existe)"
+elif ask "Crear verificacion de confianza de dispositivos (/usr/local/bin/verificar-device-trust.sh)?"; then
 
     ensure_dirs /usr/local/bin /etc/securizar /var/log/securizar
 
@@ -1241,7 +1263,9 @@ fi
 ###############################################################################
 log_section "S5: Identity-Aware Proxy (IAP)"
 
-if ask "Crear templates de Identity-Aware Proxy (/etc/securizar/iap/)?"; then
+if check_executable /usr/local/bin/configurar-iap.sh; then
+    log_already "Identity-Aware Proxy (configurar-iap.sh existe)"
+elif ask "Crear templates de Identity-Aware Proxy (/etc/securizar/iap/)?"; then
 
     ensure_dirs /etc/securizar/iap /usr/local/bin
 
@@ -1722,7 +1746,9 @@ fi
 ###############################################################################
 log_section "S6: Micro-segmentacion basada en identidad"
 
-if ask "Configurar micro-segmentacion de red basada en identidad?"; then
+if check_executable /usr/local/bin/segmentar-por-identidad.sh; then
+    log_already "Micro-segmentacion basada en identidad (segmentar-por-identidad.sh existe)"
+elif ask "Configurar micro-segmentacion de red basada en identidad?"; then
 
     ensure_dirs /etc/securizar /usr/local/bin
 
@@ -2024,7 +2050,9 @@ fi
 ###############################################################################
 log_section "S7: Least privilege enforcement"
 
-if ask "Crear auditoria de minimo privilegio (/usr/local/bin/auditar-privilegios-zt.sh)?"; then
+if check_executable /usr/local/bin/auditar-privilegios-zt.sh; then
+    log_already "Least privilege enforcement (auditar-privilegios-zt.sh existe)"
+elif ask "Crear auditoria de minimo privilegio (/usr/local/bin/auditar-privilegios-zt.sh)?"; then
 
     ensure_dirs /usr/local/bin /var/log/securizar
 
@@ -2416,7 +2444,9 @@ fi
 ###############################################################################
 log_section "S8: Session management y monitorizacion"
 
-if ask "Configurar gestion de sesiones Zero Trust?"; then
+if check_executable /usr/local/bin/gestionar-sesiones-zt.sh; then
+    log_already "Session management y monitorizacion (gestionar-sesiones-zt.sh existe)"
+elif ask "Configurar gestion de sesiones Zero Trust?"; then
 
     ensure_dirs /usr/local/bin /var/log/securizar/sessions
 
@@ -2450,7 +2480,7 @@ if ask "Configurar gestion de sesiones Zero Trust?"; then
         cat > "$PROFILE_ZT" << 'PROFEOF'
 # Zero Trust: Session controls (added by securizar)
 # Idle timeout: 15 minutes (900 seconds)
-readonly TMOUT=900
+TMOUT=900
 export TMOUT
 
 # Session recording notice for privileged users
@@ -2843,7 +2873,9 @@ fi
 ###############################################################################
 log_section "S9: Integracion con SSO y MFA"
 
-if ask "Crear verificacion de SSO y MFA (/usr/local/bin/verificar-sso-mfa.sh)?"; then
+if check_executable /usr/local/bin/verificar-sso-mfa.sh; then
+    log_already "Integracion con SSO y MFA (verificar-sso-mfa.sh existe)"
+elif ask "Crear verificacion de SSO y MFA (/usr/local/bin/verificar-sso-mfa.sh)?"; then
 
     ensure_dirs /usr/local/bin /var/log/securizar
 
@@ -3219,7 +3251,9 @@ fi
 ###############################################################################
 log_section "S10: Auditoria integral Zero Trust"
 
-if ask "Crear auditoria integral Zero Trust (/usr/local/bin/auditoria-zero-trust.sh)?"; then
+if check_executable /usr/local/bin/auditoria-zero-trust.sh; then
+    log_already "Auditoria integral Zero Trust (auditoria-zero-trust.sh existe)"
+elif ask "Crear auditoria integral Zero Trust (/usr/local/bin/auditoria-zero-trust.sh)?"; then
 
     ensure_dirs /usr/local/bin /var/log/securizar /etc/cron.weekly
 

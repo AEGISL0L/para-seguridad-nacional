@@ -39,6 +39,8 @@ def index(request):
     else:
         severity = 'NORMAL'
 
+    dedup = parsers.get_alert_dedup_stats(alerts)
+
     return render(request, 'dashboard/index.html', {
         'tokens': token_status,
         'alerts': alerts[-20:],
@@ -50,6 +52,7 @@ def index(request):
         'total_alerts': len(alerts),
         'total_incidents': len(incidents),
         'tokens_compromised': sum(1 for t in token_status if t['status'] != 'OK'),
+        'dedup': dedup,
     })
 
 
@@ -175,12 +178,26 @@ def incident_detail(request, incident_id):
         raise Http404('Incidente no encontrado')
 
     integrity = parsers.verify_integrity(incident_id)
+    accessor = parsers.extract_accessor(incident_id)
+    iocs = parsers.extract_iocs(incident_id)
+    findings = parsers.extract_key_findings(incident_id)
+    threat = parsers.compute_threat_score(incident_id)
+
+    meta = inc.get('metadata', {})
+    mitre = parsers.map_mitre_techniques(
+        meta.get('token_type', ''), meta.get('event', 'ACCESS')
+    )
 
     return render(request, 'dashboard/incident_detail.html', {
         'incident': inc,
-        'metadata': inc.get('metadata', {}),
+        'metadata': meta,
         'files': inc.get('files', {}),
         'integrity': integrity,
+        'accessor': accessor,
+        'iocs': iocs,
+        'findings': findings,
+        'threat': threat,
+        'mitre': mitre,
     })
 
 
@@ -354,6 +371,290 @@ def api_alert_stream(request):
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'
     return response
+
+
+def timeline(request):
+    """Vista cronologica unificada de todos los eventos."""
+    limit = min(int(request.GET.get('limit', 100)), 500)
+    events = parsers.build_timeline(limit=limit)
+
+    # Dedup: collapse consecutive alerts for same token within 2 seconds
+    deduped = []
+    for e in events:
+        if deduped and e['type'] == 'alert' and deduped[-1]['type'] == 'alert':
+            prev = deduped[-1]
+            if (prev['canary_id'] == e['canary_id']
+                    and prev['timestamp'] and e['timestamp']
+                    and abs((prev['timestamp'] - e['timestamp']).total_seconds()) < 2):
+                if 'dup_count' not in prev:
+                    prev['dup_count'] = 1
+                prev['dup_count'] += 1
+                continue
+        deduped.append(e)
+
+    return render(request, 'dashboard/timeline.html', {
+        'events': deduped,
+        'total_raw': len(events),
+        'total_deduped': len(deduped),
+        'limit': limit,
+    })
+
+
+def api_export_incidents(request):
+    """JSON export of all incidents with IOCs and findings."""
+    incidents = parsers.list_incidents()
+    export = []
+    for inc in incidents:
+        iid = inc['incident_id']
+        iocs = parsers.extract_iocs(iid)
+        accessor = parsers.extract_accessor(iid)
+        findings = parsers.extract_key_findings(iid)
+        export.append({
+            'incident_id': iid,
+            'metadata': inc.get('metadata', {}),
+            'file_count': inc.get('file_count', 0),
+            'accessor': accessor,
+            'iocs': {
+                'external_ips': iocs.get('external_ips', []),
+                'ssh_origins': iocs.get('ssh_origins', []),
+                'arp_anomalies': iocs.get('arp_anomalies', 0),
+                'vpn_active': iocs.get('vpn_active', False),
+                'file_hashes': iocs.get('file_hashes', []),
+            },
+            'findings': findings,
+        })
+
+    response = JsonResponse({'incidents': export, 'count': len(export)})
+    if request.GET.get('download'):
+        response['Content-Disposition'] = (
+            f'attachment; filename="securizar-incidents-{datetime.now():%Y%m%d-%H%M%S}.json"'
+        )
+    return response
+
+
+def correlation(request):
+    """Incident correlation: grouped by token, feedback loop detection."""
+    corr = parsers.correlate_incidents()
+    dedup = parsers.get_alert_dedup_stats()
+    registry = parsers.parse_registry()
+
+    # Enrich groups with token type
+    type_map = {t['canary_id']: t['type'] for t in registry}
+    groups = []
+    for cid, count in sorted(corr['groups'].items(), key=lambda x: -x[1]):
+        groups.append({
+            'canary_id': cid,
+            'count': count,
+            'type': type_map.get(cid, 'unknown'),
+        })
+
+    return render(request, 'dashboard/correlation.html', {
+        'groups': groups,
+        'feedback_loops': corr['feedback_loops'],
+        'unique_tokens': corr['unique_tokens'],
+        'unique_accessors': corr['unique_accessors'],
+        'total_incidents': corr['total_incidents'],
+        'dedup': dedup,
+    })
+
+
+def attack_map(request):
+    """MITRE ATT&CK heatmap from all incidents."""
+    heatmap_data = parsers.build_mitre_heatmap()
+    return render(request, 'dashboard/attack_map.html', {
+        'heatmap': heatmap_data['heatmap'],
+        'total_techniques': heatmap_data['total_techniques'],
+        'total_incidents': heatmap_data['total_incidents'],
+        'top_techniques': heatmap_data['top_techniques'],
+    })
+
+
+def threat_overview(request):
+    """Threat intelligence: attack chain, attacker profile, scores."""
+    chain = parsers.build_attack_chain()
+    incidents = parsers.list_incidents()
+
+    # Compute threat scores for all incidents
+    scores = []
+    for inc in incidents[:50]:
+        s = parsers.compute_threat_score(inc['incident_id'])
+        s['incident_id'] = inc['incident_id']
+        s['event'] = inc.get('metadata', {}).get('event', '?')
+        s['token_type'] = inc.get('metadata', {}).get('token_type', '?')
+        s['canary_id'] = inc.get('metadata', {}).get('canary_id', '?')
+        scores.append(s)
+
+    # Aggregate score
+    if scores:
+        avg_score = sum(s['score'] for s in scores) / len(scores)
+        max_score = max(s['score'] for s in scores)
+    else:
+        avg_score = 0
+        max_score = 0
+
+    # Sort by score descending for the top threats table
+    scores.sort(key=lambda s: -s['score'])
+
+    return render(request, 'dashboard/threat_overview.html', {
+        'chain': chain,
+        'phases': chain['phases'],
+        'profile': chain['profile'],
+        'scores': scores[:20],
+        'avg_score': round(avg_score),
+        'max_score': max_score,
+        'total_incidents': chain['chain_length'],
+    })
+
+
+def fingerprint_view(request):
+    """Attacker fingerprinting and behavioral analysis."""
+    fp = parsers.fingerprint_attacker()
+    return render(request, 'dashboard/fingerprint.html', {
+        'fingerprint': fp,
+        'tools': fp['tools'],
+        'processes': fp['suspicious_processes'],
+        'categories': fp['tool_categories'],
+        'timing': fp['timing'],
+        'patterns': fp['patterns'],
+        'sophistication': fp['sophistication'],
+        'reasons': fp['sophistication_reasons'],
+        'classification': fp['classification'],
+    })
+
+
+def playbook_view(request):
+    """Auto-generated incident response playbook."""
+    pb = parsers.generate_response_playbook()
+    return render(request, 'dashboard/playbook.html', {
+        'playbook': pb,
+        'threat_level': pb['threat_level'],
+        'immediate': pb['immediate_actions'],
+        'containment': pb['containment'],
+        'investigation': pb['investigation'],
+        'hardening': pb['hardening'],
+        'monitoring': pb['monitoring'],
+    })
+
+
+def ip_reputation(request):
+    """IP reputation lookup and enrichment."""
+    enriched = parsers.enrich_all_ips()
+    # Separate by risk level
+    critical = [ip for ip in enriched if ip['abuse_score'] >= 70]
+    high = [ip for ip in enriched if 40 <= ip['abuse_score'] < 70]
+    medium = [ip for ip in enriched if 10 <= ip['abuse_score'] < 40]
+    low = [ip for ip in enriched if ip['abuse_score'] < 10]
+
+    return render(request, 'dashboard/ip_reputation.html', {
+        'enriched': enriched[:50],
+        'critical': critical,
+        'high': high,
+        'medium': medium,
+        'low': low,
+        'total': len(enriched),
+    })
+
+
+def deception_graph(request):
+    """Deception mesh: token graph, attack paths, coverage analysis."""
+    graph = parsers.build_deception_graph()
+    return render(request, 'dashboard/deception_graph.html', {
+        'nodes': graph['nodes'],
+        'edges': graph['edges'],
+        'attack_paths': graph['attack_paths'],
+        'coverage': graph['coverage'],
+        'lateral_risk': graph['lateral_risk'],
+        'total_nodes': len(graph['nodes']),
+        'total_edges': len(graph['edges']),
+        'compromised': sum(1 for n in graph['nodes'] if n['compromised']),
+    })
+
+
+def lateral_movement(request):
+    """Lateral movement detection and attack chain analysis."""
+    lateral = parsers.detect_lateral_movement()
+    predictions = parsers.predict_next_target()
+    return render(request, 'dashboard/lateral_movement.html', {
+        'chains': lateral['chains'],
+        'cross_token_actors': lateral['cross_token_actors'],
+        'risk_score': lateral['risk_score'],
+        'total_actors': lateral['total_actors'],
+        'lateral_actors': lateral['lateral_actors'],
+        'predictions': predictions['predictions'],
+        'recommendations': predictions['recommendations'],
+        'observed_pattern': predictions['observed_pattern'],
+        'compromised_sequence': predictions.get('compromised_sequence', []),
+    })
+
+
+def threat_feed(request):
+    """Threat intelligence feed: download IOCs in various formats."""
+    fmt = request.GET.get('format', '')
+    if fmt in ('json', 'csv', 'stix'):
+        feed = parsers.generate_threat_feed(fmt=fmt)
+        content = feed['content']
+        if fmt == 'json' or fmt == 'stix':
+            ct = 'application/json'
+            ext = 'json'
+        else:
+            ct = 'text/csv'
+            ext = 'csv'
+        response = HttpResponse(content, content_type=ct)
+        response['Content-Disposition'] = (
+            f'attachment; filename="securizar-threat-feed-{datetime.now():%Y%m%d}.{ext}"'
+        )
+        return response
+
+    # Show feed overview page
+    feed_json = parsers.generate_threat_feed(fmt='json')
+    network = parsers.parse_network_log()
+    return render(request, 'dashboard/threat_feed.html', {
+        'ioc_count': feed_json['ioc_count'],
+        'summary': feed_json['summary'],
+        'network_events': len(network),
+        'network_recent': network[-10:] if network else [],
+    })
+
+
+def ttp_catalog(request):
+    """TTP catalog: observed techniques, tactics, procedures."""
+    ttps = parsers.catalog_ttps()
+    actors = parsers.profile_threat_actors()
+    rules = parsers.generate_detection_rules()
+    return render(request, 'dashboard/ttp_catalog.html', {
+        'techniques': ttps['techniques'],
+        'tactics': ttps['tactics'],
+        'procedures': ttps['procedures'][:30],
+        'kill_chain': ttps['kill_chain_coverage'],
+        'total_techniques': ttps['total_techniques'],
+        'total_tactics': ttps['total_tactics'],
+        'actors': actors[:15],
+        'rules': rules,
+    })
+
+
+def analytics(request):
+    """Comprehensive deception platform analytics."""
+    summary = parsers.build_analytics_summary()
+    roi = parsers.compute_deception_roi()
+    dwell = parsers.compute_dwell_time()
+    return render(request, 'dashboard/analytics.html', {
+        'summary': summary,
+        'roi': roi,
+        'dwell': dwell,
+        'health': summary['health_score'],
+        'trend_pct': summary['trend_pct'],
+        'trend_direction': summary['trend_direction'],
+        'threat_levels': summary['threat_levels'],
+        'event_dist': summary['event_distribution'],
+        'type_hits': summary['type_hits'],
+        'detection_latency': summary.get('detection_latency', {}),
+        'dwell_overall': dwell['overall'],
+        'top_actors': dwell['per_actor'][:10],
+        'effectiveness': roi['effectiveness_score'],
+        'warning_level': roi['warning_level'],
+        'warning_desc': roi['warning_desc'],
+    })
 
 
 def settings_view(request):

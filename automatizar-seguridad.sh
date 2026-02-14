@@ -20,6 +20,18 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 7
+_pc check_file_exists /etc/cron.daily/aide-check
+_pc check_file_exists /etc/cron.daily/zypper-security-update
+_pc check_file_exists /etc/cron.weekly/lynis-audit
+_pc check_file_exists /etc/cron.daily/rkhunter-check
+_pc check_executable /usr/local/bin/seguridad-notificar.sh
+_pc check_file_exists /etc/cron.weekly/verificar-logrotate
+_pc check_file_exists /etc/cron.daily/seguridad-resumen
+_precheck_result
+
 log_info "Configurando automatización de seguridad..."
 
 # ============================================================
@@ -31,7 +43,9 @@ if command -v aide &>/dev/null; then
     echo "AIDE detectado. Se creará un cron job diario para verificar integridad."
     echo ""
 
-    if ask "¿Crear /etc/cron.daily/aide-check?"; then
+    if check_file_exists /etc/cron.daily/aide-check; then
+        log_already "Cron diario AIDE (aide-check)"
+    elif ask "¿Crear /etc/cron.daily/aide-check?"; then
         cat > /etc/cron.daily/aide-check << 'EOFAIDE'
 #!/bin/bash
 # Verificación diaria de integridad con AIDE
@@ -77,7 +91,9 @@ echo "Se creará un cron job diario para instalar parches de seguridad."
 echo "Solo instala parches marcados como 'security'."
 echo ""
 
-if ask "¿Crear /etc/cron.daily/zypper-security-update?"; then
+if check_file_exists /etc/cron.daily/zypper-security-update; then
+    log_already "Parches de seguridad automáticos (zypper-security-update)"
+elif ask "¿Crear /etc/cron.daily/zypper-security-update?"; then
     cat > /etc/cron.daily/zypper-security-update << 'EOFZYPPER'
 #!/bin/bash
 # Instalación automática de parches de seguridad (multi-distro)
@@ -135,7 +151,9 @@ if command -v lynis &>/dev/null; then
     echo "Lynis detectado. Se creará una auditoría semanal automatizada."
     echo ""
 
-    if ask "¿Crear /etc/cron.weekly/lynis-audit?"; then
+    if check_file_exists /etc/cron.weekly/lynis-audit; then
+        log_already "Auditoría semanal Lynis (lynis-audit)"
+    elif ask "¿Crear /etc/cron.weekly/lynis-audit?"; then
         cat > /etc/cron.weekly/lynis-audit << 'EOFLYNIS'
 #!/bin/bash
 # Auditoría semanal de seguridad con lynis
@@ -180,7 +198,9 @@ if command -v rkhunter &>/dev/null; then
     echo "rkhunter detectado. Se creará un escaneo diario de rootkits."
     echo ""
 
-    if ask "¿Crear /etc/cron.daily/rkhunter-check?"; then
+    if check_file_exists /etc/cron.daily/rkhunter-check; then
+        log_already "Escaneo diario rkhunter (rkhunter-check)"
+    elif ask "¿Crear /etc/cron.daily/rkhunter-check?"; then
         cat > /etc/cron.daily/rkhunter-check << 'EOFRKHUNTER'
 #!/bin/bash
 # Escaneo diario de rootkits con rkhunter
@@ -226,7 +246,9 @@ echo "Se creará un script de notificaciones y un timer horario."
 echo "Las notificaciones se envían via notify-send (escritorio) y logger (syslog)."
 echo ""
 
-if ask "¿Crear sistema de notificaciones de seguridad?"; then
+if check_executable /usr/local/bin/seguridad-notificar.sh; then
+    log_already "Sistema de notificaciones (seguridad-notificar.sh)"
+elif ask "¿Crear sistema de notificaciones de seguridad?"; then
     # Script de notificaciones
     cat > /usr/local/bin/seguridad-notificar.sh << 'EOFNOTIFY'
 #!/bin/bash
@@ -356,7 +378,9 @@ log_section "S6: VERIFICACIÓN SEMANAL DE LOGROTATE"
 echo "Se verificará que logrotate está funcionando correctamente."
 echo ""
 
-if ask "¿Crear /etc/cron.weekly/verificar-logrotate?"; then
+if check_file_exists /etc/cron.weekly/verificar-logrotate; then
+    log_already "Verificación de logrotate (verificar-logrotate)"
+elif ask "¿Crear /etc/cron.weekly/verificar-logrotate?"; then
     cat > /etc/cron.weekly/verificar-logrotate << 'EOFLOGROTATE'
 #!/bin/bash
 # Verificación semanal de logrotate
@@ -411,7 +435,9 @@ echo "  - Logins recientes"
 echo "  - Alertas del día"
 echo ""
 
-if ask "¿Crear /etc/cron.daily/seguridad-resumen?"; then
+if check_file_exists /etc/cron.daily/seguridad-resumen; then
+    log_already "Digest diario de seguridad (seguridad-resumen)"
+elif ask "¿Crear /etc/cron.daily/seguridad-resumen?"; then
     cat > /etc/cron.daily/seguridad-resumen << 'EOFRESUMEN'
 #!/bin/bash
 # Digest diario de seguridad

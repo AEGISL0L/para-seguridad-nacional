@@ -23,6 +23,15 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-impacto"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 4
+_pc check_executable /usr/local/bin/backup-offsite.sh
+_pc check_executable /usr/local/bin/clamav-antiransomware.sh
+_pc check_executable /usr/local/bin/verificar-backups.sh
+_pc check_executable /usr/local/bin/detectar-impacto.sh
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE IMPACTO - TA0040                          ║"
@@ -44,7 +53,9 @@ echo "  - T1561: Disk Wipe que destruye el disco principal"
 echo "  - T1485: Destrucción de datos"
 echo ""
 
-if ask "¿Configurar sistema de backups offsite automáticos?"; then
+if check_executable /usr/local/bin/backup-offsite.sh; then
+    log_already "Backups offsite automáticos (backup-offsite.sh)"
+elif ask "¿Configurar sistema de backups offsite automáticos?"; then
 
     # Crear directorio de configuración
     mkdir -p /etc/backup-offsite
@@ -266,7 +277,9 @@ echo "  - Detección de extensiones típicas de ransomware"
 echo "  - Monitoreo de cifrado masivo de archivos"
 echo ""
 
-if ask "¿Configurar ClamAV con protección anti-ransomware?"; then
+if check_executable /usr/local/bin/clamav-antiransomware.sh; then
+    log_already "ClamAV anti-ransomware (clamav-antiransomware.sh)"
+elif ask "¿Configurar ClamAV con protección anti-ransomware?"; then
 
     # Verificar/instalar ClamAV
     if ! command -v clamscan &>/dev/null; then
@@ -489,7 +502,9 @@ echo "  - Alertas si se detecta manipulación de backups"
 echo "  - Protección de snapshots de Snapper (si existe)"
 echo ""
 
-if ask "¿Configurar protección de snapshots y backups?"; then
+if check_executable /usr/local/bin/verificar-backups.sh; then
+    log_already "Protección de snapshots/backups (verificar-backups.sh)"
+elif ask "¿Configurar protección de snapshots y backups?"; then
 
     # Proteger directorio de backups del hardening
     BACKUP_DIRS_TO_PROTECT=(
@@ -730,7 +745,9 @@ echo "  - Cifrado masivo sospechoso (T1486 Ransomware)"
 echo "  - Parada de servicios críticos (T1489 Service Stop)"
 echo ""
 
-if ask "¿Configurar monitoreo de actividad de impacto?"; then
+if check_executable /usr/local/bin/detectar-impacto.sh; then
+    log_already "Monitoreo de actividad de impacto (detectar-impacto.sh)"
+elif ask "¿Configurar monitoreo de actividad de impacto?"; then
 
     # Reglas auditd para detección de impacto
     if command -v auditctl &>/dev/null; then

@@ -19,6 +19,23 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 12
+_pc true  # S1: deteccion puertos (siempre re-evaluar)
+_pc true  # S2: fuga de banners (siempre re-evaluar)
+_pc true  # S3: fingerprinting SO (siempre re-evaluar)
+_pc true  # S4: exposicion DNS (siempre re-evaluar)
+_pc true  # S5: info servicios web (siempre re-evaluar)
+_pc true  # S6: SNMP/gestion expuestos (siempre re-evaluar)
+_pc true  # S7: exposicion publica (siempre re-evaluar)
+_pc true  # S8: metadatos/archivos publicos (siempre re-evaluar)
+_pc true  # S9: proteccion de red (siempre re-evaluar)
+_pc true  # S10: certificados SSL/TLS (siempre re-evaluar)
+_pc 'check_executable "/usr/local/bin/auditoria-reconocimiento.sh"'
+_pc 'check_file_exists "/etc/cron.weekly/auditoria-reconocimiento"'
+_precheck_result
+
 REPORT_DIR="/root/auditoria-externa-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/informe-reconocimiento.txt"
@@ -814,7 +831,9 @@ fi
 log_section "11. CREAR SCRIPT DE AUDITORÍA PERIÓDICA"
 # ============================================================
 
-if ask "¿Crear script de auditoría externa periódica en /usr/local/bin/?"; then
+if check_executable "/usr/local/bin/auditoria-reconocimiento.sh"; then
+    log_already "Auditoria periodica (auditoria-reconocimiento.sh ya instalado)"
+elif ask "¿Crear script de auditoría externa periódica en /usr/local/bin/?"; then
     cat > /usr/local/bin/auditoria-reconocimiento.sh << 'AUDIT_EOF'
 #!/bin/bash
 # ============================================================
@@ -938,7 +957,9 @@ fi
 log_section "12. PROGRAMAR AUDITORÍA PERIÓDICA"
 # ============================================================
 
-if ask "¿Programar auditoría semanal de reconocimiento (cron)?"; then
+if check_file_exists "/etc/cron.weekly/auditoria-reconocimiento"; then
+    log_already "Cron semanal auditoria (ya programado)"
+elif ask "¿Programar auditoría semanal de reconocimiento (cron)?"; then
     cat > /etc/cron.weekly/auditoria-reconocimiento << 'CRON_EOF'
 #!/bin/bash
 # Auditoría semanal de reconocimiento (TA0043)
@@ -984,3 +1005,4 @@ echo "  - Verificar en GreyNoise: https://viz.greynoise.io/ip/$PUBLIC_IP"
 echo ""
 echo "Informe completo en: $REPORT_FILE"
 log_info "Backup/reportes en: $REPORT_DIR"
+show_changes_summary

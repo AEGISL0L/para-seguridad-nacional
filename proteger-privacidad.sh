@@ -11,6 +11,23 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 12
+_pc true  # S1 - detección/acción directa (siempre re-evaluar)
+_pc true  # S2 - limpieza cookies (siempre re-evaluar)
+_pc 'check_file_exists ~/.config/xdg-desktop-portal/portals.conf'
+_pc true  # S4 - permisos (siempre re-evaluar)
+_pc true  # S5 - carpeta cifrada (depende de gocryptfs)
+_pc 'check_file_exists /etc/modprobe.d/disable-webcam.conf'
+_pc true  # S7 - limpieza historial (siempre re-evaluar)
+_pc 'check_file_exists ~/.config/kscreenlockerrc'
+_pc 'check_file_exists ~/.config/autostart/security-notify.desktop'
+_pc true  # S10 - detección spyware (siempre re-evaluar)
+_pc true  # S11 - firewall (siempre re-evaluar)
+_pc true  # S12 - informativo
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   PROTECCIÓN DE PRIVACIDAD - Anti-Observadores            ║"
@@ -185,7 +202,9 @@ fi
 # ============================================================
 log_info "6. Bloqueando webcam y micrófono..."
 
-if ask "¿Bloquear webcam y micrófono por software?"; then
+if check_file_exists /etc/modprobe.d/disable-webcam.conf; then
+    log_already "Webcam/micrófono bloqueados (modprobe conf existe)"
+elif ask "¿Bloquear webcam y micrófono por software?"; then
     # Blacklist módulos de webcam
     echo "install uvcvideo /bin/false" | sudo tee /etc/modprobe.d/disable-webcam.conf > /dev/null
     echo "install snd_usb_audio /bin/false" | sudo tee -a /etc/modprobe.d/disable-webcam.conf > /dev/null

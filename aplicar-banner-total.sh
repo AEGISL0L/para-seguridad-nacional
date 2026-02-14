@@ -11,6 +11,30 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+_precheck 20
+_pc 'check_file_contains /etc/issue "SISTEMA PRIVADO"'
+_pc 'check_file_contains /etc/issue.net "SISTEMA PRIVADO"'
+_pc 'check_file_contains /etc/motd "SISTEMA PRIVADO"'
+_pc 'check_file_exists /etc/ssh/banner'
+_pc 'check_file_exists /etc/profile.d/z-security-banner.sh'
+_pc 'check_file_contains /etc/bash.bashrc SECURITY_BANNER'
+_pc 'check_dir_exists /usr/share/sddm/themes/warning-theme'
+_pc 'check_file_exists /etc/dconf/db/gdm.d/01-banner'
+_pc 'check_file_exists /etc/xdg/kscreenlockerrc'
+_pc 'check_file_exists /etc/polkit-1/rules.d/00-banner.rules'
+_pc 'check_file_exists /etc/sudo_lecture'
+_pc 'check_file_exists /etc/systemd/system/getty@tty1.service.d/override.conf'
+_pc 'check_file_contains /etc/security/faillock.conf "^audit"'
+_pc 'check_file_exists /etc/rsyslog.d/99-security-banner.conf'
+_pc true  # S15: firewall log-denied (no persistent artifact)
+_pc 'check_file_contains /etc/hosts.deny "SISTEMA PRIVADO"'
+_pc 'check_file_exists /etc/udev/rules.d/99-usb-security.rules'
+_pc 'check_file_exists /etc/cron.d/security-reminder'
+_pc true  # S19: audit check (detection only)
+_pc 'check_file_contains /etc/default/grub GRUB_INIT_TUNE'
+_precheck_result
+
 BANNER='
     ══════════════════════════════════════════════════════════════════
     ██╗    ██╗ █████╗ ██████╗ ███╗   ██╗██╗███╗   ██╗ ██████╗

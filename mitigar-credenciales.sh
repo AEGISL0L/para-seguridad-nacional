@@ -29,6 +29,16 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-credenciales"
 securizar_setup_traps
+
+_precheck 6
+_pc 'check_file_exists /etc/sysctl.d/91-credential-protection.conf'
+_pc 'check_file_contains /etc/security/faillock.conf "deny = 5"'
+_pc 'check_file_contains /etc/sysctl.d/91-credential-protection.conf "T1557"'
+_pc 'check_executable /usr/local/bin/buscar-credenciales.sh'
+_pc 'check_executable /usr/local/bin/detectar-promiscuo.sh'
+_pc 'check_executable /usr/local/bin/detectar-keylogger.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE ACCESO A CREDENCIALES - TA0006            ║"
@@ -50,7 +60,9 @@ echo "  - Proteger /proc/*/maps y /proc/*/mem"
 echo "  - Endurecer permisos de /etc/shadow"
 echo ""
 
-if ask "¿Aplicar protección contra credential dumping?"; then
+if check_file_exists /etc/sysctl.d/91-credential-protection.conf; then
+    log_already "Protección contra credential dumping (91-credential-protection.conf)"
+elif ask "¿Aplicar protección contra credential dumping?"; then
 
     # 1a. Restringir ptrace
     echo ""
@@ -166,7 +178,9 @@ echo "  - Políticas de contraseña fuertes"
 echo "  - Monitoreo de intentos fallidos"
 echo ""
 
-if ask "¿Configurar protección contra fuerza bruta?"; then
+if check_file_contains /etc/security/faillock.conf "deny = 5"; then
+    log_already "Protección contra fuerza bruta (faillock.conf)"
+elif ask "¿Configurar protección contra fuerza bruta?"; then
 
     # 2a. Verificar/configurar faillock
     echo ""
@@ -317,7 +331,9 @@ echo "  - Verificación de certificados SSL/TLS"
 echo "  - Detección de rogue DHCP"
 echo ""
 
-if ask "¿Configurar protección contra MITM?"; then
+if check_file_contains /etc/sysctl.d/91-credential-protection.conf "T1557"; then
+    log_already "Protección contra MITM (sysctl ARP/ICMP)"
+elif ask "¿Configurar protección contra MITM?"; then
 
     # 3a. Instalar y configurar arpwatch
     if ! command -v arpwatch &>/dev/null; then
@@ -400,7 +416,9 @@ echo "  - T1552.003: Credenciales en historial de bash"
 echo "  - T1552.004: Claves privadas SSH expuestas"
 echo ""
 
-if ask "¿Escanear el sistema en busca de credenciales expuestas?"; then
+if check_executable /usr/local/bin/buscar-credenciales.sh; then
+    log_already "Escaneo de credenciales expuestas (buscar-credenciales.sh)"
+elif ask "¿Escanear el sistema en busca de credenciales expuestas?"; then
 
     cat > /usr/local/bin/buscar-credenciales.sh << 'EOFCRED'
 #!/bin/bash
@@ -541,7 +559,9 @@ log_section "5. PROTECCIÓN CONTRA SNIFFING (T1040)"
 echo "Detectar y prevenir sniffing de red en interfaces locales."
 echo ""
 
-if ask "¿Configurar protección contra network sniffing?"; then
+if check_executable /usr/local/bin/detectar-promiscuo.sh; then
+    log_already "Protección contra sniffing (detectar-promiscuo.sh)"
+elif ask "¿Configurar protección contra network sniffing?"; then
 
     # 5a. Detectar interfaces en modo promiscuo
     cat > /usr/local/bin/detectar-promiscuo.sh << 'EOFPROM'
@@ -632,7 +652,9 @@ echo "Detectar posibles keyloggers en el sistema."
 echo "Los keyloggers capturan pulsaciones de teclado para robar credenciales."
 echo ""
 
-if ask "¿Configurar detección de keyloggers?"; then
+if check_executable /usr/local/bin/detectar-keylogger.sh; then
+    log_already "Detección de keyloggers (detectar-keylogger.sh)"
+elif ask "¿Configurar detección de keyloggers?"; then
 
     cat > /usr/local/bin/detectar-keylogger.sh << 'EOFKL'
 #!/bin/bash

@@ -28,7 +28,7 @@ securizar_setup_traps
 init_backup "auditoria-red-infra"
 
 # ── Pre-check: detectar secciones ya aplicadas ──────────────
-_precheck 10
+_precheck 15
 _pc 'check_executable /usr/bin/nmap || check_executable /usr/local/bin/nmap'
 _pc 'check_executable /usr/local/bin/auditoria-red-descubrimiento.sh'
 _pc 'check_executable /usr/local/bin/auditoria-red-puertos.sh'
@@ -39,6 +39,11 @@ _pc 'check_executable /usr/local/bin/auditoria-red-inventario.sh'
 _pc 'check_executable /usr/local/bin/auditoria-red-baseline.sh'
 _pc 'check_executable /usr/local/bin/auditoria-red-programada.sh'
 _pc 'check_executable /usr/local/bin/auditoria-red-reporte-global.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-topologia.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-infralink.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-baseline-ext.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-programada-ext.sh'
+_pc 'check_executable /usr/local/bin/auditoria-red-reporte-ext.sh'
 _precheck_result
 
 log_section "MODULO 67: AUDITORIA DE INFRAESTRUCTURA DE RED"
@@ -322,6 +327,38 @@ elif ask "Instalar herramientas de auditoria de red?"; then
         command -v snmpget &>/dev/null && log_change "Instalado" "snmp-utils"
     fi
 
+    # ── Herramientas adicionales L2/infraestructura ──
+    if ! command -v lldpctl &>/dev/null || ! command -v ethtool &>/dev/null || ! command -v chronyc &>/dev/null; then
+        log_info "Instalando herramientas de auditoría L2/infraestructura..."
+
+        for _tool_pkg in lldpd ethtool bridge-utils traceroute mtr fping; do
+            if ! pkg_install "$_tool_pkg" 2>/dev/null; then
+                log_warn "No se pudo instalar $_tool_pkg"
+            else
+                log_change "Instalado" "$_tool_pkg"
+            fi
+        done
+
+        # chrony (nombre de paquete varía)
+        if ! command -v chronyc &>/dev/null; then
+            case "$DISTRO_FAMILY" in
+                suse)   pkg_install chrony 2>/dev/null || true ;;
+                debian) pkg_install chrony 2>/dev/null || true ;;
+                redhat) pkg_install chrony 2>/dev/null || true ;;
+                arch)   pkg_install chrony 2>/dev/null || true ;;
+            esac
+            command -v chronyc &>/dev/null && log_change "Instalado" "chrony"
+        fi
+
+        # Activar lldpd si se instaló
+        if command -v lldpd &>/dev/null; then
+            systemctl enable --now lldpd 2>/dev/null || true
+            log_info "lldpd activado para descubrimiento LLDP/CDP"
+        fi
+
+        hash -r 2>/dev/null || true
+    fi
+
     log_info "Herramientas de auditoria verificadas"
 else
     log_skip "Instalacion de herramientas de auditoria"
@@ -483,6 +520,349 @@ ENDSCRIPT
     log_info "Script de descubrimiento de red creado"
 else
     log_skip "Scripts de descubrimiento de red"
+fi
+
+# ── Script de topología L2 ──
+if check_executable /usr/local/bin/auditoria-red-topologia.sh; then
+    log_already "Scripts de topología L2 (auditoria-red-topologia.sh existe)"
+elif ask "Crear scripts de topología y auditoría L2 (LLDP/CDP, VLANs, bridges)?"; then
+
+    cat > "${TOOLS_DIR}/auditoria-red-topologia.sh" << 'ENDSCRIPT'
+#!/bin/bash
+# auditoria-red-topologia.sh - Auditoría de topología L2 de red
+# Uso: auditoria-red-topologia.sh [--full|--quick]
+set -euo pipefail
+[[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+REPORT_DIR="/var/lib/securizar/auditoria-red/reportes"
+mkdir -p "$REPORT_DIR"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+MODE="${1:---full}"
+OUTFILE="${REPORT_DIR}/topologia-${TIMESTAMP}.txt"
+
+SCORE=100
+ISSUES=0
+WARNINGS=0
+
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}  AUDITORÍA DE TOPOLOGÍA L2 DE RED${NC}"
+echo -e "${BOLD}  Host: $(hostname)  |  $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo ""
+
+{
+    echo "# Auditoría de topología L2 - $(hostname)"
+    echo "# Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# ─────────────────────────────────────────────────"
+    echo ""
+
+    # ── [1/6] Vecinos LLDP/CDP ──
+    echo -e "${CYAN}[1/6] Vecinos LLDP/CDP${NC}"
+    echo "## 1. Vecinos LLDP/CDP"
+    echo ""
+
+    LLDP_NEIGHBORS=0
+    if command -v lldpctl &>/dev/null; then
+        LLDP_OUT=$(lldpctl 2>/dev/null || true)
+        if [[ -n "$LLDP_OUT" ]]; then
+            echo "$LLDP_OUT" | while IFS= read -r line; do
+                echo "  $line"
+            done
+            LLDP_NEIGHBORS=$(echo "$LLDP_OUT" | grep -c "Interface:" 2>/dev/null || true)
+            echo ""
+            echo -e "  ${GREEN}[OK]${NC} LLDP activo: $LLDP_NEIGHBORS vecinos descubiertos"
+            echo "  [OK] LLDP vecinos: $LLDP_NEIGHBORS"
+        else
+            echo -e "  ${YELLOW}[INFO]${NC} lldpd activo pero sin vecinos LLDP descubiertos"
+            echo "  [INFO] Sin vecinos LLDP"
+        fi
+    elif command -v lldpcli &>/dev/null; then
+        lldpcli show neighbors 2>/dev/null | while IFS= read -r line; do
+            echo "  $line"
+        done
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} lldpd no instalado - no se puede descubrir topología LLDP"
+        echo "  [WARN] lldpd no instalado"
+        SCORE=$((SCORE - 5))
+        ((WARNINGS++)) || true
+    fi
+
+    # Verificar CDP (si hay switches Cisco)
+    if command -v tcpdump &>/dev/null; then
+        CDP_CHECK=$(timeout 5 tcpdump -i any -c 1 -nn 'ether[20:2] == 0x2000' 2>/dev/null | head -1 || true)
+        if [[ -n "$CDP_CHECK" ]]; then
+            echo -e "  ${YELLOW}[INFO]${NC} Tramas CDP detectadas (equipos Cisco cercanos)"
+            echo "  [INFO] CDP detectado"
+        fi
+    fi
+    echo ""
+
+    # ── [2/6] VLANs ──
+    echo -e "${CYAN}[2/6] VLANs configuradas${NC}"
+    echo "## 2. VLANs"
+    echo ""
+
+    VLAN_COUNT=0
+    # Detectar interfaces VLAN (802.1Q)
+    VLAN_IFACES=$(ip -d link show 2>/dev/null | grep -B1 "vlan protocol" | grep -oP '^\d+: \K[^@:]+' || true)
+    if [[ -n "$VLAN_IFACES" ]]; then
+        for viface in $VLAN_IFACES; do
+            vlan_id=$(ip -d link show "$viface" 2>/dev/null | grep -oP 'vlan protocol 802.1Q id \K\d+' || echo "?")
+            parent=$(ip -d link show "$viface" 2>/dev/null | grep -oP '^\d+: [^@]+@\K[^:]+' || echo "?")
+            state=$(ip -br link show "$viface" 2>/dev/null | awk '{print $2}')
+            echo -e "    ${GREEN}[VLAN]${NC} $viface (ID: $vlan_id, padre: $parent, estado: $state)"
+            echo "  [VLAN] $viface id=$vlan_id parent=$parent state=$state"
+            ((VLAN_COUNT++)) || true
+        done
+    fi
+
+    # Verificar VLANs en /proc
+    if [[ -f /proc/net/vlan/config ]]; then
+        echo ""
+        echo "  /proc/net/vlan/config:"
+        while IFS= read -r line; do
+            echo "    $line"
+        done < /proc/net/vlan/config
+    fi
+
+    if [[ $VLAN_COUNT -eq 0 ]]; then
+        echo -e "  ${YELLOW}[INFO]${NC} Sin VLANs 802.1Q configuradas en el host"
+        echo "  [INFO] Sin VLANs"
+    else
+        echo -e "  ${GREEN}[OK]${NC} $VLAN_COUNT VLANs configuradas"
+    fi
+
+    # Verificar que el módulo 8021q está cargado
+    if lsmod 2>/dev/null | grep -q "^8021q"; then
+        echo -e "  ${GREEN}[OK]${NC} Módulo 8021q cargado"
+    else
+        echo -e "  ${YELLOW}[INFO]${NC} Módulo 8021q no cargado (sin soporte VLAN tagging activo)"
+    fi
+    echo ""
+
+    # ── [3/6] Bridges, bonds y STP ──
+    echo -e "${CYAN}[3/6] Bridges, bonds y STP${NC}"
+    echo "## 3. Bridges, bonds y STP"
+    echo ""
+
+    # Bridges
+    BRIDGE_COUNT=0
+    if command -v bridge &>/dev/null; then
+        BRIDGES=$(bridge link show 2>/dev/null | awk '{print $2}' | sort -u || true)
+        if [[ -n "$BRIDGES" ]]; then
+            echo "  Bridges detectados:"
+            for br in $(ip -br link show type bridge 2>/dev/null | awk '{print $1}'); do
+                state=$(ip -br link show "$br" 2>/dev/null | awk '{print $2}')
+                members=$(bridge link show 2>/dev/null | grep "master $br" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
+                echo -e "    ${GREEN}[BR]${NC} $br ($state) miembros: ${members:--}"
+                echo "  [BR] $br state=$state members=$members"
+                ((BRIDGE_COUNT++)) || true
+
+                # STP estado
+                STP_STATE=$(cat "/sys/class/net/$br/bridge/stp_state" 2>/dev/null || echo "?")
+                if [[ "$STP_STATE" == "1" ]]; then
+                    echo -e "      ${GREEN}[STP]${NC} STP habilitado en $br"
+                    echo "  [STP] $br enabled"
+                elif [[ "$STP_STATE" == "0" ]]; then
+                    echo -e "      ${YELLOW}[WARN]${NC} STP deshabilitado en $br (riesgo de loops)"
+                    echo "  [WARN] STP deshabilitado en $br"
+                    SCORE=$((SCORE - 5))
+                    ((WARNINGS++)) || true
+                fi
+            done
+        fi
+    fi
+
+    # Bonds
+    BOND_COUNT=0
+    for bond_dir in /sys/class/net/*/bonding; do
+        [[ -d "$bond_dir" ]] || continue
+        bond_iface=$(basename "$(dirname "$bond_dir")")
+        bond_mode=$(cat "${bond_dir}/mode" 2>/dev/null || echo "?")
+        bond_slaves=$(cat "${bond_dir}/slaves" 2>/dev/null || echo "ninguno")
+        bond_miimon=$(cat "${bond_dir}/miimon" 2>/dev/null || echo "?")
+        state=$(ip -br link show "$bond_iface" 2>/dev/null | awk '{print $2}')
+
+        echo -e "    ${GREEN}[BOND]${NC} $bond_iface (modo: $bond_mode, estado: $state)"
+        echo "  [BOND] $bond_iface mode=$bond_mode state=$state"
+        echo -e "      Esclavos: $bond_slaves"
+        echo -e "      MII monitoring: ${bond_miimon}ms"
+        echo "  slaves=$bond_slaves miimon=$bond_miimon"
+        ((BOND_COUNT++)) || true
+
+        # Verificar que todos los esclavos están UP
+        for slave in $bond_slaves; do
+            slave_state=$(cat "/sys/class/net/$slave/operstate" 2>/dev/null || echo "unknown")
+            if [[ "$slave_state" != "up" ]]; then
+                echo -e "      ${RED}[FAIL]${NC} Esclavo $slave en estado: $slave_state"
+                echo "  [FAIL] slave $slave state=$slave_state"
+                SCORE=$((SCORE - 10))
+                ((ISSUES++)) || true
+            fi
+        done
+    done
+
+    if [[ $BRIDGE_COUNT -eq 0 ]] && [[ $BOND_COUNT -eq 0 ]]; then
+        echo -e "  ${YELLOW}[INFO]${NC} Sin bridges ni bonds configurados"
+        echo "  [INFO] Sin bridges/bonds"
+    fi
+    echo ""
+
+    # ── [4/6] 802.1X / NAC ──
+    echo -e "${CYAN}[4/6] 802.1X / Network Access Control${NC}"
+    echo "## 4. 802.1X / NAC"
+    echo ""
+
+    DOT1X_OK=false
+    if command -v wpa_supplicant &>/dev/null; then
+        echo -e "  ${GREEN}[OK]${NC} wpa_supplicant disponible para 802.1X"
+        echo "  [OK] wpa_supplicant disponible"
+
+        # Verificar si hay configuración 802.1X por cable
+        if [[ -f /etc/wpa_supplicant/wpa_supplicant-wired.conf ]] || \
+           ls /etc/wpa_supplicant/wpa_supplicant-*.conf &>/dev/null 2>&1; then
+            echo -e "  ${GREEN}[OK]${NC} Configuración 802.1X encontrada"
+            echo "  [OK] 802.1X configurado"
+            DOT1X_OK=true
+        else
+            echo -e "  ${YELLOW}[INFO]${NC} Sin configuración 802.1X por cable detectada"
+            echo "  [INFO] Sin 802.1X por cable"
+        fi
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} wpa_supplicant no instalado (sin soporte 802.1X)"
+        echo "  [WARN] Sin wpa_supplicant"
+    fi
+
+    # Verificar hostapd (si actúa como autenticador)
+    if command -v hostapd &>/dev/null; then
+        echo -e "  ${GREEN}[INFO]${NC} hostapd disponible (puede actuar como autenticador 802.1X)"
+    fi
+
+    # FreeRADIUS
+    if systemctl is-active freeradius &>/dev/null 2>&1 || systemctl is-active radiusd &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}[OK]${NC} Servidor RADIUS activo (soporte NAC)"
+        echo "  [OK] RADIUS activo"
+        DOT1X_OK=true
+    fi
+
+    if ! $DOT1X_OK; then
+        echo -e "  ${YELLOW}[WARN]${NC} Sin protección 802.1X/NAC activa"
+        echo "  [WARN] Sin 802.1X/NAC"
+        SCORE=$((SCORE - 5))
+        ((WARNINGS++)) || true
+    fi
+    echo ""
+
+    # ── [5/6] Seguridad L2 ──
+    echo -e "${CYAN}[5/6] Seguridad L2${NC}"
+    echo "## 5. Seguridad L2"
+    echo ""
+
+    # ARP protecciones (sysctl)
+    for param_val in "net.ipv4.conf.all.arp_announce:2" "net.ipv4.conf.all.arp_ignore:1" "net.ipv4.conf.all.arp_accept:0"; do
+        param="${param_val%%:*}"
+        expected="${param_val##*:}"
+        current=$(sysctl -n "$param" 2>/dev/null || echo "N/A")
+        if [[ "$current" == "$expected" ]]; then
+            echo -e "  ${GREEN}[OK]${NC} $param = $current"
+            echo "  [OK] $param=$current"
+        else
+            echo -e "  ${RED}[FAIL]${NC} $param = $current (esperado: $expected)"
+            echo "  [FAIL] $param=$current (esperado: $expected)"
+            SCORE=$((SCORE - 5))
+            ((ISSUES++)) || true
+        fi
+    done
+
+    # Verificar ebtables/nftables para filtrado L2
+    L2_FILTER=false
+    if command -v ebtables &>/dev/null; then
+        EB_RULES=$(ebtables -L 2>/dev/null | grep -c "^-" || true)
+        if [[ $EB_RULES -gt 0 ]]; then
+            echo -e "  ${GREEN}[OK]${NC} ebtables con $EB_RULES reglas L2"
+            echo "  [OK] ebtables rules=$EB_RULES"
+            L2_FILTER=true
+        fi
+    fi
+    if command -v nft &>/dev/null; then
+        NFT_BRIDGE=$(nft list tables 2>/dev/null | grep -c "bridge" || true)
+        if [[ $NFT_BRIDGE -gt 0 ]]; then
+            echo -e "  ${GREEN}[OK]${NC} nftables bridge tables: $NFT_BRIDGE"
+            echo "  [OK] nftables bridge=$NFT_BRIDGE"
+            L2_FILTER=true
+        fi
+    fi
+    if ! $L2_FILTER; then
+        echo -e "  ${YELLOW}[INFO]${NC} Sin filtrado L2 activo (ebtables/nft bridge)"
+        echo "  [INFO] Sin filtrado L2"
+    fi
+
+    # Verificar modo promiscuo
+    PROMISC=$(ip link show 2>/dev/null | grep -i "PROMISC" | awk -F': ' '{print $2}' || true)
+    if [[ -n "$PROMISC" ]]; then
+        echo -e "  ${YELLOW}[WARN]${NC} Interfaces en modo promiscuo: $PROMISC"
+        echo "  [WARN] Promiscuo: $PROMISC"
+        SCORE=$((SCORE - 5))
+        ((WARNINGS++)) || true
+    else
+        echo -e "  ${GREEN}[OK]${NC} Sin interfaces en modo promiscuo"
+    fi
+
+    # Verificar MACs duplicadas
+    DUP_MACS=$(ip neigh show 2>/dev/null | awk '{print $5}' | sort | uniq -d | grep -v "^$" || true)
+    if [[ -n "$DUP_MACS" ]]; then
+        echo -e "  ${RED}[CRITICO]${NC} MACs duplicadas (posible ARP spoofing):"
+        echo "  [CRITICO] MACs duplicadas"
+        for mac in $DUP_MACS; do
+            ips=$(ip neigh show 2>/dev/null | grep "$mac" | awk '{print $1}' | tr '\n' ',' | sed 's/,$//')
+            echo -e "    $mac -> $ips"
+            echo "  DUP $mac -> $ips"
+        done
+        SCORE=$((SCORE - 15))
+        ((ISSUES++)) || true
+    else
+        echo -e "  ${GREEN}[OK]${NC} Sin MACs duplicadas"
+    fi
+    echo ""
+
+    # ── [6/6] Resumen y scoring ──
+    echo -e "${CYAN}[6/6] Resumen de topología${NC}"
+    echo "## 6. Resumen"
+    echo ""
+
+    echo "  VLANs: $VLAN_COUNT | Bridges: $BRIDGE_COUNT | Bonds: $BOND_COUNT | LLDP vecinos: $LLDP_NEIGHBORS"
+    echo ""
+
+    [[ $SCORE -lt 0 ]] && SCORE=0
+    echo "## Puntuación topología L2"
+    echo "  Puntuación: $SCORE/100"
+    echo "  Problemas: $ISSUES | Warnings: $WARNINGS"
+
+    echo "$SCORE" > "${OUTFILE}.score"
+} 2>&1 | tee "$OUTFILE"
+SCORE=$(cat "${OUTFILE}.score" 2>/dev/null) || SCORE=0; rm -f "${OUTFILE}.score"
+
+echo ""
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+if [[ $SCORE -ge 80 ]]; then
+    echo -e "  Puntuación topología: ${GREEN}${SCORE}/100${NC}"
+elif [[ $SCORE -ge 60 ]]; then
+    echo -e "  Puntuación topología: ${YELLOW}${SCORE}/100${NC}"
+else
+    echo -e "  Puntuación topología: ${RED}${SCORE}/100${NC}"
+fi
+echo -e "  Reporte: ${CYAN}$OUTFILE${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+ENDSCRIPT
+    chmod +x "${TOOLS_DIR}/auditoria-red-topologia.sh"
+    log_change "Creado" "${TOOLS_DIR}/auditoria-red-topologia.sh"
+
+    log_info "Script de topología L2 creado"
+else
+    log_skip "Scripts de topología L2"
 fi
 fi # S2
 
@@ -1097,7 +1477,7 @@ echo -e "${CYAN}[1/4] Descubrimiento de agentes SNMP (161/udp)...${NC}"
 if command -v nmap &>/dev/null; then
     nmap -sU -p 161 --open -T3 "$TARGET" -oG "${OUTFILE}-discovery.gnmap" 2>/dev/null
     SNMP_HOSTS=$(grep "161/open" "${OUTFILE}-discovery.gnmap" 2>/dev/null | awk '{print $2}' | sort -u)
-    SNMP_COUNT=$(echo "$SNMP_HOSTS" | grep -c . 2>/dev/null || echo 0)
+    SNMP_COUNT=$(echo "$SNMP_HOSTS" | grep -c . 2>/dev/null || true)
     echo -e "${GREEN}  Agentes SNMP detectados: $SNMP_COUNT${NC}"
 else
     echo -e "${RED}  nmap no disponible; no se puede escanear${NC}"
@@ -1569,7 +1949,7 @@ echo ""
             echo "    $line"
         done
     elif command -v iptables &>/dev/null; then
-        RULES_COUNT=$(iptables -S 2>/dev/null | grep -cv "^-P" || echo 0)
+        RULES_COUNT=$(iptables -S 2>/dev/null | grep -cv "^-P" || true)
         if [[ $RULES_COUNT -gt 0 ]]; then
             FW_ACTIVE=true
             echo -e "    ${GREEN}[OK]${NC} iptables con $RULES_COUNT reglas"
@@ -1620,7 +2000,9 @@ echo ""
     echo "  Puntuacion: $SCORE/100"
     echo "  Problemas: $ISSUES"
 
+    echo "$SCORE $ISSUES" > "${OUTFILE}.score"
 } 2>&1 | tee "$OUTFILE"
+read SCORE ISSUES < "${OUTFILE}.score" 2>/dev/null || { SCORE=0; ISSUES=0; }; rm -f "${OUTFILE}.score"
 
 # Mostrar puntuacion final
 echo ""
@@ -1641,6 +2023,545 @@ ENDSCRIPT
     log_info "Script de auditoria de configuracion de red creado"
 else
     log_skip "Scripts de auditoria de configuracion de red"
+fi
+
+# ── Script de infraestructura de enlace extendida ──
+if check_executable /usr/local/bin/auditoria-red-infralink.sh; then
+    log_already "Scripts de infraestructura de enlace (auditoria-red-infralink.sh existe)"
+elif ask "Crear scripts de auditoría extendida (NTP, DHCP, ethtool, IPv6, MTU, rendimiento)?"; then
+
+    cat > "${TOOLS_DIR}/auditoria-red-infralink.sh" << 'ENDSCRIPT'
+#!/bin/bash
+# auditoria-red-infralink.sh - Auditoría de infraestructura de enlace
+# Uso: auditoria-red-infralink.sh [--full|--quick] [interfaz]
+set -euo pipefail
+[[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+REPORT_DIR="/var/lib/securizar/auditoria-red/reportes"
+mkdir -p "$REPORT_DIR"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+MODE="${1:---full}"
+TARGET_IFACE="${2:-}"
+OUTFILE="${REPORT_DIR}/infralink-${TIMESTAMP}.txt"
+
+SCORE=100
+ISSUES=0
+WARNINGS=0
+
+# Detectar interfaz principal si no se especifica
+if [[ -z "$TARGET_IFACE" ]]; then
+    TARGET_IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+    [[ -z "$TARGET_IFACE" ]] && TARGET_IFACE=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+    TARGET_IFACE="${TARGET_IFACE:-eth0}"
+fi
+
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}  AUDITORÍA DE INFRAESTRUCTURA DE ENLACE${NC}"
+echo -e "${BOLD}  Host: $(hostname)  |  Interfaz: $TARGET_IFACE${NC}"
+echo -e "${BOLD}  $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo ""
+
+{
+    echo "# Auditoría de infraestructura de enlace - $(hostname)"
+    echo "# Interfaz: $TARGET_IFACE | Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# ─────────────────────────────────────────────────"
+    echo ""
+
+    # ── [1/8] NTP / Sincronización horaria ──
+    echo -e "${CYAN}[1/8] NTP / Sincronización horaria${NC}"
+    echo "## 1. NTP / Sincronización horaria"
+    echo ""
+
+    NTP_OK=false
+    NTP_OFFSET="N/A"
+
+    # Verificar chrony
+    if command -v chronyc &>/dev/null; then
+        CHRONY_STATE=$(chronyc tracking 2>/dev/null || true)
+        if [[ -n "$CHRONY_STATE" ]]; then
+            echo "  Motor NTP: chrony"
+            echo "$CHRONY_STATE" | while IFS= read -r line; do
+                echo "    $line"
+            done
+            echo ""
+
+            # Extraer offset
+            NTP_OFFSET=$(echo "$CHRONY_STATE" | grep "Last offset" | awk '{print $4}' || echo "?")
+            OFFSET_ABS=$(echo "$NTP_OFFSET" | sed 's/[+-]//' | sed 's/seconds//')
+
+            # Verificar fuentes
+            CHRONY_SOURCES=$(chronyc sources 2>/dev/null || true)
+            if [[ -n "$CHRONY_SOURCES" ]]; then
+                echo "  Fuentes NTP:"
+                echo "$CHRONY_SOURCES" | while IFS= read -r line; do
+                    echo "    $line"
+                done
+                echo ""
+
+                REACHABLE=$(echo "$CHRONY_SOURCES" | grep -c '^\^[*+]' 2>/dev/null || true)
+                TOTAL_SRC=$(echo "$CHRONY_SOURCES" | grep -c '^\^' 2>/dev/null || true)
+                echo -e "  Fuentes alcanzables: $REACHABLE / $TOTAL_SRC"
+                echo "  [NTP] sources=$TOTAL_SRC reachable=$REACHABLE"
+
+                if [[ $REACHABLE -gt 0 ]]; then
+                    echo -e "  ${GREEN}[OK]${NC} chrony sincronizado (offset: ${NTP_OFFSET})"
+                    echo "  [OK] chrony synced offset=$NTP_OFFSET"
+                    NTP_OK=true
+                else
+                    echo -e "  ${RED}[FAIL]${NC} chrony sin fuentes alcanzables"
+                    echo "  [FAIL] chrony sin fuentes"
+                    SCORE=$((SCORE - 15))
+                    ((ISSUES++)) || true
+                fi
+            fi
+        fi
+    fi
+
+    # Verificar systemd-timesyncd
+    if ! $NTP_OK && command -v timedatectl &>/dev/null; then
+        TD_OUT=$(timedatectl show 2>/dev/null || timedatectl status 2>/dev/null || true)
+        if echo "$TD_OUT" | grep -qi "NTP.*yes\|NTPSynchronized.*yes\|synchronized: yes" 2>/dev/null; then
+            echo -e "  ${GREEN}[OK]${NC} systemd-timesyncd sincronizado"
+            echo "  [OK] timesyncd sincronizado"
+            NTP_OK=true
+        elif echo "$TD_OUT" | grep -qi "NTP.*no\|NTPSynchronized.*no" 2>/dev/null; then
+            echo -e "  ${YELLOW}[WARN]${NC} NTP no sincronizado (timedatectl)"
+            echo "  [WARN] NTP no sync"
+            SCORE=$((SCORE - 10))
+            ((WARNINGS++)) || true
+        fi
+    fi
+
+    # Verificar ntpd clásico
+    if ! $NTP_OK && command -v ntpq &>/dev/null; then
+        NTP_PEERS=$(ntpq -p 2>/dev/null || true)
+        if [[ -n "$NTP_PEERS" ]]; then
+            echo "  Motor NTP: ntpd"
+            echo "$NTP_PEERS" | while IFS= read -r line; do
+                echo "    $line"
+            done
+            SYNCED=$(echo "$NTP_PEERS" | grep -c '^\*' 2>/dev/null || true)
+            if [[ $SYNCED -gt 0 ]]; then
+                echo -e "  ${GREEN}[OK]${NC} ntpd sincronizado"
+                NTP_OK=true
+            fi
+        fi
+    fi
+
+    if ! $NTP_OK; then
+        echo -e "  ${RED}[FAIL]${NC} Sin servicio NTP activo o sincronizado"
+        echo "  [FAIL] Sin NTP"
+        SCORE=$((SCORE - 15))
+        ((ISSUES++)) || true
+    fi
+    echo ""
+
+    # ── [2/8] DHCP ──
+    echo -e "${CYAN}[2/8] DHCP${NC}"
+    echo "## 2. DHCP"
+    echo ""
+
+    DHCP_CLIENT=false
+    DHCP_SERVER=false
+
+    # Verificar si la interfaz usa DHCP
+    if ip -4 addr show "$TARGET_IFACE" 2>/dev/null | grep -q "dynamic" 2>/dev/null; then
+        echo -e "  ${GREEN}[INFO]${NC} $TARGET_IFACE obtiene IP por DHCP (dinámico)"
+        echo "  [INFO] $TARGET_IFACE DHCP dynamic"
+        DHCP_CLIENT=true
+    else
+        echo -e "  ${GREEN}[INFO]${NC} $TARGET_IFACE usa IP estática"
+        echo "  [INFO] $TARGET_IFACE static"
+    fi
+
+    # Verificar dhclient lease
+    for lease_file in /var/lib/dhclient/dhclient*.leases /var/lib/dhcp/dhclient*.leases \
+                      /var/lib/NetworkManager/dhclient-*.lease; do
+        if [[ -f "$lease_file" ]]; then
+            echo "  Lease encontrado: $lease_file"
+            DHCP_SERVER_IP=$(grep "dhcp-server-identifier" "$lease_file" 2>/dev/null | tail -1 | awk '{print $3}' | tr -d ';')
+            DHCP_DOMAIN=$(grep "domain-name " "$lease_file" 2>/dev/null | tail -1 | awk '{print $3}' | tr -d '";')
+            DHCP_DNS=$(grep "domain-name-servers" "$lease_file" 2>/dev/null | tail -1 | awk '{$1=$2=""; print $0}' | tr -d ';' | xargs)
+            [[ -n "$DHCP_SERVER_IP" ]] && echo "    Servidor DHCP: $DHCP_SERVER_IP"
+            [[ -n "$DHCP_DOMAIN" ]] && echo "    Dominio: $DHCP_DOMAIN"
+            [[ -n "$DHCP_DNS" ]] && echo "    DNS asignados: $DHCP_DNS"
+            DHCP_CLIENT=true
+            break
+        fi
+    done
+
+    # Verificar si somos servidor DHCP
+    for dhcp_svc in dhcpd isc-dhcp-server kea-dhcp4 dnsmasq; do
+        if systemctl is-active "$dhcp_svc" &>/dev/null 2>&1; then
+            echo -e "  ${YELLOW}[INFO]${NC} Servidor DHCP activo: $dhcp_svc"
+            echo "  [INFO] DHCP server=$dhcp_svc"
+            DHCP_SERVER=true
+        fi
+    done
+
+    if ! $DHCP_CLIENT && ! $DHCP_SERVER; then
+        echo -e "  ${GREEN}[INFO]${NC} Sin actividad DHCP detectada (IP estáticas)"
+        echo "  [INFO] Sin DHCP"
+    fi
+    echo ""
+
+    # ── [3/8] Ethtool diagnósticos ──
+    echo -e "${CYAN}[3/8] Ethtool - diagnósticos de enlace${NC}"
+    echo "## 3. Ethtool diagnósticos"
+    echo ""
+
+    if command -v ethtool &>/dev/null; then
+        # Obtener lista de interfaces físicas (excluir virtual)
+        PHYS_IFACES=$(ls /sys/class/net/ 2>/dev/null | while read -r iface; do
+            [[ -d "/sys/class/net/$iface/device" ]] && echo "$iface"
+        done)
+        [[ -z "$PHYS_IFACES" ]] && PHYS_IFACES="$TARGET_IFACE"
+
+        for iface in $PHYS_IFACES; do
+            echo -e "  ${BOLD}$iface:${NC}"
+            echo "  ### $iface"
+
+            # Velocidad y dúplex
+            ETH_INFO=$(ethtool "$iface" 2>/dev/null || true)
+            if [[ -n "$ETH_INFO" ]]; then
+                SPEED=$(echo "$ETH_INFO" | grep "Speed:" | awk '{print $2}')
+                DUPLEX=$(echo "$ETH_INFO" | grep "Duplex:" | awk '{print $2}')
+                LINK=$(echo "$ETH_INFO" | grep "Link detected:" | awk '{print $3}')
+                AUTONEG=$(echo "$ETH_INFO" | grep "Auto-negotiation:" | awk '{print $2}')
+
+                echo -e "    Velocidad: ${SPEED:-?} | Dúplex: ${DUPLEX:-?} | Link: ${LINK:-?} | Auto-neg: ${AUTONEG:-?}"
+                echo "  speed=$SPEED duplex=$DUPLEX link=$LINK autoneg=$AUTONEG"
+
+                # Verificar half-duplex (malo)
+                if [[ "$DUPLEX" == "Half" ]]; then
+                    echo -e "    ${RED}[FAIL]${NC} Half-duplex detectado (colisiones, rendimiento pobre)"
+                    echo "  [FAIL] half-duplex en $iface"
+                    SCORE=$((SCORE - 10))
+                    ((ISSUES++)) || true
+                fi
+
+                # Verificar link down
+                if [[ "$LINK" == "no" ]]; then
+                    echo -e "    ${YELLOW}[WARN]${NC} Sin link detectado en $iface"
+                    echo "  [WARN] no link $iface"
+                fi
+            fi
+
+            # Estadísticas de errores
+            ETH_STATS=$(ethtool -S "$iface" 2>/dev/null || true)
+            if [[ -n "$ETH_STATS" ]]; then
+                RX_ERRORS=$(echo "$ETH_STATS" | grep -iE "rx_errors|rx_crc_errors|rx_frame_errors" | head -3)
+                TX_ERRORS=$(echo "$ETH_STATS" | grep -iE "tx_errors|tx_dropped|tx_aborted" | head -3)
+                COLLISIONS=$(echo "$ETH_STATS" | grep -i "collision" | head -1)
+
+                HAS_ERRORS=false
+                for stat_line in $RX_ERRORS $TX_ERRORS $COLLISIONS; do
+                    val=$(echo "$stat_line" | awk '{print $NF}')
+                    if [[ "$val" =~ ^[0-9]+$ ]] && [[ $val -gt 0 ]]; then
+                        HAS_ERRORS=true
+                    fi
+                done
+
+                if $HAS_ERRORS; then
+                    echo -e "    ${YELLOW}[WARN]${NC} Errores en estadísticas NIC:"
+                    echo "$RX_ERRORS" | grep -v "^$" | while IFS= read -r line; do
+                        echo -e "      $line"
+                    done
+                    echo "$TX_ERRORS" | grep -v "^$" | while IFS= read -r line; do
+                        echo -e "      $line"
+                    done
+                    [[ -n "$COLLISIONS" ]] && echo -e "      $COLLISIONS"
+                    echo "  [WARN] NIC errors en $iface"
+                    SCORE=$((SCORE - 3))
+                    ((WARNINGS++)) || true
+                else
+                    echo -e "    ${GREEN}[OK]${NC} Sin errores significativos en NIC"
+                fi
+            fi
+
+            # Driver info
+            DRV_INFO=$(ethtool -i "$iface" 2>/dev/null || true)
+            if [[ -n "$DRV_INFO" ]]; then
+                DRIVER=$(echo "$DRV_INFO" | grep "driver:" | awk '{print $2}')
+                FW_VER=$(echo "$DRV_INFO" | grep "firmware-version:" | awk '{print $2}')
+                echo -e "    Driver: ${DRIVER:-?} | Firmware: ${FW_VER:--}"
+                echo "  driver=$DRIVER firmware=$FW_VER"
+            fi
+
+            # Offloads
+            OFFLOADS=$(ethtool -k "$iface" 2>/dev/null || true)
+            if [[ -n "$OFFLOADS" ]]; then
+                TSO=$(echo "$OFFLOADS" | grep "tcp-segmentation-offload:" | awk '{print $2}')
+                GRO=$(echo "$OFFLOADS" | grep "generic-receive-offload:" | awk '{print $2}')
+                GSO=$(echo "$OFFLOADS" | grep "generic-segmentation-offload:" | awk '{print $2}')
+                echo -e "    Offloads: TSO=${TSO:-?} GRO=${GRO:-?} GSO=${GSO:-?}"
+            fi
+            echo ""
+        done
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} ethtool no instalado"
+        echo "  [WARN] ethtool no instalado"
+        SCORE=$((SCORE - 5))
+        ((WARNINGS++)) || true
+    fi
+    echo ""
+
+    # ── [4/8] Bridges / bonds estado ──
+    echo -e "${CYAN}[4/8] Estado de bridges y bonds${NC}"
+    echo "## 4. Estado bridges/bonds"
+    echo ""
+
+    # Bridges
+    BR_LIST=$(ip -br link show type bridge 2>/dev/null | awk '{print $1}' || true)
+    if [[ -n "$BR_LIST" ]]; then
+        for br in $BR_LIST; do
+            echo -e "  ${BOLD}Bridge: $br${NC}"
+            bridge fdb show br "$br" 2>/dev/null | head -20 | while IFS= read -r line; do
+                echo "    $line"
+            done
+            FDB_COUNT=$(bridge fdb show br "$br" 2>/dev/null | wc -l)
+            echo "  Entradas FDB: $FDB_COUNT"
+            echo ""
+        done
+    else
+        echo -e "  ${GREEN}[INFO]${NC} Sin bridges activos"
+    fi
+
+    # Bonds
+    BOND_LIST=""
+    for bdir in /sys/class/net/*/bonding; do
+        [[ -d "$bdir" ]] && BOND_LIST="$BOND_LIST $(basename "$(dirname "$bdir")")"
+    done
+    if [[ -n "$BOND_LIST" ]]; then
+        for bond in $BOND_LIST; do
+            echo -e "  ${BOLD}Bond: $bond${NC}"
+            bond_mode=$(cat "/sys/class/net/$bond/bonding/mode" 2>/dev/null || echo "?")
+            bond_xmit=$(cat "/sys/class/net/$bond/bonding/xmit_hash_policy" 2>/dev/null || echo "?")
+            active_slave=$(cat "/sys/class/net/$bond/bonding/active_slave" 2>/dev/null || echo "-")
+            echo "    Modo: $bond_mode | Hash: $bond_xmit | Activo: $active_slave"
+            echo "  [BOND] $bond mode=$bond_mode active=$active_slave"
+            echo ""
+        done
+    else
+        echo -e "  ${GREEN}[INFO]${NC} Sin bonds activos"
+    fi
+    echo ""
+
+    # ── [5/8] IPv6 ──
+    echo -e "${CYAN}[5/8] IPv6${NC}"
+    echo "## 5. IPv6"
+    echo ""
+
+    IPV6_ENABLED=false
+    IPV6_ADDRS=$(ip -6 addr show 2>/dev/null | grep "inet6" | grep -v "::1/128" | grep -v "fe80::" || true)
+    IPV6_LINK_LOCAL=$(ip -6 addr show 2>/dev/null | grep "inet6 fe80::" || true)
+
+    if [[ -n "$IPV6_ADDRS" ]]; then
+        IPV6_ENABLED=true
+        echo -e "  ${GREEN}[INFO]${NC} IPv6 global configurado:"
+        echo "$IPV6_ADDRS" | while IFS= read -r line; do
+            echo -e "    $line"
+        done
+        echo "  [INFO] IPv6 global activo"
+    fi
+
+    if [[ -n "$IPV6_LINK_LOCAL" ]]; then
+        echo -e "  ${GREEN}[INFO]${NC} IPv6 link-local presente"
+    fi
+
+    # Verificar seguridad IPv6
+    RA_ALL=$(sysctl -n net.ipv6.conf.all.accept_ra 2>/dev/null || echo "?")
+    RA_DEF=$(sysctl -n net.ipv6.conf.default.accept_ra 2>/dev/null || echo "?")
+    REDIR6=$(sysctl -n net.ipv6.conf.all.accept_redirects 2>/dev/null || echo "?")
+    SRC6=$(sysctl -n net.ipv6.conf.all.accept_source_route 2>/dev/null || echo "?")
+
+    echo ""
+    echo "  Parámetros de seguridad IPv6:"
+    for pv in "accept_ra(all):$RA_ALL:0" "accept_ra(default):$RA_DEF:0" "accept_redirects:$REDIR6:0" "accept_source_route:$SRC6:0"; do
+        name="${pv%%:*}"
+        rest="${pv#*:}"
+        current="${rest%%:*}"
+        expected="${rest##*:}"
+        if [[ "$current" == "$expected" ]]; then
+            echo -e "    ${GREEN}[OK]${NC} $name = $current"
+        else
+            echo -e "    ${RED}[FAIL]${NC} $name = $current (esperado: $expected)"
+            echo "  [FAIL] IPv6 $name=$current"
+            SCORE=$((SCORE - 5))
+            ((ISSUES++)) || true
+        fi
+    done
+
+    # IPv6 deshabilitado completamente?
+    IPV6_DISABLED=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo "0")
+    if [[ "$IPV6_DISABLED" == "1" ]]; then
+        echo -e "  ${YELLOW}[INFO]${NC} IPv6 completamente deshabilitado"
+        echo "  [INFO] IPv6 disabled"
+    fi
+    echo ""
+
+    # ── [6/8] MTU ──
+    echo -e "${CYAN}[6/8] MTU${NC}"
+    echo "## 6. MTU"
+    echo ""
+
+    # Recolectar MTU de todas las interfaces
+    MTU_MISMATCH=false
+    PREV_MTU=""
+    ip -br link show 2>/dev/null | while IFS= read -r line; do
+        iface=$(echo "$line" | awk '{print $1}')
+        state=$(echo "$line" | awk '{print $2}')
+        [[ "$iface" == "lo" ]] && continue
+        [[ "$state" == "DOWN" ]] && continue
+
+        mtu=$(ip link show "$iface" 2>/dev/null | grep -oP 'mtu \K\d+' || echo "?")
+        echo -e "    $iface: MTU=$mtu ($state)"
+        echo "  [MTU] $iface=$mtu"
+    done
+
+    # Verificar MTU path
+    echo ""
+    echo "  Verificación de Path MTU:"
+    PMTUD=$(sysctl -n net.ipv4.ip_no_pmtu_disc 2>/dev/null || echo "?")
+    if [[ "$PMTUD" == "0" ]]; then
+        echo -e "  ${GREEN}[OK]${NC} Path MTU Discovery habilitado"
+        echo "  [OK] PMTUD enabled"
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} Path MTU Discovery deshabilitado (ip_no_pmtu_disc=$PMTUD)"
+        echo "  [WARN] PMTUD disabled"
+        SCORE=$((SCORE - 3))
+        ((WARNINGS++)) || true
+    fi
+
+    # Jumbo frames
+    JUMBO_IFACES=$(ip link show 2>/dev/null | grep -oP '\d+: \K\S+(?=.*mtu (9[0-9]{3}|[1-9][0-9]{4,}))' || true)
+    if [[ -n "$JUMBO_IFACES" ]]; then
+        echo -e "  ${YELLOW}[INFO]${NC} Interfaces con jumbo frames: $JUMBO_IFACES"
+        echo "  [INFO] jumbo frames: $JUMBO_IFACES"
+    fi
+    echo ""
+
+    # ── [7/8] Rendimiento (latencia/pérdida) ──
+    echo -e "${CYAN}[7/8] Rendimiento de red (latencia/pérdida)${NC}"
+    echo "## 7. Rendimiento"
+    echo ""
+
+    # Gateway
+    GW=$(ip route show default 2>/dev/null | head -1 | awk '{print $3}')
+    if [[ -n "$GW" ]]; then
+        echo "  Default gateway: $GW"
+        echo ""
+
+        # Ping al gateway
+        echo "  Latencia al gateway:"
+        PING_GW=$(ping -c 5 -W 2 "$GW" 2>/dev/null || true)
+        if [[ -n "$PING_GW" ]]; then
+            PING_STATS=$(echo "$PING_GW" | tail -1)
+            PING_LOSS=$(echo "$PING_GW" | grep "packet loss" | grep -oP '\d+%')
+            echo "    $PING_STATS"
+            echo "    Pérdida: ${PING_LOSS:-?}"
+            echo "  [PERF] gw_latency=$PING_STATS loss=$PING_LOSS"
+
+            LOSS_NUM=$(echo "$PING_LOSS" | tr -d '%')
+            if [[ -n "$LOSS_NUM" ]] && [[ "$LOSS_NUM" -gt 0 ]]; then
+                echo -e "    ${YELLOW}[WARN]${NC} Pérdida de paquetes al gateway: $PING_LOSS"
+                SCORE=$((SCORE - 5))
+                ((WARNINGS++)) || true
+            else
+                echo -e "    ${GREEN}[OK]${NC} Sin pérdida de paquetes al gateway"
+            fi
+        else
+            echo -e "    ${RED}[FAIL]${NC} No se puede hacer ping al gateway"
+            echo "  [FAIL] gateway unreachable"
+            SCORE=$((SCORE - 10))
+            ((ISSUES++)) || true
+        fi
+        echo ""
+    fi
+
+    # Test con fping si disponible
+    if [[ "$MODE" == "--full" ]] && command -v fping &>/dev/null; then
+        echo "  Test de latencia a DNS públicos (fping):"
+        FPING_OUT=$(fping -c 3 -q 8.8.8.8 1.1.1.1 9.9.9.9 2>&1 || true)
+        if [[ -n "$FPING_OUT" ]]; then
+            echo "$FPING_OUT" | while IFS= read -r line; do
+                echo "    $line"
+            done
+            echo "  [PERF] fping DNS test done"
+        fi
+        echo ""
+    fi
+
+    # Test con mtr si disponible (modo rápido)
+    if [[ "$MODE" == "--full" ]] && command -v mtr &>/dev/null && [[ -n "$GW" ]]; then
+        echo "  Traceroute al gateway (mtr, 3 paquetes):"
+        MTR_OUT=$(mtr -r -c 3 --no-dns "$GW" 2>/dev/null || true)
+        if [[ -n "$MTR_OUT" ]]; then
+            echo "$MTR_OUT" | while IFS= read -r line; do
+                echo "    $line"
+            done
+        fi
+        echo ""
+    fi
+
+    # Throughput TCP estimado (buffer sizes)
+    echo "  Buffers TCP:"
+    TCP_RMEM=$(sysctl -n net.ipv4.tcp_rmem 2>/dev/null || echo "?")
+    TCP_WMEM=$(sysctl -n net.ipv4.tcp_wmem 2>/dev/null || echo "?")
+    TCP_CONG=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "?")
+    echo "    tcp_rmem: $TCP_RMEM"
+    echo "    tcp_wmem: $TCP_WMEM"
+    echo "    tcp_congestion_control: $TCP_CONG"
+    echo "  [PERF] tcp_rmem=$TCP_RMEM tcp_wmem=$TCP_WMEM congestion=$TCP_CONG"
+
+    if [[ "$TCP_CONG" == "cubic" ]] || [[ "$TCP_CONG" == "bbr" ]]; then
+        echo -e "    ${GREEN}[OK]${NC} Algoritmo de congestión: $TCP_CONG"
+    else
+        echo -e "    ${YELLOW}[INFO]${NC} Algoritmo de congestión: $TCP_CONG (considerar bbr o cubic)"
+    fi
+    echo ""
+
+    # ── [8/8] Scoring ──
+    echo -e "${CYAN}[8/8] Resumen y puntuación${NC}"
+    echo "## 8. Puntuación"
+    echo ""
+
+    [[ $SCORE -lt 0 ]] && SCORE=0
+    echo "  Puntuación infraestructura de enlace: $SCORE/100"
+    echo "  Problemas: $ISSUES | Warnings: $WARNINGS"
+    echo ""
+
+    NTP_STATUS="N/A"
+    $NTP_OK && NTP_STATUS="OK" || NTP_STATUS="FAIL"
+    echo "  NTP: $NTP_STATUS | IPv6: $([ "$IPV6_DISABLED" = "1" ] && echo "disabled" || echo "enabled")"
+    echo "  DHCP client: $DHCP_CLIENT | DHCP server: $DHCP_SERVER"
+
+    echo "$SCORE" > "${OUTFILE}.score"
+} 2>&1 | tee "$OUTFILE"
+SCORE=$(cat "${OUTFILE}.score" 2>/dev/null) || SCORE=0; rm -f "${OUTFILE}.score"
+
+echo ""
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+if [[ $SCORE -ge 80 ]]; then
+    echo -e "  Puntuación infraestructura: ${GREEN}${SCORE}/100${NC}"
+elif [[ $SCORE -ge 60 ]]; then
+    echo -e "  Puntuación infraestructura: ${YELLOW}${SCORE}/100${NC}"
+else
+    echo -e "  Puntuación infraestructura: ${RED}${SCORE}/100${NC}"
+fi
+echo -e "  Reporte: ${CYAN}$OUTFILE${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+ENDSCRIPT
+    chmod +x "${TOOLS_DIR}/auditoria-red-infralink.sh"
+    log_change "Creado" "${TOOLS_DIR}/auditoria-red-infralink.sh"
+
+    log_info "Script de infraestructura de enlace creado"
+else
+    log_skip "Scripts de infraestructura de enlace"
 fi
 fi # S6
 
@@ -2071,6 +2992,272 @@ ENDSCRIPT
 else
     log_skip "Sistema de baseline y drift"
 fi
+
+# ── Baseline extendida (L2, NTP, bonds, MTU) ──
+if check_executable /usr/local/bin/auditoria-red-baseline-ext.sh; then
+    log_already "Baseline extendida (auditoria-red-baseline-ext.sh existe)"
+elif ask "Crear baseline extendida (LLDP, VLANs, NTP, bonds, MTU)?"; then
+
+    cat > "${TOOLS_DIR}/auditoria-red-baseline-ext.sh" << 'ENDSCRIPT'
+#!/bin/bash
+# auditoria-red-baseline-ext.sh - Baseline extendida de infraestructura de red
+# Uso: auditoria-red-baseline-ext.sh --capture   Capturar baseline extendida
+#      auditoria-red-baseline-ext.sh --compare    Comparar con baseline extendida
+set -euo pipefail
+[[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+BASELINE_DIR="/var/lib/securizar/auditoria-red/baseline"
+HISTORY_DIR="${BASELINE_DIR}/history"
+mkdir -p "$BASELINE_DIR" "$HISTORY_DIR"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+ACTION="${1:---compare}"
+
+capture_ext_baseline() {
+    local PREFIX="${BASELINE_DIR}/baseline-ext-${TIMESTAMP}"
+    local LATEST="${BASELINE_DIR}/latest-ext"
+
+    echo -e "${BOLD}Capturando baseline extendida...${NC}"
+    echo ""
+
+    # 1. Topología LLDP
+    echo -e "  ${CYAN}[1/7]${NC} Topología LLDP..."
+    if command -v lldpctl &>/dev/null; then
+        lldpctl -f keyvalue 2>/dev/null | sort > "${PREFIX}-lldp.txt"
+    else
+        echo "# lldpd no disponible" > "${PREFIX}-lldp.txt"
+    fi
+
+    # 2. VLANs
+    echo -e "  ${CYAN}[2/7]${NC} VLANs..."
+    {
+        ip -d link show 2>/dev/null | grep -A1 "vlan protocol" | grep -E "^[0-9]+:|vlan" || echo "# Sin VLANs"
+        [[ -f /proc/net/vlan/config ]] && cat /proc/net/vlan/config || true
+    } | sort > "${PREFIX}-vlans.txt"
+
+    # 3. Bridges y STP
+    echo -e "  ${CYAN}[3/7]${NC} Bridges..."
+    {
+        for br in $(ip -br link show type bridge 2>/dev/null | awk '{print $1}'); do
+            echo "bridge=$br"
+            echo "  stp=$(cat "/sys/class/net/$br/bridge/stp_state" 2>/dev/null || echo "?")"
+            echo "  members=$(bridge link show 2>/dev/null | grep "master $br" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')"
+        done
+    } | sort > "${PREFIX}-bridges.txt"
+
+    # 4. Bonds
+    echo -e "  ${CYAN}[4/7]${NC} Bonds..."
+    {
+        for bond_dir in /sys/class/net/*/bonding; do
+            [[ -d "$bond_dir" ]] || continue
+            bond=$(basename "$(dirname "$bond_dir")")
+            echo "bond=$bond"
+            echo "  mode=$(cat "${bond_dir}/mode" 2>/dev/null)"
+            echo "  slaves=$(cat "${bond_dir}/slaves" 2>/dev/null)"
+            echo "  miimon=$(cat "${bond_dir}/miimon" 2>/dev/null)"
+        done
+        [[ -z "$(ls /sys/class/net/*/bonding 2>/dev/null)" ]] && echo "# Sin bonds" || true
+    } | sort > "${PREFIX}-bonds.txt"
+
+    # 5. NTP offset
+    echo -e "  ${CYAN}[5/7]${NC} NTP..."
+    {
+        if command -v chronyc &>/dev/null; then
+            echo "engine=chrony"
+            chronyc tracking 2>/dev/null | grep -E "Leap status|System time|Last offset|RMS offset|Frequency"
+            echo "sources:"
+            chronyc sources 2>/dev/null | grep '^\^'
+        elif command -v ntpq &>/dev/null; then
+            echo "engine=ntpd"
+            ntpq -p 2>/dev/null | grep '^\*'
+        elif command -v timedatectl &>/dev/null; then
+            echo "engine=systemd-timesyncd"
+            timedatectl show 2>/dev/null | grep -E "NTP|Timezone"
+        else
+            echo "# Sin NTP"
+        fi
+    } > "${PREFIX}-ntp.txt"
+
+    # 6. MTU de interfaces
+    echo -e "  ${CYAN}[6/7]${NC} MTU..."
+    ip -br link show 2>/dev/null | while IFS= read -r line; do
+        iface=$(echo "$line" | awk '{print $1}')
+        [[ "$iface" == "lo" ]] && continue
+        mtu=$(ip link show "$iface" 2>/dev/null | grep -oP 'mtu \K\d+' || echo "?")
+        echo "$iface mtu=$mtu"
+    done | sort > "${PREFIX}-mtu.txt"
+
+    # 7. Ethtool (velocidad/duplex interfaces físicas)
+    echo -e "  ${CYAN}[7/7]${NC} Ethtool..."
+    {
+        if command -v ethtool &>/dev/null; then
+            for iface in $(ls /sys/class/net/ 2>/dev/null); do
+                [[ -d "/sys/class/net/$iface/device" ]] || continue
+                speed=$(ethtool "$iface" 2>/dev/null | grep "Speed:" | awk '{print $2}' || true)
+                duplex=$(ethtool "$iface" 2>/dev/null | grep "Duplex:" | awk '{print $2}' || true)
+                link=$(ethtool "$iface" 2>/dev/null | grep "Link detected:" | awk '{print $3}' || true)
+                echo "$iface speed=${speed:-?} duplex=${duplex:-?} link=${link:-?}"
+            done
+        else
+            echo "# ethtool no disponible"
+        fi
+    } | sort > "${PREFIX}-ethtool.txt"
+
+    # Symlinks a latest
+    for suffix in lldp vlans bridges bonds ntp mtu ethtool; do
+        ln -sf "${PREFIX}-${suffix}.txt" "${LATEST}-${suffix}.txt"
+    done
+
+    # Metadatos
+    {
+        echo "timestamp=$TIMESTAMP"
+        echo "date=$(date '+%Y-%m-%d %H:%M:%S')"
+        echo "hostname=$(hostname)"
+    } > "${PREFIX}-meta-ext.txt"
+    ln -sf "${PREFIX}-meta-ext.txt" "${LATEST}-meta-ext.txt"
+
+    echo ""
+    echo -e "${GREEN}Baseline extendida capturada: ${PREFIX}-*.txt${NC}"
+    for f in "${PREFIX}"-*.txt; do
+        echo -e "  ${GREEN}+${NC} $(basename "$f") ($(wc -l < "$f") entradas)"
+    done
+}
+
+compare_ext_baseline() {
+    local LATEST="${BASELINE_DIR}/latest-ext"
+    local DRIFTS=0
+
+    if [[ ! -f "${LATEST}-lldp.txt" ]]; then
+        echo -e "${RED}No hay baseline extendida. Ejecute: $0 --capture${NC}"
+        exit 1
+    fi
+
+    echo -e "${BOLD}Comparando estado actual con baseline extendida...${NC}"
+    echo ""
+
+    local CUR="${BASELINE_DIR}/current-ext-${TIMESTAMP}"
+
+    # Capturar estado actual (mismas 7 capturas)
+    if command -v lldpctl &>/dev/null; then
+        lldpctl -f keyvalue 2>/dev/null | sort > "${CUR}-lldp.txt"
+    else
+        echo "# lldpd no disponible" > "${CUR}-lldp.txt"
+    fi
+
+    {
+        ip -d link show 2>/dev/null | grep -A1 "vlan protocol" | grep -E "^[0-9]+:|vlan" || echo "# Sin VLANs"
+        [[ -f /proc/net/vlan/config ]] && cat /proc/net/vlan/config || true
+    } | sort > "${CUR}-vlans.txt"
+
+    {
+        for br in $(ip -br link show type bridge 2>/dev/null | awk '{print $1}'); do
+            echo "bridge=$br stp=$(cat "/sys/class/net/$br/bridge/stp_state" 2>/dev/null || echo "?")"
+        done
+    } | sort > "${CUR}-bridges.txt"
+
+    {
+        for bond_dir in /sys/class/net/*/bonding; do
+            [[ -d "$bond_dir" ]] || continue
+            bond=$(basename "$(dirname "$bond_dir")")
+            echo "bond=$bond mode=$(cat "${bond_dir}/mode" 2>/dev/null) slaves=$(cat "${bond_dir}/slaves" 2>/dev/null)"
+        done
+        [[ -z "$(ls /sys/class/net/*/bonding 2>/dev/null)" ]] && echo "# Sin bonds" || true
+    } | sort > "${CUR}-bonds.txt"
+
+    ip -br link show 2>/dev/null | while IFS= read -r line; do
+        iface=$(echo "$line" | awk '{print $1}')
+        [[ "$iface" == "lo" ]] && continue
+        mtu=$(ip link show "$iface" 2>/dev/null | grep -oP 'mtu \K\d+' || echo "?")
+        echo "$iface mtu=$mtu"
+    done | sort > "${CUR}-mtu.txt"
+
+    if command -v ethtool &>/dev/null; then
+        for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            [[ -d "/sys/class/net/$iface/device" ]] || continue
+            speed=$(ethtool "$iface" 2>/dev/null | grep "Speed:" | awk '{print $2}' || true)
+            duplex=$(ethtool "$iface" 2>/dev/null | grep "Duplex:" | awk '{print $2}' || true)
+            link=$(ethtool "$iface" 2>/dev/null | grep "Link detected:" | awk '{print $3}' || true)
+            echo "$iface speed=${speed:-?} duplex=${duplex:-?} link=${link:-?}"
+        done | sort > "${CUR}-ethtool.txt"
+    else
+        echo "# ethtool no disponible" > "${CUR}-ethtool.txt"
+    fi
+
+    # Comparar
+    for component in lldp vlans bridges bonds mtu ethtool; do
+        local BF="${LATEST}-${component}.txt"
+        local CF="${CUR}-${component}.txt"
+
+        [[ ! -f "$BF" ]] && { echo -e "  ${YELLOW}[SKIP]${NC} $component: sin baseline"; continue; }
+
+        DIFF_OUT=$(diff "$BF" "$CF" 2>/dev/null || true)
+        if [[ -z "$DIFF_OUT" ]]; then
+            echo -e "  ${GREEN}[OK]${NC}    $component: sin cambios"
+        else
+            echo -e "  ${RED}[DRIFT]${NC} $component: cambios detectados"
+            ((DRIFTS++)) || true
+            ADDED=$(echo "$DIFF_OUT" | grep -c "^>" || true)
+            REMOVED=$(echo "$DIFF_OUT" | grep -c "^<" || true)
+            echo -e "          ${GREEN}+$ADDED${NC} / ${RED}-$REMOVED${NC}"
+            echo "$DIFF_OUT" | grep "^[<>]" | head -5 | while IFS= read -r line; do
+                echo -e "          $line"
+            done
+        fi
+    done
+
+    # NTP: comparación especial (offset cambia siempre)
+    echo ""
+    if command -v chronyc &>/dev/null; then
+        OFFSET=$(chronyc tracking 2>/dev/null | grep "Last offset" | awk '{print $4}' || echo "?")
+        echo -e "  ${CYAN}[NTP]${NC}  Offset actual: $OFFSET"
+    fi
+
+    # Guardar drift si hay
+    if [[ $DRIFTS -gt 0 ]]; then
+        {
+            echo "# Drift extendido - $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "# Componentes: $DRIFTS"
+            for component in lldp vlans bridges bonds mtu ethtool; do
+                DIFF_OUT=$(diff "${LATEST}-${component}.txt" "${CUR}-${component}.txt" 2>/dev/null || true)
+                [[ -n "$DIFF_OUT" ]] && { echo "## $component:"; echo "$DIFF_OUT"; echo ""; }
+            done
+        } > "${HISTORY_DIR}/drift-ext-${TIMESTAMP}.txt"
+        echo ""
+        echo -e "${YELLOW}Drift extendido registrado: ${HISTORY_DIR}/drift-ext-${TIMESTAMP}.txt${NC}"
+    fi
+
+    rm -f "${CUR}"-*.txt
+
+    echo ""
+    echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+    if [[ $DRIFTS -eq 0 ]]; then
+        echo -e "  ${GREEN}Infraestructura CONFORME con baseline extendida${NC}"
+    else
+        echo -e "  ${RED}$DRIFTS componentes con DRIFT extendido${NC}"
+    fi
+    echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+}
+
+case "$ACTION" in
+    --capture|-c) capture_ext_baseline ;;
+    --compare|-d) compare_ext_baseline ;;
+    *)
+        echo "Uso: $0 [--capture|--compare]"
+        echo ""
+        echo "  --capture   Capturar baseline extendida (LLDP, VLANs, bonds, NTP, MTU, ethtool)"
+        echo "  --compare   Comparar estado actual con baseline extendida"
+        ;;
+esac
+ENDSCRIPT
+    chmod +x "${TOOLS_DIR}/auditoria-red-baseline-ext.sh"
+    log_change "Creado" "${TOOLS_DIR}/auditoria-red-baseline-ext.sh"
+
+    log_info "Baseline extendida creada"
+else
+    log_skip "Baseline extendida"
+fi
 fi # S8
 
 # ============================================================
@@ -2231,7 +3418,7 @@ esac
 
 # Enviar notificacion si hay email configurado
 if [[ -n "$ALERT_EMAIL" ]] && command -v mail &>/dev/null; then
-    DRIFT_COUNT=$(grep -ci "DRIFT\|FAIL\|CRITICO\|SHADOW" "$REPORT_FILE" 2>/dev/null || echo 0)
+    DRIFT_COUNT=$(grep -ci "DRIFT\|FAIL\|CRITICO\|SHADOW" "$REPORT_FILE" 2>/dev/null || true)
     if [[ $DRIFT_COUNT -gt 0 ]]; then
         mail -s "[Securizar] Auditoria de red ${TIPO}: $DRIFT_COUNT problemas" "$ALERT_EMAIL" < "$REPORT_FILE"
         log "Notificacion enviada a $ALERT_EMAIL ($DRIFT_COUNT problemas)"
@@ -2391,6 +3578,138 @@ EOFCRON
     log_info "Auditorias periodicas configuradas"
 else
     log_skip "Auditorias periodicas automatizadas"
+fi
+
+# ── Auditoría extendida programada ──
+if check_executable /usr/local/bin/auditoria-red-programada-ext.sh; then
+    log_already "Auditoría extendida programada (auditoria-red-programada-ext.sh existe)"
+elif ask "Crear orquestador de auditorías extendidas (topología, NTP, MTU)?"; then
+
+    cat > "${TOOLS_DIR}/auditoria-red-programada-ext.sh" << 'ENDSCRIPT'
+#!/bin/bash
+# auditoria-red-programada-ext.sh - Orquestador de auditorías extendidas
+# Uso: auditoria-red-programada-ext.sh [diaria|semanal|completa]
+set -euo pipefail
+[[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+
+LOG_FILE="/var/log/securizar/auditoria-red-ext.log"
+REPORT_DIR="/var/lib/securizar/auditoria-red/reportes"
+mkdir -p "$(dirname "$LOG_FILE")" "$REPORT_DIR"
+
+TIPO="${1:-diaria}"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+REPORT_FILE="${REPORT_DIR}/auditoria-ext-${TIPO}-${TIMESTAMP}.txt"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+run_diaria() {
+    log "=== AUDITORÍA EXTENDIDA DIARIA ==="
+
+    # 1. Infraestructura de enlace (NTP, DHCP, ethtool, IPv6, MTU)
+    log "Ejecutando auditoría de infraestructura de enlace..."
+    if [[ -x /usr/local/bin/auditoria-red-infralink.sh ]]; then
+        /usr/local/bin/auditoria-red-infralink.sh --quick >> "$REPORT_FILE" 2>&1
+    fi
+
+    # 2. Comparar baseline extendida
+    log "Comparando con baseline extendida..."
+    if [[ -x /usr/local/bin/auditoria-red-baseline-ext.sh ]]; then
+        /usr/local/bin/auditoria-red-baseline-ext.sh --compare >> "$REPORT_FILE" 2>&1
+    fi
+
+    log "Auditoría extendida diaria completada: $REPORT_FILE"
+}
+
+run_semanal() {
+    log "=== AUDITORÍA EXTENDIDA SEMANAL ==="
+    run_diaria
+
+    # 3. Topología L2 completa
+    log "Ejecutando auditoría de topología L2..."
+    if [[ -x /usr/local/bin/auditoria-red-topologia.sh ]]; then
+        /usr/local/bin/auditoria-red-topologia.sh --full >> "$REPORT_FILE" 2>&1
+    fi
+
+    # 4. Actualizar baseline extendida
+    log "Actualizando baseline extendida..."
+    if [[ -x /usr/local/bin/auditoria-red-baseline-ext.sh ]]; then
+        /usr/local/bin/auditoria-red-baseline-ext.sh --capture >> "$REPORT_FILE" 2>&1
+    fi
+
+    log "Auditoría extendida semanal completada: $REPORT_FILE"
+}
+
+run_completa() {
+    log "=== AUDITORÍA EXTENDIDA COMPLETA ==="
+    run_semanal
+
+    # 5. Reporte extendido
+    log "Generando reporte extendido..."
+    if [[ -x /usr/local/bin/auditoria-red-reporte-ext.sh ]]; then
+        /usr/local/bin/auditoria-red-reporte-ext.sh --text >> "$REPORT_FILE" 2>&1
+    fi
+
+    log "Auditoría extendida completa: $REPORT_FILE"
+}
+
+case "$TIPO" in
+    diaria)   run_diaria ;;
+    semanal)  run_semanal ;;
+    completa) run_completa ;;
+    *)
+        echo "Uso: $0 [diaria|semanal|completa]"
+        exit 1
+        ;;
+esac
+
+# Notificación syslog
+if command -v logger &>/dev/null; then
+    ISSUES=$(grep -ciE "FAIL|CRITICO|DRIFT" "$REPORT_FILE" 2>/dev/null || true)
+    if [[ $ISSUES -gt 0 ]]; then
+        logger -t securizar-audit-ext "Auditoría extendida $TIPO: $ISSUES problemas detectados"
+    fi
+fi
+ENDSCRIPT
+    chmod +x "${TOOLS_DIR}/auditoria-red-programada-ext.sh"
+    log_change "Creado" "${TOOLS_DIR}/auditoria-red-programada-ext.sh"
+
+    # Timer systemd para auditoría extendida
+    if command -v systemctl &>/dev/null; then
+        cat > /etc/systemd/system/securizar-auditoria-red-ext.service << 'EOFSVC'
+[Unit]
+Description=Securizar - Auditoría de red extendida diaria
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/auditoria-red-programada-ext.sh diaria
+Nice=19
+IOSchedulingClass=idle
+EOFSVC
+
+        cat > /etc/systemd/system/securizar-auditoria-red-ext.timer << 'EOFTMR'
+[Unit]
+Description=Securizar - Auditoría de red extendida (timer)
+
+[Timer]
+OnCalendar=*-*-* 02:45:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOFTMR
+
+        systemctl daemon-reload
+        systemctl enable --now securizar-auditoria-red-ext.timer 2>/dev/null || true
+        log_change "Creado" "systemd timer para auditoría extendida (02:45 diaria)"
+    fi
+
+    log_info "Auditoría extendida programada configurada"
+else
+    log_skip "Auditoría extendida programada"
 fi
 fi # S9
 
@@ -2661,7 +3980,10 @@ echo ""
         echo "  Sin recomendaciones criticas. Mantener las auditorias periodicas."
     fi
 
+    echo "$PERCENTAGE $GRADE $TOTAL_CHECKS $TOTAL_PASS $TOTAL_WARN $TOTAL_FAIL $FW_OK $LISTEN_COUNT $GLOBAL_BINDS" > "${OUTFILE}.score"
 } 2>&1 | tee "${OUTFILE}.txt"
+read PERCENTAGE GRADE TOTAL_CHECKS TOTAL_PASS TOTAL_WARN TOTAL_FAIL FW_OK LISTEN_COUNT GLOBAL_BINDS < "${OUTFILE}.score" 2>/dev/null || PERCENTAGE=0
+rm -f "${OUTFILE}.score"
 
 # ── Exportacion JSON para SIEM ──
 if [[ "$FORMAT" == "--json" ]]; then
@@ -2728,6 +4050,394 @@ ENDSCRIPT
 else
     log_skip "Sistema de reporte consolidado"
 fi
+
+# ── Reporte extendido (topología, NTP, IPv6, rendimiento) ──
+if check_executable /usr/local/bin/auditoria-red-reporte-ext.sh; then
+    log_already "Reporte extendido (auditoria-red-reporte-ext.sh existe)"
+elif ask "Crear sistema de reporte extendido (topología, NTP, IPv6, rendimiento)?"; then
+
+    cat > "${TOOLS_DIR}/auditoria-red-reporte-ext.sh" << 'ENDSCRIPT'
+#!/bin/bash
+# auditoria-red-reporte-ext.sh - Reporte extendido de auditoría de red
+# Uso: auditoria-red-reporte-ext.sh [--text|--json]
+set -euo pipefail
+[[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+
+REPORT_DIR="/var/lib/securizar/auditoria-red/reportes"
+BASELINE_DIR="/var/lib/securizar/auditoria-red/baseline"
+HISTORY_DIR="${BASELINE_DIR}/history"
+mkdir -p "$REPORT_DIR"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+FORMAT="${1:---text}"
+OUTFILE="${REPORT_DIR}/global-ext-${TIMESTAMP}"
+
+TOTAL_SCORE=0
+TOTAL_CHECKS=0
+TOTAL_PASS=0
+TOTAL_WARN=0
+TOTAL_FAIL=0
+
+add_check() {
+    local result="$1"
+    local weight="${2:-1}"
+    ((TOTAL_CHECKS++)) || true
+    case "$result" in
+        pass) TOTAL_SCORE=$((TOTAL_SCORE + weight * 10)); ((TOTAL_PASS++)) || true ;;
+        warn) TOTAL_SCORE=$((TOTAL_SCORE + weight * 5)); ((TOTAL_WARN++)) || true ;;
+        fail) ((TOTAL_FAIL++)) || true ;;
+    esac
+}
+
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}  REPORTE EXTENDIDO DE AUDITORÍA DE RED${NC}"
+echo -e "${BOLD}  Host: $(hostname)  |  $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo ""
+
+{
+    echo "=========================================================="
+    echo " REPORTE EXTENDIDO DE AUDITORÍA DE INFRAESTRUCTURA DE RED"
+    echo " Host: $(hostname)"
+    echo " Fecha: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "=========================================================="
+    echo ""
+
+    # ── 1. Topología L2 ──
+    echo "## 1. Topología L2"
+    echo ""
+
+    # LLDP
+    if command -v lldpctl &>/dev/null; then
+        LLDP_N=$(lldpctl 2>/dev/null | grep -c "Interface:" 2>/dev/null || true)
+        if [[ $LLDP_N -gt 0 ]]; then
+            echo -e "  ${GREEN}[OK]${NC} LLDP activo: $LLDP_N vecinos"
+            add_check "pass" 2
+        else
+            echo -e "  ${YELLOW}[WARN]${NC} LLDP sin vecinos"
+            add_check "warn"
+        fi
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} lldpd no instalado"
+        add_check "warn"
+    fi
+
+    # VLANs
+    VLAN_N=$(ip -d link show 2>/dev/null | grep -c "vlan protocol" || true)
+    echo "  VLANs configuradas: $VLAN_N"
+    add_check "pass"
+
+    # Bridges STP
+    for br in $(ip -br link show type bridge 2>/dev/null | awk '{print $1}'); do
+        STP=$(cat "/sys/class/net/$br/bridge/stp_state" 2>/dev/null || echo "?")
+        if [[ "$STP" == "1" ]]; then
+            echo -e "  ${GREEN}[OK]${NC} STP habilitado en bridge $br"
+            add_check "pass" 2
+        elif [[ "$STP" == "0" ]]; then
+            echo -e "  ${YELLOW}[WARN]${NC} STP deshabilitado en $br"
+            add_check "warn" 2
+        fi
+    done
+    echo ""
+
+    # ── 2. Link Health ──
+    echo "## 2. Link Health (ethtool)"
+    echo ""
+
+    if command -v ethtool &>/dev/null; then
+        for iface in $(ls /sys/class/net/ 2>/dev/null); do
+            [[ -d "/sys/class/net/$iface/device" ]] || continue
+            speed=$(ethtool "$iface" 2>/dev/null | grep "Speed:" | awk '{print $2}' || true)
+            duplex=$(ethtool "$iface" 2>/dev/null | grep "Duplex:" | awk '{print $2}' || true)
+            link=$(ethtool "$iface" 2>/dev/null | grep "Link detected:" | awk '{print $3}' || true)
+
+            if [[ "$link" == "yes" ]] && [[ "${duplex:-}" == "Full" ]]; then
+                echo -e "  ${GREEN}[OK]${NC} $iface: ${speed:-?} $duplex"
+                add_check "pass" 2
+            elif [[ "${duplex:-}" == "Half" ]]; then
+                echo -e "  ${RED}[FAIL]${NC} $iface: ${speed:-?} Half-duplex"
+                add_check "fail" 2
+            elif [[ "$link" == "no" ]]; then
+                echo -e "  ${YELLOW}[WARN]${NC} $iface: sin link"
+                add_check "warn"
+            else
+                echo -e "  ${GREEN}[OK]${NC} $iface: ${speed:-?} ${duplex:-?}"
+                add_check "pass"
+            fi
+        done
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} ethtool no instalado"
+        add_check "warn" 2
+    fi
+    echo ""
+
+    # ── 3. NTP ──
+    echo "## 3. NTP / Sincronización"
+    echo ""
+
+    NTP_SYNCED=false
+    if command -v chronyc &>/dev/null; then
+        SOURCES=$(chronyc sources 2>/dev/null | grep -c '^\^[*+]' 2>/dev/null || true)
+        if [[ $SOURCES -gt 0 ]]; then
+            OFFSET=$(chronyc tracking 2>/dev/null | grep "Last offset" | awk '{print $4}' || echo "?")
+            echo -e "  ${GREEN}[OK]${NC} chrony sincronizado (offset: $OFFSET, fuentes: $SOURCES)"
+            add_check "pass" 3
+            NTP_SYNCED=true
+        else
+            echo -e "  ${RED}[FAIL]${NC} chrony sin fuentes alcanzables"
+            add_check "fail" 3
+        fi
+    elif command -v timedatectl &>/dev/null; then
+        if timedatectl show 2>/dev/null | grep -q "NTPSynchronized=yes" 2>/dev/null; then
+            echo -e "  ${GREEN}[OK]${NC} systemd-timesyncd sincronizado"
+            add_check "pass" 3
+            NTP_SYNCED=true
+        else
+            echo -e "  ${YELLOW}[WARN]${NC} NTP no sincronizado"
+            add_check "warn" 3
+        fi
+    else
+        echo -e "  ${RED}[FAIL]${NC} Sin servicio NTP"
+        add_check "fail" 3
+    fi
+    echo ""
+
+    # ── 4. IPv6 ──
+    echo "## 4. IPv6 Seguridad"
+    echo ""
+
+    IPV6_DISABLED=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo "0")
+    if [[ "$IPV6_DISABLED" == "1" ]]; then
+        echo -e "  ${GREEN}[INFO]${NC} IPv6 completamente deshabilitado"
+        add_check "pass" 2
+    else
+        IPV6_ISSUES=0
+        for pv in "net.ipv6.conf.all.accept_ra:0" "net.ipv6.conf.default.accept_ra:0" \
+                   "net.ipv6.conf.all.accept_redirects:0" "net.ipv6.conf.all.accept_source_route:0"; do
+            param="${pv%%:*}"
+            expected="${pv##*:}"
+            current=$(sysctl -n "$param" 2>/dev/null || echo "?")
+            if [[ "$current" == "$expected" ]]; then
+                echo -e "  ${GREEN}[OK]${NC} $param = $current"
+                add_check "pass"
+            else
+                echo -e "  ${RED}[FAIL]${NC} $param = $current (esperado: $expected)"
+                add_check "fail"
+                ((IPV6_ISSUES++)) || true
+            fi
+        done
+    fi
+    echo ""
+
+    # ── 5. Rendimiento ──
+    echo "## 5. Rendimiento"
+    echo ""
+
+    GW=$(ip route show default 2>/dev/null | head -1 | awk '{print $3}')
+    if [[ -n "$GW" ]]; then
+        PING_OUT=$(ping -c 3 -W 2 "$GW" 2>/dev/null || true)
+        LOSS=$(echo "$PING_OUT" | grep "packet loss" | grep -oP '\d+(?=%)' || echo "?")
+        AVG=$(echo "$PING_OUT" | tail -1 | awk -F'/' '{print $5}' || echo "?")
+
+        if [[ "$LOSS" == "0" ]]; then
+            echo -e "  ${GREEN}[OK]${NC} Gateway ($GW): 0% pérdida, latencia ~${AVG}ms"
+            add_check "pass" 2
+        elif [[ "$LOSS" != "?" ]] && [[ "$LOSS" -le 5 ]]; then
+            echo -e "  ${YELLOW}[WARN]${NC} Gateway ($GW): ${LOSS}% pérdida"
+            add_check "warn" 2
+        else
+            echo -e "  ${RED}[FAIL]${NC} Gateway inalcanzable o alta pérdida"
+            add_check "fail" 2
+        fi
+    fi
+
+    # TCP congestion
+    TCP_CONG=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "?")
+    if [[ "$TCP_CONG" == "cubic" ]] || [[ "$TCP_CONG" == "bbr" ]]; then
+        echo -e "  ${GREEN}[OK]${NC} TCP congestion: $TCP_CONG"
+        add_check "pass"
+    else
+        echo -e "  ${YELLOW}[INFO]${NC} TCP congestion: $TCP_CONG"
+        add_check "warn"
+    fi
+
+    # PMTUD
+    PMTUD=$(sysctl -n net.ipv4.ip_no_pmtu_disc 2>/dev/null || echo "?")
+    if [[ "$PMTUD" == "0" ]]; then
+        echo -e "  ${GREEN}[OK]${NC} Path MTU Discovery habilitado"
+        add_check "pass"
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} Path MTU Discovery deshabilitado"
+        add_check "warn"
+    fi
+    echo ""
+
+    # ── 6. DHCP ──
+    echo "## 6. DHCP"
+    echo ""
+
+    DHCP_SVCS=0
+    for svc in dhcpd isc-dhcp-server kea-dhcp4 dnsmasq; do
+        if systemctl is-active "$svc" &>/dev/null 2>&1; then
+            echo -e "  ${YELLOW}[INFO]${NC} Servidor DHCP: $svc"
+            ((DHCP_SVCS++)) || true
+        fi
+    done
+    if [[ $DHCP_SVCS -eq 0 ]]; then
+        echo -e "  ${GREEN}[OK]${NC} Sin servidor DHCP local"
+    fi
+    add_check "pass"
+    echo ""
+
+    # ── 7. MTU ──
+    echo "## 7. MTU"
+    echo ""
+
+    MTU_VALUES=""
+    for iface in $(ip -br link show up 2>/dev/null | awk '{print $1}' | grep -v lo); do
+        mtu=$(ip link show "$iface" 2>/dev/null | grep -oP 'mtu \K\d+' || echo "?")
+        echo "  $iface: MTU=$mtu"
+        MTU_VALUES="$MTU_VALUES $mtu"
+    done
+
+    # Verificar consistencia
+    UNIQUE_MTUS=$(echo "$MTU_VALUES" | tr ' ' '\n' | sort -u | grep -v "^$" | wc -l)
+    if [[ $UNIQUE_MTUS -le 1 ]]; then
+        echo -e "  ${GREEN}[OK]${NC} MTU consistente en todas las interfaces"
+        add_check "pass"
+    else
+        echo -e "  ${YELLOW}[INFO]${NC} Múltiples valores MTU ($UNIQUE_MTUS distintos)"
+        add_check "warn"
+    fi
+    echo ""
+
+    # ── 8. Baseline extendida ──
+    echo "## 8. Baseline extendida"
+    echo ""
+
+    if [[ -f "${BASELINE_DIR}/latest-ext-lldp.txt" ]]; then
+        echo -e "  ${GREEN}[OK]${NC} Baseline extendida configurada"
+        add_check "pass" 2
+
+        EXT_DRIFTS=$(ls "${HISTORY_DIR}"/drift-ext-*.txt 2>/dev/null | wc -l)
+        RECENT_EXT=$(find "${HISTORY_DIR}" -name "drift-ext-*.txt" -mtime -7 2>/dev/null | wc -l)
+        echo "  Drifts extendidos totales: $EXT_DRIFTS"
+        echo "  Drifts extendidos (7 días): $RECENT_EXT"
+        if [[ $RECENT_EXT -gt 3 ]]; then
+            echo -e "  ${YELLOW}[WARN]${NC} Muchos drifts extendidos recientes"
+            add_check "warn"
+        else
+            add_check "pass"
+        fi
+    else
+        echo -e "  ${YELLOW}[WARN]${NC} Sin baseline extendida"
+        echo "  Ejecute: auditoria-red-baseline-ext.sh --capture"
+        add_check "warn" 2
+    fi
+    echo ""
+
+    # ── Puntuación global extendida ──
+    if [[ $TOTAL_CHECKS -gt 0 ]]; then
+        MAX_SCORE=$((TOTAL_CHECKS * 10))
+        PERCENTAGE=$((TOTAL_SCORE * 100 / MAX_SCORE))
+        [[ $PERCENTAGE -gt 100 ]] && PERCENTAGE=100
+    else
+        PERCENTAGE=0
+    fi
+
+    echo "=========================================================="
+    echo " PUNTUACIÓN EXTENDIDA DE SEGURIDAD DE RED"
+    echo "=========================================================="
+    echo ""
+    echo "  Checks: $TOTAL_CHECKS | Pass: $TOTAL_PASS | Warn: $TOTAL_WARN | Fail: $TOTAL_FAIL"
+    echo "  Puntuación: $PERCENTAGE/100"
+    echo ""
+
+    if [[ $PERCENTAGE -ge 80 ]]; then
+        GRADE="A"
+        echo -e "  ${GREEN}Grado: $GRADE - Infraestructura sólida${NC}"
+    elif [[ $PERCENTAGE -ge 60 ]]; then
+        GRADE="B"
+        echo -e "  ${YELLOW}Grado: $GRADE - Aceptable, mejoras posibles${NC}"
+    elif [[ $PERCENTAGE -ge 40 ]]; then
+        GRADE="C"
+        echo -e "  ${YELLOW}Grado: $GRADE - Mejoras necesarias${NC}"
+    else
+        GRADE="D"
+        echo -e "  ${RED}Grado: $GRADE - Acción urgente${NC}"
+    fi
+    echo ""
+
+    # Recomendaciones
+    echo "## Recomendaciones extendidas:"
+    echo ""
+    RECO=1
+    if ! $NTP_SYNCED; then
+        echo "  $RECO. [CRITICO] Configurar y sincronizar NTP (chrony recomendado)"
+        ((RECO++)) || true
+    fi
+    if [[ "$IPV6_DISABLED" != "1" ]] && [[ ${IPV6_ISSUES:-0} -gt 0 ]]; then
+        echo "  $RECO. [ALTA] Endurecer parámetros IPv6 (accept_ra, redirects)"
+        ((RECO++)) || true
+    fi
+    if ! command -v lldpctl &>/dev/null; then
+        echo "  $RECO. [MEDIA] Instalar lldpd para descubrimiento de topología"
+        ((RECO++)) || true
+    fi
+    if ! command -v ethtool &>/dev/null; then
+        echo "  $RECO. [MEDIA] Instalar ethtool para diagnóstico de enlaces"
+        ((RECO++)) || true
+    fi
+    if [[ ! -f "${BASELINE_DIR}/latest-ext-lldp.txt" ]]; then
+        echo "  $RECO. [MEDIA] Capturar baseline extendida: auditoria-red-baseline-ext.sh --capture"
+        ((RECO++)) || true
+    fi
+    if [[ $RECO -eq 1 ]]; then
+        echo "  Sin recomendaciones extendidas. Buena postura de infraestructura."
+    fi
+
+    echo "$PERCENTAGE $GRADE $TOTAL_CHECKS $TOTAL_PASS $TOTAL_WARN $TOTAL_FAIL $NTP_SYNCED $IPV6_DISABLED" > "${OUTFILE}.score"
+} 2>&1 | tee "${OUTFILE}.txt"
+read PERCENTAGE GRADE TOTAL_CHECKS TOTAL_PASS TOTAL_WARN TOTAL_FAIL NTP_SYNCED IPV6_DISABLED < "${OUTFILE}.score" 2>/dev/null || PERCENTAGE=0
+rm -f "${OUTFILE}.score"
+
+# JSON export
+if [[ "$FORMAT" == "--json" ]]; then
+    cat > "${OUTFILE}.json" << EOFJSON
+{
+  "timestamp": "$(date -Iseconds)",
+  "hostname": "$(hostname)",
+  "audit_type": "network_infrastructure_extended",
+  "score": $PERCENTAGE,
+  "grade": "$GRADE",
+  "checks_total": $TOTAL_CHECKS,
+  "checks_pass": $TOTAL_PASS,
+  "checks_warn": $TOTAL_WARN,
+  "checks_fail": $TOTAL_FAIL,
+  "ntp_synced": $NTP_SYNCED,
+  "ipv6_disabled": $([ "$IPV6_DISABLED" = "1" ] && echo true || echo false),
+  "baseline_ext_configured": $(test -f "${BASELINE_DIR}/latest-ext-lldp.txt" && echo true || echo false)
+}
+EOFJSON
+    echo ""
+    echo -e "${GREEN}JSON exportado: ${OUTFILE}.json${NC}"
+fi
+
+echo ""
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+echo -e "  Reporte: ${CYAN}${OUTFILE}.txt${NC}"
+[[ "$FORMAT" == "--json" ]] && echo -e "  JSON:    ${CYAN}${OUTFILE}.json${NC}"
+echo -e "${BOLD}══════════════════════════════════════════════════════${NC}"
+ENDSCRIPT
+    chmod +x "${TOOLS_DIR}/auditoria-red-reporte-ext.sh"
+    log_change "Creado" "${TOOLS_DIR}/auditoria-red-reporte-ext.sh"
+
+    log_info "Sistema de reporte extendido creado"
+else
+    log_skip "Sistema de reporte extendido"
+fi
 fi # S10
 
 # ============================================================
@@ -2739,7 +4449,7 @@ echo ""
 echo -e "  ${BOLD}Herramientas de auditoria de infraestructura de red:${NC}"
 echo ""
 
-for cmd in nmap arp-scan nbtscan testssl.sh socat snmpwalk; do
+for cmd in nmap arp-scan nbtscan testssl.sh socat snmpwalk lldpctl ethtool chronyc fping mtr bridge; do
     if command -v "$cmd" &>/dev/null; then
         echo -e "    ${GREEN}+${NC} $cmd: $(command -v "$cmd")"
     else
@@ -2753,7 +4463,8 @@ echo ""
 for script in auditoria-red-descubrimiento auditoria-red-puertos auditoria-red-tls \
               auditoria-red-snmp auditoria-red-config auditoria-red-inventario \
               auditoria-red-baseline auditoria-red-programada auditoria-red-reporte-global \
-              auditoria-red-limpieza; do
+              auditoria-red-limpieza auditoria-red-topologia auditoria-red-infralink \
+              auditoria-red-baseline-ext auditoria-red-programada-ext auditoria-red-reporte-ext; do
     if [[ -x "/usr/local/bin/${script}.sh" ]]; then
         echo -e "    ${GREEN}+${NC} ${script}.sh"
     fi
@@ -2782,6 +4493,15 @@ echo -e "    ${CYAN}auditoria-red-baseline.sh --capture${NC}         Capturar ba
 echo -e "    ${CYAN}auditoria-red-baseline.sh --compare${NC}         Detectar drift"
 echo -e "    ${CYAN}auditoria-red-reporte-global.sh${NC}             Reporte consolidado"
 echo -e "    ${CYAN}auditoria-red-programada.sh completa${NC}        Auditoria completa"
+echo ""
+echo -e "  ${BOLD}Uso rápido (extendido):${NC}"
+echo ""
+echo -e "    ${CYAN}auditoria-red-topologia.sh${NC}                   Topología L2 (LLDP, VLANs, bridges)"
+echo -e "    ${CYAN}auditoria-red-infralink.sh${NC}                   NTP, DHCP, ethtool, IPv6, MTU"
+echo -e "    ${CYAN}auditoria-red-baseline-ext.sh --capture${NC}      Capturar baseline extendida"
+echo -e "    ${CYAN}auditoria-red-baseline-ext.sh --compare${NC}      Detectar drift extendido"
+echo -e "    ${CYAN}auditoria-red-programada-ext.sh completa${NC}     Auditoría extendida completa"
+echo -e "    ${CYAN}auditoria-red-reporte-ext.sh${NC}                 Reporte extendido"
 echo ""
 
 show_changes_summary

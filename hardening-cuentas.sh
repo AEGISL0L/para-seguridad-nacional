@@ -21,6 +21,18 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-cuentas"
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 7
+_pc check_file_contains /etc/login.defs "PASS_MAX_DAYS.*90"
+_pc check_file_contains /etc/security/faillock.conf "deny = 5"
+_pc true  # S3: deteccion cuentas sin password (siempre re-evaluar)
+_pc true  # S4: deteccion UID=0 extra (siempre re-evaluar)
+_pc true  # S5: auditoria shells sistema (siempre re-evaluar)
+_pc true  # S6: cuentas no usadas (siempre re-evaluar)
+_pc check_executable /usr/local/bin/auditar-cuentas.sh
+_precheck_result
+
 log_section "S1: POLÍTICAS DE CONTRASEÑAS (login.defs)"
 
 echo "Configuración propuesta:"
@@ -32,7 +44,9 @@ echo "  LOGIN_TIMEOUT = 60  (timeout de login 60s)"
 echo "  ENCRYPT_METHOD = YESCRYPT (o SHA512 si no hay soporte)"
 echo ""
 
-if ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
+if check_file_contains /etc/login.defs "PASS_MAX_DAYS.*90"; then
+    log_already "Políticas de contraseñas en /etc/login.defs"
+elif ask "¿Aplicar políticas de contraseñas en /etc/login.defs?"; then
     cp /etc/login.defs "$BACKUP_DIR/" 2>/dev/null || true
     log_change "Backup" "/etc/login.defs"
 
@@ -125,7 +139,9 @@ echo "  fail_interval = 900 (ventana de 15 min)"
 echo "  audit            (registrar en log)"
 echo ""
 
-if ask "¿Configurar /etc/security/faillock.conf?"; then
+if check_file_contains /etc/security/faillock.conf "deny = 5"; then
+    log_already "Configurar /etc/security/faillock.conf"
+elif ask "¿Configurar /etc/security/faillock.conf?"; then
     cp /etc/security/faillock.conf "$BACKUP_DIR/" 2>/dev/null || true
     log_change "Backup" "/etc/security/faillock.conf"
 
@@ -326,7 +342,9 @@ fi
 # ============================================================
 log_section "S7: SCRIPT DE AUDITORÍA DE CUENTAS"
 
-if ask "¿Crear /usr/local/bin/auditar-cuentas.sh?"; then
+if check_executable /usr/local/bin/auditar-cuentas.sh; then
+    log_already "Crear /usr/local/bin/auditar-cuentas.sh"
+elif ask "¿Crear /usr/local/bin/auditar-cuentas.sh?"; then
     cat > /usr/local/bin/auditar-cuentas.sh << 'EOFAUDIT'
 #!/bin/bash
 # ============================================================

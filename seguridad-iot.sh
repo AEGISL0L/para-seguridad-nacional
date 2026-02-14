@@ -8,31 +8,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/securizar-common.sh"
-source "$SCRIPT_DIR/lib/securizar-distro.sh"
-source "$SCRIPT_DIR/lib/securizar-pkg.sh"
 
-CHANGES=()
-
-show_changes_summary() {
-    echo ""
-    if [[ ${#CHANGES[@]} -eq 0 ]]; then
-        log_info "No se realizaron cambios"
-        return 0
-    fi
-    log_section "RESUMEN DE CAMBIOS"
-    local i=1
-    for change in "${CHANGES[@]}"; do
-        log_info "  $i. $change"
-        ((i++))
-    done
-    echo ""
-    log_info "Total: ${#CHANGES[@]} cambios aplicados"
-}
+require_root
+securizar_setup_traps
+init_backup "seguridad-iot"
 
 # ── Sección 1: Descubrimiento de dispositivos IoT ──
 section_1() {
     log_section "1. Descubrimiento de dispositivos IoT"
 
+    if check_executable /usr/local/bin/securizar-iot-discovery.sh; then
+        log_already "Descubrimiento IoT (securizar-iot-discovery.sh existe)"; return 0
+    fi
     ask "¿Configurar descubrimiento automático de dispositivos IoT en la red?" || { log_skip "Descubrimiento IoT omitido"; return 0; }
 
     mkdir -p /var/log/securizar/iot /etc/securizar/iot
@@ -207,13 +194,16 @@ EOF
     chmod +x /etc/cron.weekly/securizar-iot-discovery
 
     log_change "Descubrimiento de dispositivos IoT configurado"
-    CHANGES+=("Sección 1: Descubrimiento IoT con arp-scan/nmap y clasificación por vendor")
+    log_change "Aplicado" "Sección 1: Descubrimiento IoT con arp-scan/nmap y clasificación por vendor"
 }
 
 # ── Sección 2: Segmentación de red para IoT ──
 section_2() {
     log_section "2. Segmentación de red para IoT"
 
+    if check_executable /usr/local/bin/securizar-iot-segment.sh; then
+        log_already "Segmentación IoT (securizar-iot-segment.sh existe)"; return 0
+    fi
     ask "¿Configurar reglas de firewall para segmentar red IoT?" || { log_skip "Segmentación IoT omitida"; return 0; }
 
     mkdir -p /etc/securizar/iot
@@ -363,13 +353,16 @@ EOFSEGMENT
     chmod +x /usr/local/bin/securizar-iot-segment.sh
 
     log_change "Reglas de segmentación de red IoT configuradas"
-    CHANGES+=("Sección 2: Segmentación de red IoT con iptables")
+    log_change "Aplicado" "Sección 2: Segmentación de red IoT con iptables"
 }
 
 # ── Sección 3: Hardening MQTT ──
 section_3() {
     log_section "3. Hardening MQTT"
 
+    if check_executable /usr/local/bin/securizar-mqtt-harden.sh; then
+        log_already "Hardening MQTT (securizar-mqtt-harden.sh existe)"; return 0
+    fi
     ask "¿Configurar hardening del protocolo MQTT?" || { log_skip "Hardening MQTT omitido"; return 0; }
 
     mkdir -p /etc/securizar/iot/templates
@@ -583,13 +576,16 @@ ALLOW_ANONYMOUS=false
 EOF
 
     log_change "Hardening MQTT configurado con templates y escáner"
-    CHANGES+=("Sección 3: Hardening MQTT con TLS, ACL y autenticación")
+    log_change "Aplicado" "Sección 3: Hardening MQTT con TLS, ACL y autenticación"
 }
 
 # ── Sección 4: Hardening CoAP ──
 section_4() {
     log_section "4. Hardening CoAP"
 
+    if check_executable /usr/local/bin/securizar-coap-harden.sh; then
+        log_already "Hardening CoAP (securizar-coap-harden.sh existe)"; return 0
+    fi
     ask "¿Configurar hardening del protocolo CoAP?" || { log_skip "Hardening CoAP omitido"; return 0; }
 
     mkdir -p /etc/securizar/iot /var/log/securizar/iot
@@ -688,13 +684,16 @@ EOFCOAP
     chmod +x /usr/local/bin/securizar-coap-harden.sh
 
     log_change "Hardening CoAP configurado"
-    CHANGES+=("Sección 4: Hardening CoAP con restricciones DTLS y firewall")
+    log_change "Aplicado" "Sección 4: Hardening CoAP con restricciones DTLS y firewall"
 }
 
 # ── Sección 5: Validación de firmware ──
 section_5() {
     log_section "5. Validación de firmware"
 
+    if check_executable /usr/local/bin/securizar-firmware-check.sh; then
+        log_already "Verificación de firmware IoT (securizar-firmware-check.sh existe)"; return 0
+    fi
     ask "¿Configurar verificación de integridad de firmware IoT?" || { log_skip "Validación de firmware omitida"; return 0; }
 
     mkdir -p /etc/securizar/iot /var/log/securizar/iot
@@ -831,13 +830,16 @@ EOFFW
 EOF
 
     log_change "Sistema de validación de firmware configurado"
-    CHANGES+=("Sección 5: Validación de firmware con whitelist y fwupd")
+    log_change "Aplicado" "Sección 5: Validación de firmware con whitelist y fwupd"
 }
 
 # ── Sección 6: Monitoreo de tráfico IoT ──
 section_6() {
     log_section "6. Monitoreo de tráfico IoT"
 
+    if check_executable /usr/local/bin/securizar-iot-monitor.sh; then
+        log_already "Monitoreo de tráfico IoT (securizar-iot-monitor.sh existe)"; return 0
+    fi
     ask "¿Configurar monitoreo continuo de tráfico IoT?" || { log_skip "Monitoreo IoT omitido"; return 0; }
 
     mkdir -p /var/log/securizar/iot /etc/securizar/iot
@@ -1013,13 +1015,16 @@ EOF
     systemctl enable securizar-iot-monitor.timer 2>/dev/null || true
 
     log_change "Monitoreo de tráfico IoT configurado"
-    CHANGES+=("Sección 6: Monitoreo de tráfico IoT con detección de anomalías")
+    log_change "Aplicado" "Sección 6: Monitoreo de tráfico IoT con detección de anomalías"
 }
 
 # ── Sección 7: Control de acceso IoT ──
 section_7() {
     log_section "7. Control de acceso IoT"
 
+    if check_executable /usr/local/bin/securizar-iot-access.sh; then
+        log_already "Control de acceso IoT (securizar-iot-access.sh existe)"; return 0
+    fi
     ask "¿Configurar control de acceso por MAC para dispositivos IoT?" || { log_skip "Control de acceso IoT omitido"; return 0; }
 
     mkdir -p /etc/securizar/iot /var/log/securizar/iot
@@ -1166,13 +1171,16 @@ EOFACCESS
     chmod +x /usr/local/bin/securizar-iot-access.sh
 
     log_change "Control de acceso IoT por MAC configurado"
-    CHANGES+=("Sección 7: Control de acceso IoT con whitelist de MACs")
+    log_change "Aplicado" "Sección 7: Control de acceso IoT con whitelist de MACs"
 }
 
 # ── Sección 8: Protección de protocolos IoT legacy ──
 section_8() {
     log_section "8. Protección de protocolos IoT legacy"
 
+    if check_executable /usr/local/bin/securizar-iot-legacy.sh; then
+        log_already "Protocolos legacy IoT (securizar-iot-legacy.sh existe)"; return 0
+    fi
     ask "¿Bloquear protocolos legacy inseguros en el segmento IoT?" || { log_skip "Protección legacy omitida"; return 0; }
 
     mkdir -p /var/log/securizar/iot
@@ -1295,13 +1303,16 @@ EOFLEGACY
     chmod +x /usr/local/bin/securizar-iot-legacy.sh
 
     log_change "Protección contra protocolos legacy IoT configurada"
-    CHANGES+=("Sección 8: Detección y bloqueo de FTP/Telnet/SNMP/Modbus en IoT")
+    log_change "Aplicado" "Sección 8: Detección y bloqueo de FTP/Telnet/SNMP/Modbus en IoT"
 }
 
 # ── Sección 9: Gestión de actualizaciones IoT ──
 section_9() {
     log_section "9. Gestión de actualizaciones IoT"
 
+    if check_executable /usr/local/bin/securizar-iot-updates.sh; then
+        log_already "Actualizaciones de firmware IoT (securizar-iot-updates.sh existe)"; return 0
+    fi
     ask "¿Configurar seguimiento de actualizaciones de firmware IoT?" || { log_skip "Actualizaciones IoT omitidas"; return 0; }
 
     mkdir -p /var/log/securizar/iot /etc/securizar/iot
@@ -1430,13 +1441,16 @@ EOF
     chmod +x /etc/cron.monthly/securizar-iot-updates
 
     log_change "Gestión de actualizaciones de firmware IoT configurada"
-    CHANGES+=("Sección 9: Registro y seguimiento de firmware IoT")
+    log_change "Aplicado" "Sección 9: Registro y seguimiento de firmware IoT"
 }
 
 # ── Sección 10: Auditoría de seguridad IoT ──
 section_10() {
     log_section "10. Auditoría de seguridad IoT"
 
+    if check_executable /usr/local/bin/auditoria-iot.sh; then
+        log_already "Auditoría integral IoT (auditoria-iot.sh existe)"; return 0
+    fi
     ask "¿Configurar auditoría integral de seguridad IoT?" || { log_skip "Auditoría IoT omitida"; return 0; }
 
     mkdir -p /var/log/securizar/iot
@@ -1568,13 +1582,27 @@ EOF
     chmod +x /etc/cron.weekly/auditoria-iot
 
     log_change "Auditoría integral de seguridad IoT configurada"
-    CHANGES+=("Sección 10: Auditoría IoT con scoring BUENO/MEJORABLE/DEFICIENTE")
+    log_change "Aplicado" "Sección 10: Auditoría IoT con scoring BUENO/MEJORABLE/DEFICIENTE"
 }
 
 # ── Main ──
 main() {
-    check_root
     log_section "MÓDULO 64: SEGURIDAD IoT"
+
+    # ── Pre-check: detectar secciones ya aplicadas ──────────────
+    _precheck 10
+    _pc 'check_executable /usr/local/bin/securizar-iot-discovery.sh'
+    _pc 'check_executable /usr/local/bin/securizar-iot-segment.sh'
+    _pc 'check_executable /usr/local/bin/securizar-mqtt-harden.sh'
+    _pc 'check_executable /usr/local/bin/securizar-coap-harden.sh'
+    _pc 'check_executable /usr/local/bin/securizar-firmware-check.sh'
+    _pc 'check_executable /usr/local/bin/securizar-iot-monitor.sh'
+    _pc 'check_executable /usr/local/bin/securizar-iot-access.sh'
+    _pc 'check_executable /usr/local/bin/securizar-iot-legacy.sh'
+    _pc 'check_executable /usr/local/bin/securizar-iot-updates.sh'
+    _pc 'check_executable /usr/local/bin/auditoria-iot.sh'
+    _precheck_result
+
     for i in $(seq 1 10); do
         "section_$i"
     done

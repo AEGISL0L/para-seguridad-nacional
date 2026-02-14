@@ -22,8 +22,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
-init_backup "logging-centralizado"
 securizar_setup_traps
+
+# --- Pre-check: verificar si ya está todo aplicado ---
+_precheck 10
+_pc 'check_file_exists /etc/rsyslog.d/01-securizar-hardening.conf'
+_pc 'check_executable /usr/local/bin/configurar-log-remoto.sh'
+_pc 'check_file_exists /etc/rsyslog.d/20-securizar-normalize.conf'
+_pc 'check_executable /usr/local/bin/securizar-log-integrity.sh'
+_pc 'check_executable /usr/local/bin/correlacionar-eventos.sh'
+_pc 'check_executable /usr/local/bin/securizar-log-alertas.sh'
+_pc 'check_executable /usr/local/bin/gestionar-retencion-logs.sh'
+_pc 'check_executable /usr/local/bin/activar-siem.sh'
+_pc 'check_executable /usr/local/bin/forense-logs.sh'
+_pc 'check_executable /usr/local/bin/auditoria-logging.sh'
+_precheck_result
+
+init_backup "logging-centralizado"
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -53,7 +68,9 @@ echo "  - journald persistente con sellado criptografico"
 echo "  - Compresion y limites de almacenamiento"
 echo ""
 
-if ask "¿Aplicar hardening de rsyslog y journald?"; then
+if check_file_exists /etc/rsyslog.d/01-securizar-hardening.conf; then
+    log_already "Hardening de rsyslog y journald (01-securizar-hardening.conf)"
+elif ask "¿Aplicar hardening de rsyslog y journald?"; then
 
     # --- Instalar y activar rsyslog ---
     if ! command -v rsyslogd &>/dev/null; then
@@ -212,7 +229,9 @@ echo "  - Template JSON estructurado para SIEM"
 echo "  - Cola con respaldo en disco (10000 mensajes)"
 echo ""
 
-if ask "¿Configurar reenvio seguro de logs via TLS?"; then
+if check_executable /usr/local/bin/configurar-log-remoto.sh; then
+    log_already "Reenvio seguro de logs via TLS (configurar-log-remoto.sh)"
+elif ask "¿Configurar reenvio seguro de logs via TLS?"; then
 
     # --- Instalar modulo TLS ---
     if ! pkg_is_installed "rsyslog-gnutls"; then
@@ -418,7 +437,9 @@ echo "  - Enriquecimiento con hostname, IP, prioridad"
 echo "  - Normalizacion de timestamps (RFC 5424)"
 echo ""
 
-if ask "¿Configurar agregacion y normalizacion de logs?"; then
+if check_file_exists /etc/rsyslog.d/20-securizar-normalize.conf; then
+    log_already "Agregacion y normalizacion de logs (20-securizar-normalize.conf)"
+elif ask "¿Configurar agregacion y normalizacion de logs?"; then
 
     # --- Template de normalizacion ---
     NORM_CONF="/etc/rsyslog.d/20-securizar-normalize.conf"
@@ -595,7 +616,9 @@ echo "  - Integracion con logrotate"
 echo "  - Almacenamiento cifrado opcional (gocryptfs)"
 echo ""
 
-if ask "¿Configurar almacenamiento seguro de logs?"; then
+if check_executable /usr/local/bin/securizar-log-integrity.sh; then
+    log_already "Almacenamiento seguro de logs (securizar-log-integrity.sh)"
+elif ask "¿Configurar almacenamiento seguro de logs?"; then
 
     # --- Atributos inmutables en logs criticos ---
     CRITICAL_LOGS=(
@@ -843,7 +866,9 @@ echo "  - Manipulacion de logs (borrado/truncado)"
 echo "  - Instalacion de persistencia (crontab/systemd tras SSH)"
 echo ""
 
-if ask "¿Instalar herramienta de correlacion de eventos?"; then
+if check_executable /usr/local/bin/correlacionar-eventos.sh; then
+    log_already "Herramienta de correlacion de eventos (correlacionar-eventos.sh)"
+elif ask "¿Instalar herramienta de correlacion de eventos?"; then
 
     cat > /usr/local/bin/correlacionar-eventos.sh << 'EOFCORR'
 #!/bin/bash
@@ -1118,7 +1143,9 @@ echo "  - Rate limiting: max 10 alertas/minuto por categoria"
 echo "  - Soporte email y webhook opcionales"
 echo ""
 
-if ask "¿Configurar alertas en tiempo real?"; then
+if check_executable /usr/local/bin/securizar-log-alertas.sh; then
+    log_already "Alertas en tiempo real (securizar-log-alertas.sh)"
+elif ask "¿Configurar alertas en tiempo real?"; then
 
     # --- Script de alertas ---
     cat > /usr/local/bin/securizar-log-alertas.sh << 'EOFALERTAS'
@@ -1332,7 +1359,9 @@ echo "  - Aplicacion: 30 dias"
 echo "  - Compresion zstd/gzip, postrotate rsyslog"
 echo ""
 
-if ask "¿Configurar retencion y rotacion avanzada?"; then
+if check_executable /usr/local/bin/gestionar-retencion-logs.sh; then
+    log_already "Retencion y rotacion avanzada (gestionar-retencion-logs.sh)"
+elif ask "¿Configurar retencion y rotacion avanzada?"; then
 
     # Detectar compresor disponible
     if command -v zstd &>/dev/null; then
@@ -1581,7 +1610,9 @@ echo "  - Graylog (omgelf)"
 echo "  - Script de activacion con test de conectividad"
 echo ""
 
-if ask "¿Instalar templates de integracion SIEM?"; then
+if check_executable /usr/local/bin/activar-siem.sh; then
+    log_already "Templates de integracion SIEM (activar-siem.sh)"
+elif ask "¿Instalar templates de integracion SIEM?"; then
 
     mkdir -p /etc/securizar/siem
 
@@ -1904,7 +1935,9 @@ echo "  - Filtrado por rango de fechas"
 echo "  - Metadatos de cadena de custodia"
 echo ""
 
-if ask "¿Instalar herramienta de forense de logs?"; then
+if check_executable /usr/local/bin/forense-logs.sh; then
+    log_already "Herramienta de forense de logs (forense-logs.sh)"
+elif ask "¿Instalar herramienta de forense de logs?"; then
 
     cat > /usr/local/bin/forense-logs.sh << 'EOFFORENSE'
 #!/bin/bash
@@ -2227,7 +2260,9 @@ echo "  - Integracion SIEM y herramientas forenses"
 echo "  - Puntuacion: COMPLETO / PARCIAL / INSUFICIENTE"
 echo ""
 
-if ask "¿Instalar auditoria de infraestructura de logging?"; then
+if check_executable /usr/local/bin/auditoria-logging.sh; then
+    log_already "Auditoria de infraestructura de logging (auditoria-logging.sh)"
+elif ask "¿Instalar auditoria de infraestructura de logging?"; then
 
     cat > /usr/local/bin/auditoria-logging.sh << 'EOFAUDIT'
 #!/bin/bash

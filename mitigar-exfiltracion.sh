@@ -26,6 +26,16 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-exfiltracion"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 5
+_pc check_executable /usr/local/bin/detectar-exfiltracion.sh
+_pc check_file_exists /etc/audit/rules.d/66-exfiltration.rules
+_pc check_file_exists /etc/systemd/resolved.conf.d/01-anti-exfil.conf
+_pc check_file_exists /etc/udev/rules.d/91-usb-readonly.rules
+_pc check_executable /usr/local/bin/monitorear-transferencias.sh
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE EXFILTRACIÓN - TA0010                     ║"
@@ -48,7 +58,9 @@ echo "  - Protocolos cifrados no estándar (T1048.001)"
 echo "  - ICMP tunneling"
 echo ""
 
-if ask "¿Configurar monitoreo de tráfico saliente?"; then
+if check_executable /usr/local/bin/detectar-exfiltracion.sh; then
+    log_already "Monitoreo de tráfico saliente (detectar-exfiltracion.sh)"
+elif ask "¿Configurar monitoreo de tráfico saliente?"; then
 
     # 1a. Reglas de firewall para monitorear tráfico saliente inusual
     echo ""
@@ -210,7 +222,9 @@ echo "Servicios monitoreados: Google Drive, Dropbox, OneDrive, MEGA,"
 echo "transfer.sh, file.io, pastebin"
 echo ""
 
-if ask "¿Bloquear acceso a servicios de cloud storage para exfiltración?"; then
+if check_file_exists /etc/audit/rules.d/66-exfiltration.rules; then
+    log_already "Bloqueo de cloud storage (66-exfiltration.rules)"
+elif ask "¿Bloquear acceso a servicios de cloud storage para exfiltración?"; then
 
     echo ""
     echo -e "${BOLD}Opciones:${NC}"
@@ -306,7 +320,9 @@ echo "Prevenir y detectar exfiltración de datos mediante DNS tunneling."
 echo "Es uno de los métodos más difíciles de detectar."
 echo ""
 
-if ask "¿Configurar protección contra DNS tunneling?"; then
+if check_file_exists /etc/systemd/resolved.conf.d/01-anti-exfil.conf; then
+    log_already "Protección DNS tunneling (01-anti-exfil.conf)"
+elif ask "¿Configurar protección contra DNS tunneling?"; then
 
     # 3a. Limitar tamaño de queries DNS
     echo ""
@@ -450,7 +466,9 @@ echo "Controlar la exfiltración de datos mediante dispositivos USB"
 echo "u otros medios físicos."
 echo ""
 
-if ask "¿Restringir escritura a medios extraíbles?"; then
+if check_file_exists /etc/udev/rules.d/91-usb-readonly.rules; then
+    log_already "Control de escritura USB (91-usb-readonly.rules)"
+elif ask "¿Restringir escritura a medios extraíbles?"; then
 
     # Crear regla udev para bloquear escritura en USB
     echo ""
@@ -498,7 +516,9 @@ echo "Limitar el tamaño de transferencias de datos salientes"
 echo "para detectar y ralentizar exfiltración masiva."
 echo ""
 
-if ask "¿Configurar limitación de transferencias salientes?"; then
+if check_executable /usr/local/bin/monitorear-transferencias.sh; then
+    log_already "Limitación de transferencias (monitorear-transferencias.sh)"
+elif ask "¿Configurar limitación de transferencias salientes?"; then
 
     # 5a. Configurar tc (traffic control) para limitar upload
     echo ""

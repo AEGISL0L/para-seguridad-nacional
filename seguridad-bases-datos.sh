@@ -15,7 +15,7 @@
 #   S10 - Database Security Audit
 # ============================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
@@ -23,6 +23,20 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 securizar_setup_traps
 init_backup "seguridad-bases-datos"
+
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 10
+_pc 'check_executable "/usr/local/bin/auditar-postgresql.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-mysql.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-redis.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-mongodb.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-acceso-db.sh"'
+_pc 'check_executable "/usr/local/bin/verificar-cifrado-db.sh"'
+_pc 'check_executable "/usr/local/bin/backup-seguro-db.sh"'
+_pc 'check_executable "/usr/local/bin/configurar-audit-db.sh"'
+_pc 'check_executable "/usr/local/bin/detectar-sqli.sh"'
+_pc 'check_executable "/usr/local/bin/auditoria-bases-datos.sh"'
+_precheck_result
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -138,7 +152,9 @@ echo ""
 if detect_postgresql; then
     log_info "PostgreSQL detectado en el sistema"
 
-    if ask "¿Aplicar hardening de PostgreSQL?"; then
+    if check_executable "/usr/local/bin/auditar-postgresql.sh"; then
+        log_already "Hardening PostgreSQL (auditar-postgresql.sh ya instalado)"
+    elif ask "¿Aplicar hardening de PostgreSQL?"; then
 
         PG_CONF=$(find_pg_conf)
         PG_HBA=$(find_pg_hba)
@@ -396,7 +412,9 @@ if detect_mysql; then
     fi
     log_info "Motor detectado: $MYSQL_TYPE"
 
-    if ask "¿Aplicar hardening de $MYSQL_TYPE?"; then
+    if check_executable "/usr/local/bin/auditar-mysql.sh"; then
+        log_already "Hardening $MYSQL_TYPE (auditar-mysql.sh ya instalado)"
+    elif ask "¿Aplicar hardening de $MYSQL_TYPE?"; then
 
         MYSQL_CONF=$(find_mysql_conf)
 
@@ -623,7 +641,9 @@ echo ""
 if detect_redis; then
     log_info "Redis detectado en el sistema"
 
-    if ask "¿Aplicar hardening de Redis?"; then
+    if check_executable "/usr/local/bin/auditar-redis.sh"; then
+        log_already "Hardening Redis (auditar-redis.sh ya instalado)"
+    elif ask "¿Aplicar hardening de Redis?"; then
 
         REDIS_CONF=$(find_redis_conf)
 
@@ -858,7 +878,9 @@ echo ""
 if detect_mongodb; then
     log_info "MongoDB detectado en el sistema"
 
-    if ask "¿Aplicar hardening de MongoDB?"; then
+    if check_executable "/usr/local/bin/auditar-mongodb.sh"; then
+        log_already "Hardening MongoDB (auditar-mongodb.sh ya instalado)"
+    elif ask "¿Aplicar hardening de MongoDB?"; then
 
         MONGOD_CONF=$(find_mongod_conf)
 
@@ -1091,7 +1113,9 @@ echo "  - Auditar privilegios de usuario (GRANT ALL)"
 echo "  - Verificacion de acceso basado en roles"
 echo ""
 
-if ask "¿Auditar autenticacion y control de acceso de bases de datos?"; then
+if check_executable "/usr/local/bin/auditar-acceso-db.sh"; then
+    log_already "Autenticacion DB (auditar-acceso-db.sh ya instalado)"
+elif ask "¿Auditar autenticacion y control de acceso de bases de datos?"; then
 
     # Crear script de auditoria de acceso
     cat > /usr/local/bin/auditar-acceso-db.sh << 'EOFACCESSAUDIT'
@@ -1329,7 +1353,9 @@ echo "  - Cifrado en reposo: pgcrypto, InnoDB, WiredTiger"
 echo "  - Gestion de claves"
 echo ""
 
-if ask "¿Configurar cifrado de bases de datos?"; then
+if check_executable "/usr/local/bin/verificar-cifrado-db.sh"; then
+    log_already "Cifrado DB (verificar-cifrado-db.sh ya instalado)"
+elif ask "¿Configurar cifrado de bases de datos?"; then
 
     # Crear script de verificacion de cifrado
     cat > /usr/local/bin/verificar-cifrado-db.sh << 'EOFCIFRADODB'
@@ -1568,7 +1594,9 @@ echo "  - Politicas de retencion"
 echo "  - Pruebas de restauracion"
 echo ""
 
-if ask "¿Configurar backups seguros de bases de datos?"; then
+if check_executable "/usr/local/bin/backup-seguro-db.sh"; then
+    log_already "Backups DB (backup-seguro-db.sh ya instalado)"
+elif ask "¿Configurar backups seguros de bases de datos?"; then
 
     # Directorio de backups
     BACKUP_DB_DIR="/var/backups/databases"
@@ -1869,7 +1897,9 @@ echo "  - Reenvio a syslog/journald"
 echo "  - Integracion con modulo 43 (logging centralizado)"
 echo ""
 
-if ask "¿Configurar audit logging de bases de datos?"; then
+if check_executable "/usr/local/bin/configurar-audit-db.sh"; then
+    log_already "Audit logging DB (configurar-audit-db.sh ya instalado)"
+elif ask "¿Configurar audit logging de bases de datos?"; then
 
     # Crear script de configuracion de audit
     cat > /usr/local/bin/configurar-audit-db.sh << 'EOFAUDITCONF'
@@ -2081,7 +2111,9 @@ echo "  - Alertas en queries sospechosas"
 echo "  - Cron job para monitoreo continuo"
 echo ""
 
-if ask "¿Configurar prevencion de SQL injection?"; then
+if check_executable "/usr/local/bin/detectar-sqli.sh"; then
+    log_already "SQLi prevention (detectar-sqli.sh ya instalado)"
+elif ask "¿Configurar prevencion de SQL injection?"; then
 
     # Crear archivo de patrones SQLi
     cat > /etc/securizar/sqli-patterns.conf << 'EOFSQLIPATTERNS'
@@ -2366,7 +2398,9 @@ echo "  - Audit logging, exposicion de red"
 echo "  - Puntuacion BUENO/MEJORABLE/DEFICIENTE"
 echo ""
 
-if ask "¿Instalar herramienta de auditoria integral de bases de datos?"; then
+if check_executable "/usr/local/bin/auditoria-bases-datos.sh"; then
+    log_already "Auditoria DB (auditoria-bases-datos.sh ya instalado)"
+elif ask "¿Instalar herramienta de auditoria integral de bases de datos?"; then
 
     cat > /usr/local/bin/auditoria-bases-datos.sh << 'EOFDBAUDIT'
 #!/bin/bash

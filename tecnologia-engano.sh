@@ -38,6 +38,20 @@ if [[ "$DECEPTION_SECTION" == "all" ]]; then
 
     log_section "MODULO 55: TECNOLOGIA DE ENGANO"
     log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
+
+    # ── Pre-check rapido ────────────────────────────────────
+    _precheck 10
+    _pc check_executable /usr/local/bin/gestionar-honeypots.sh
+    _pc check_executable /usr/local/bin/generar-honeytokens.sh
+    _pc check_executable /usr/local/bin/desplegar-honeyfiles.sh
+    _pc check_executable /usr/local/bin/gestionar-honey-users.sh
+    _pc check_file_exists /etc/securizar/honeydirs.conf
+    _pc check_executable /usr/local/bin/configurar-honey-dns.sh
+    _pc check_executable /usr/local/bin/gestionar-servicios-decoy.sh
+    _pc check_executable /usr/local/bin/alertar-deception.sh
+    _pc check_executable /usr/local/bin/dashboard-deception.sh
+    _pc check_executable /usr/local/bin/auditoria-deception.sh
+    _precheck_result
 fi
 
 # ── Directorios base ─────────────────────────────────────────
@@ -245,7 +259,9 @@ log_info "  - Logging de conexiones, alertas via syslog"
 log_info "  - Servicios systemd con template unit"
 log_info ""
 
-if ask "¿Desplegar honeypots de red (puertos trampa)?"; then
+if check_executable /usr/local/bin/gestionar-honeypots.sh; then
+    log_already "Honeypots de red (gestionar-honeypots.sh existe)"
+elif ask "¿Desplegar honeypots de red (puertos trampa)?"; then
 
     # Verificar disponibilidad de ncat o socat
     HONEYPOT_LISTENER=""
@@ -779,7 +795,9 @@ log_info "  - Fake .env files con canary tokens"
 log_info "  - Monitorizacion via auditd"
 log_info ""
 
-if ask "¿Desplegar honey tokens (credenciales canario)?"; then
+if check_executable /usr/local/bin/generar-honeytokens.sh; then
+    log_already "Honey tokens (generar-honeytokens.sh existe)"
+elif ask "¿Desplegar honey tokens (credenciales canario)?"; then
 
     HONEYTOKENS_CONF="/etc/securizar/honeytokens.conf"
     HONEYTOKENS_INVENTORY=()
@@ -1239,34 +1257,21 @@ EOFENVPROD
                 cp -a "$AUDIT_RULES_FILE" "$BACKUP_DIR/"
             fi
 
-            cat > "$AUDIT_RULES_FILE" << 'EOFAUDITRULES'
-## Securizar Modulo 55 - Monitorizacion de Honeytokens
-## Alerta en cualquier acceso a archivos canario
-
-# AWS credentials canario
--w /root/.aws/credentials.bak -p rwa -k honeytoken-aws
-# SSH keys canario
--w /root/.ssh/id_rsa.bak -p rwa -k honeytoken-ssh
--w /tmp/.id_rsa_backup -p rwa -k honeytoken-ssh
-# Database credentials canario
--w /etc/securizar/decoy-db.conf -p rwa -k honeytoken-db
-# ENV files canario
--w /opt/app-config/.env.production -p rwa -k honeytoken-env
-EOFAUDITRULES
-
-            # Agregar reglas para archivos en /var/www si existen
-            if [[ -f /var/www/.env.bak ]]; then
-                echo "-w /var/www/.env.bak -p rwa -k honeytoken-env" >> "$AUDIT_RULES_FILE"
-            fi
-
-            # Agregar reglas para cada usuario
-            while IFS=: read -r username _ uid _ _ homedir _; do
-                [[ "$uid" -ge 1000 && "$uid" -lt 65534 ]] || continue
-                [[ -d "$homedir" ]] || continue
-                if [[ -f "${homedir}/.aws/credentials.bak" ]]; then
-                    echo "-w ${homedir}/.aws/credentials.bak -p rwa -k honeytoken-aws" >> "$AUDIT_RULES_FILE"
-                fi
-            done < /etc/passwd
+            # Generar reglas solo para paths que existen
+            {
+                echo "## Securizar Modulo 55 - Monitorizacion de Honeytokens"
+                echo "## Auto-generated: solo paths existentes"
+                echo ""
+                for _ht_path in /root/.aws/credentials.bak /root/.ssh/id_rsa.bak /tmp/.id_rsa_backup /etc/securizar/decoy-db.conf /opt/app-config/.env.production /var/www/.env.bak; do
+                    [[ -f "$_ht_path" ]] && echo "-w $_ht_path -p rwa -k honeytoken-$(basename "$_ht_path" | tr '.' '-')"
+                done
+                # Reglas por usuario
+                while IFS=: read -r username _ uid _ _ homedir _; do
+                    [[ "$uid" -ge 1000 && "$uid" -lt 65534 ]] || continue
+                    [[ -d "$homedir" ]] || continue
+                    [[ -f "${homedir}/.aws/credentials.bak" ]] && echo "-w ${homedir}/.aws/credentials.bak -p rwa -k honeytoken-aws"
+                done < /etc/passwd
+            } > "$AUDIT_RULES_FILE"
 
             chmod 640 "$AUDIT_RULES_FILE"
 
@@ -1279,6 +1284,27 @@ EOFAUDITRULES
         fi
     else
         log_skip "Monitorizacion auditd de honeytokens"
+    fi
+
+    # Registrar en honey-registry centralizado (para honey-monitor.sh)
+    if [[ -f "$HONEYTOKENS_CONF" ]]; then
+        while IFS=: read -r _ru _ _ruid _ _ _rhome _; do
+            [[ "$_ruid" -ge 1000 && "$_ruid" -lt 65534 ]] || continue
+            [[ -d "$_rhome" ]] || continue
+            _CENTRAL_REG="$_rhome/.config/securizar/honey-registry.conf"
+            mkdir -p "$(dirname "$_CENTRAL_REG")"
+            while IFS='|' read -r _ht_tag _tid _ttype _tpath _tts; do
+                [[ "$_ht_tag" == "HONEYTOKEN" ]] || continue
+                [[ -f "$_tpath" ]] || continue
+                # No duplicar si ya existe en registry
+                if [[ -f "$_CENTRAL_REG" ]] && grep -q "$_tpath" "$_CENTRAL_REG" 2>/dev/null; then
+                    continue
+                fi
+                echo "${_tid}|${_tpath}|${_ttype}|$(date +%Y-%m-%d)|Mod55 honeytoken" >> "$_CENTRAL_REG"
+            done < "$HONEYTOKENS_CONF"
+            chown "$_ru:$(id -gn "$_ru" 2>/dev/null || echo "$_ru")" "$_CENTRAL_REG" 2>/dev/null || true
+        done < /etc/passwd
+        log_info "Tokens registrados en honey-registry centralizado"
     fi
 
     log_info "Honey tokens configurados"
@@ -1302,7 +1328,9 @@ log_info "  - /tmp/.ssh_config (config SSH falso)"
 log_info "  - Documentos financieros falsos en homes de usuario"
 log_info ""
 
-if ask "¿Desplegar honey files (documentos senuelo)?"; then
+if check_executable /usr/local/bin/desplegar-honeyfiles.sh; then
+    log_already "Honey files (desplegar-honeyfiles.sh existe)"
+elif ask "¿Desplegar honey files (documentos senuelo)?"; then
 
     HONEYFILES_INVENTORY="/etc/securizar/honeyfiles.conf"
     cat > "$HONEYFILES_INVENTORY" << EOFHFINV
@@ -1652,32 +1680,24 @@ EOFBANKACC
                 cp -a "$AUDIT_HF_RULES" "$BACKUP_DIR/"
             fi
 
-            cat > "$AUDIT_HF_RULES" << 'EOFHFAUDIT'
-## Securizar Modulo 55 - Monitorizacion Forense de Honey Files
-## Reglas syscall-level: captura proceso, PID, UID, comando completo
-
-# Archivos de contrasenas falsos (syscall-level para forense)
--a always,exit -F arch=b64 -S open,openat,read,readv -F path=/root/passwords.xlsx.txt -F perm=r -k honeyfile-passwords
--a always,exit -F arch=b64 -S open,openat,read,readv -F path=/root/backup-keys.txt -F perm=r -k honeyfile-keys
-# Credenciales web falsas
--a always,exit -F arch=b64 -S open,openat,read,readv -F path=/var/www/html/.htpasswd.bak -F perm=r -k honeyfile-htpasswd
-# Config SSH falso en /tmp
--a always,exit -F arch=b64 -S open,openat,read,readv -F path=/tmp/.ssh_config -F perm=r -k honeyfile-sshconfig
-# Tambien capturar escritura/modificacion
--w /root/passwords.xlsx.txt -p wa -k honeyfile-passwords-write
--w /root/backup-keys.txt -p wa -k honeyfile-keys-write
--w /var/www/html/.htpasswd.bak -p wa -k honeyfile-htpasswd-write
--w /tmp/.ssh_config -p wa -k honeyfile-sshconfig-write
-EOFHFAUDIT
-
-            # Agregar reglas para documentos financieros por usuario
-            while IFS=: read -r username _ uid _ _ homedir _; do
-                [[ "$uid" -ge 1000 && "$uid" -lt 65534 ]] || continue
-                [[ -d "$homedir" ]] || continue
-                if [[ -f "${homedir}/Documents/bank-accounts.csv" ]]; then
-                    echo "-a always,exit -F arch=b64 -S open,openat,read,readv -F path=${homedir}/Documents/bank-accounts.csv -F perm=r -k honeyfile-financial" >> "$AUDIT_HF_RULES"
-                fi
-            done < /etc/passwd
+            # Generar reglas solo para paths que existen
+            {
+                echo "## Securizar Modulo 55 - Monitorizacion Forense de Honey Files"
+                echo "## Auto-generated: solo paths existentes"
+                echo ""
+                declare -A _hf_map=( [/root/passwords.xlsx.txt]=honeyfile-passwords [/root/backup-keys.txt]=honeyfile-keys [/var/www/html/.htpasswd.bak]=honeyfile-htpasswd [/tmp/.ssh_config]=honeyfile-sshconfig )
+                for _hf_path in "${!_hf_map[@]}"; do
+                    [[ -f "$_hf_path" ]] || continue
+                    _hf_key="${_hf_map[$_hf_path]}"
+                    echo "-a always,exit -F arch=b64 -S open,openat,read,readv -F path=$_hf_path -F perm=r -k $_hf_key"
+                    echo "-w $_hf_path -p wa -k ${_hf_key}-write"
+                done
+                # Documentos financieros por usuario
+                while IFS=: read -r username _ uid _ _ homedir _; do
+                    [[ "$uid" -ge 1000 && "$uid" -lt 65534 ]] || continue
+                    [[ -f "${homedir}/Documents/bank-accounts.csv" ]] && echo "-a always,exit -F arch=b64 -S open,openat,read,readv -F path=${homedir}/Documents/bank-accounts.csv -F perm=r -k honeyfile-financial"
+                done < /etc/passwd
+            } > "$AUDIT_HF_RULES"
 
             chmod 640 "$AUDIT_HF_RULES"
             augenrules --load 2>/dev/null || auditctl -R "$AUDIT_HF_RULES" 2>/dev/null || true
@@ -1710,7 +1730,9 @@ log_info "  - Shells invalidos, cuentas bloqueadas"
 log_info "  - Monitorizacion de intentos de autenticacion"
 log_info ""
 
-if ask "¿Crear honey users (cuentas canario)?"; then
+if check_executable /usr/local/bin/gestionar-honey-users.sh; then
+    log_already "Honey users (gestionar-honey-users.sh existe)"
+elif ask "¿Crear honey users (cuentas canario)?"; then
 
     HONEYUSERS_CONF="/etc/securizar/honeyusers.conf"
     cat > "$HONEYUSERS_CONF" << EOFHUCONF
@@ -1953,25 +1975,21 @@ EOFHONEYUSERS
                 cp -a "$AUDIT_HU_RULES" "$BACKUP_DIR/"
             fi
 
-            cat > "$AUDIT_HU_RULES" << 'EOFHUAUDIT'
-## Securizar Modulo 55 - Monitorizacion de Honey Users
-## Alerta en cualquier intento de autenticacion
-
-# Monitorizar intentos de su a honey users
--w /usr/bin/su -p x -k honeyuser-su
--w /usr/bin/sudo -p x -k honeyuser-sudo
-
-# Monitorizar acceso a archivos de autenticacion
--w /etc/passwd -p wa -k honeyuser-passwd-change
--w /etc/shadow -p rwa -k honeyuser-shadow-access
-
-# Monitorizar SSH login attempts (sshd)
--w /var/log/auth.log -p wa -k honeyuser-auth-log
--w /var/log/secure -p wa -k honeyuser-auth-log
-
-# Reglas especificas para PAM
--a always,exit -F arch=b64 -S execve -F uid=0 -C auid!=uid -k honeyuser-priv-escalation
-EOFHUAUDIT
+            # Generar reglas solo para paths que existen
+            {
+                echo "## Securizar Modulo 55 - Monitorizacion de Honey Users"
+                echo "## Auto-generated: solo paths existentes"
+                echo ""
+                for _hu_bin in /usr/bin/su /usr/bin/sudo; do
+                    [[ -f "$_hu_bin" ]] && echo "-w $_hu_bin -p x -k honeyuser-$(basename "$_hu_bin")"
+                done
+                echo "-w /etc/passwd -p wa -k honeyuser-passwd-change"
+                echo "-w /etc/shadow -p rwa -k honeyuser-shadow-access"
+                for _hu_log in /var/log/auth.log /var/log/secure; do
+                    [[ -f "$_hu_log" ]] && echo "-w $_hu_log -p wa -k honeyuser-auth-log"
+                done
+                echo "-a always,exit -F arch=b64 -S execve -F uid=0 -C auid!=uid -k honeyuser-priv-escalation"
+            } > "$AUDIT_HU_RULES"
 
             chmod 640 "$AUDIT_HU_RULES"
             augenrules --load 2>/dev/null || auditctl -R "$AUDIT_HU_RULES" 2>/dev/null || true
@@ -2054,7 +2072,9 @@ log_info "  - /etc/securizar/.admin-keys/ (claves admin falsas)"
 log_info "  - /root/.bitcoin/ (wallet crypto falso)"
 log_info ""
 
-if ask "¿Desplegar honey directories (directorios trampa)?"; then
+if check_file_exists /etc/securizar/honeydirs.conf; then
+    log_already "Honey directories (honeydirs.conf existe)"
+elif ask "¿Desplegar honey directories (directorios trampa)?"; then
 
     HONEYDIRS_CONF="/etc/securizar/honeydirs.conf"
     cat > "$HONEYDIRS_CONF" << EOFHDCONF
@@ -2428,21 +2448,19 @@ EOFBTCCFG
                 cp -a "$AUDIT_HD_RULES" "$BACKUP_DIR/"
             fi
 
-            cat > "$AUDIT_HD_RULES" << 'EOFHDAUDIT'
-## Securizar Modulo 55 - Monitorizacion Forense de Honey Directories
-## Reglas syscall-level para capturar proceso, PID, UID en accesos
-
-# Lectura a directorios trampa (syscall open/openat)
--a always,exit -F arch=b64 -S open,openat -F dir=/opt/backup-data/ -F perm=r -k honeydir-backup-read
--a always,exit -F arch=b64 -S open,openat -F dir=/var/lib/vault-keys/ -F perm=r -k honeydir-vault-read
--a always,exit -F arch=b64 -S open,openat -F dir=/etc/securizar/.admin-keys/ -F perm=r -k honeydir-adminkeys-read
--a always,exit -F arch=b64 -S open,openat -F dir=/root/.bitcoin/ -F perm=r -k honeydir-bitcoin-read
-# Escritura/modificacion (watch rules para cambios)
--w /opt/backup-data/ -p wa -k honeydir-backup-write
--w /var/lib/vault-keys/ -p wa -k honeydir-vault-write
--w /etc/securizar/.admin-keys/ -p wa -k honeydir-adminkeys-write
--w /root/.bitcoin/ -p wa -k honeydir-bitcoin-write
-EOFHDAUDIT
+            # Generar reglas solo para directorios que existen
+            {
+                echo "## Securizar Modulo 55 - Monitorizacion Forense de Honey Directories"
+                echo "## Auto-generated: solo paths existentes"
+                echo ""
+                declare -A _hd_map=( [/opt/backup-data/]=honeydir-backup [/var/lib/vault-keys/]=honeydir-vault [/etc/securizar/.admin-keys/]=honeydir-adminkeys [/root/.bitcoin/]=honeydir-bitcoin )
+                for _hd_dir in "${!_hd_map[@]}"; do
+                    [[ -d "$_hd_dir" ]] || continue
+                    _hd_key="${_hd_map[$_hd_dir]}"
+                    echo "-a always,exit -F arch=b64 -S open,openat -F dir=$_hd_dir -F perm=r -k ${_hd_key}-read"
+                    echo "-w $_hd_dir -p wa -k ${_hd_key}-write"
+                done
+            } > "$AUDIT_HD_RULES"
             chmod 640 "$AUDIT_HD_RULES"
             augenrules --load 2>/dev/null || auditctl -R "$AUDIT_HD_RULES" 2>/dev/null || true
             log_change "Configurado" "Reglas auditd para honey directories: $AUDIT_HD_RULES"
@@ -2453,14 +2471,25 @@ EOFHDAUDIT
         log_skip "Monitorizacion auditd de honey directories"
     fi
 
-    # Opcionalmente instalar inotify-tools para monitorizacion en tiempo real
+    # Monitorizacion en tiempo real
     if ask "¿Instalar inotify-tools para monitorizacion en tiempo real?"; then
         if ! command -v inotifywait &>/dev/null; then
             pkg_install inotify-tools || true
         fi
         if command -v inotifywait &>/dev/null; then
             log_change "Disponible" "inotifywait para monitorizacion de honey directories"
-            log_info "Ejecutar: gestionar-honeydirs.sh monitor"
+            # Comprobar monitor forense centralizado
+            _HONEY_MON=""
+            for _hm_path in /home/*/.config/securizar/honey-monitor.sh; do
+                [[ -f "$_hm_path" ]] && _HONEY_MON="$_hm_path" && break
+            done
+            if [[ -n "$_HONEY_MON" ]]; then
+                log_info "Monitor forense centralizado disponible: $_HONEY_MON"
+                log_info "  Iniciar daemon: bash $_HONEY_MON watchd"
+                log_info "  Ver evidencia:  bash $_HONEY_MON evidence"
+            else
+                log_info "Ejecutar: gestionar-honeydirs.sh monitor"
+            fi
         else
             log_warn "No se pudo instalar inotify-tools"
         fi
@@ -2488,7 +2517,9 @@ log_info "  - database-primary.internal -> IP de honeypot"
 log_info "  - Entradas /etc/hosts como alternativa"
 log_info ""
 
-if ask "¿Configurar honey DNS (registros DNS canario)?"; then
+if check_executable /usr/local/bin/configurar-honey-dns.sh; then
+    log_already "Honey DNS (configurar-honey-dns.sh existe)"
+elif ask "¿Configurar honey DNS (registros DNS canario)?"; then
 
     # Crear script de gestion
     log_info "Creando /usr/local/bin/configurar-honey-dns.sh..."
@@ -2824,7 +2855,9 @@ log_info "  - Servicio systemd: securizar-decoy-web.service"
 log_info "  - Logging a /var/log/securizar/decoy-web.log"
 log_info ""
 
-if ask "¿Desplegar servicios de red falsos (deception services)?"; then
+if check_executable /usr/local/bin/gestionar-servicios-decoy.sh; then
+    log_already "Deception network services (gestionar-servicios-decoy.sh existe)"
+elif ask "¿Desplegar servicios de red falsos (deception services)?"; then
 
     # Crear script de gestion de servicios decoy
     log_info "Creando /usr/local/bin/gestionar-servicios-decoy.sh..."
@@ -3376,7 +3409,9 @@ log_info "  - Correlacion de eventos multiples"
 log_info "  - Rate limiting para evitar fatiga de alertas"
 log_info ""
 
-if ask "¿Configurar sistema centralizado de alertas de deception?"; then
+if check_executable /usr/local/bin/alertar-deception.sh; then
+    log_already "Sistema de alertas de deception (alertar-deception.sh existe)"
+elif ask "¿Configurar sistema centralizado de alertas de deception?"; then
 
     # Crear configuracion de alertas
     log_info "Creando /etc/securizar/deception-alerts.conf..."
@@ -3794,7 +3829,9 @@ log_info "  - Top IPs atacantes"
 log_info "  - Reportes automatizados"
 log_info ""
 
-if ask "¿Crear dashboard de deception e informes?"; then
+if check_executable /usr/local/bin/dashboard-deception.sh; then
+    log_already "Dashboard de deception (dashboard-deception.sh existe)"
+elif ask "¿Crear dashboard de deception e informes?"; then
 
     # Dashboard interactivo
     log_info "Creando /usr/local/bin/dashboard-deception.sh..."
@@ -4287,7 +4324,9 @@ log_info "  - Puntuacion de cobertura"
 log_info "  - Rating: BUENO/MEJORABLE/DEFICIENTE"
 log_info ""
 
-if ask "¿Crear sistema de auditoria integral de deception?"; then
+if check_executable /usr/local/bin/auditoria-deception.sh; then
+    log_already "Auditoria integral de deception (auditoria-deception.sh existe)"
+elif ask "¿Crear sistema de auditoria integral de deception?"; then
 
     log_info "Creando /usr/local/bin/auditoria-deception.sh..."
     cat > /usr/local/bin/auditoria-deception.sh << 'EOFAUDIT'
@@ -4766,6 +4805,11 @@ if [[ "$DECEPTION_SECTION" == "all" ]]; then
     echo "  - Dashboard:              dashboard-deception.sh [24h|7d|30d|all]"
     echo "  - Informe:                informe-deception.sh [24h|7d|30d]"
     echo "  - Auditoria completa:     auditoria-deception.sh"
+    echo ""
+    echo "Monitor forense centralizado (inotifywait + captura evidencia):"
+    echo "  - honey-monitor.sh watchd       (daemon con captura forense)"
+    echo "  - honey-monitor.sh evidence     (ver paquetes de evidencia)"
+    echo "  - honey-monitor.sh audit-setup  (reglas auditd centralizadas)"
     echo ""
     log_info "Modulo 55 completado"
 fi

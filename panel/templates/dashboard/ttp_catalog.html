@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}TTP Catalog{% endblock %}
+{% block page_title %}TTP Catalog & Actor Profiles{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{% url 'dashboard:index' %}">Dashboard</a> / TTP Catalog</div>
+
+<!-- Summary Cards -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Tecnicas Observadas</div>
+    <div class="card-value text-blue">{{ total_techniques }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tacticas</div>
+    <div class="card-value text-purple">{{ total_tactics }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Actores Identificados</div>
+    <div class="card-value text-red">{{ actors|length }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Reglas de Deteccion</div>
+    <div class="card-value text-green">{{ rules|length }}</div>
+  </div>
+</div>
+
+<!-- Kill Chain Coverage -->
+<div class="section-title">Cobertura Kill Chain</div>
+<div class="card mb-3">
+  {% for phase, count in kill_chain.items %}
+  <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
+    <span style="min-width:180px;font-size:.85rem;{% if count > 0 %}color:var(--text-bright){% else %}color:var(--text-muted){% endif %}">{{ phase }}</span>
+    <div style="flex:1;background:var(--bg-primary);border-radius:4px;height:16px;overflow:hidden">
+      {% if count > 0 %}
+      <div style="width:{% widthratio count 500 100 %}%;min-width:4px;height:100%;background:{% if count > 100 %}var(--red){% elif count > 10 %}var(--yellow){% else %}var(--blue){% endif %};border-radius:4px"></div>
+      {% endif %}
+    </div>
+    <span class="mono text-muted" style="min-width:40px;text-align:right">{{ count }}</span>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- MITRE Techniques Table -->
+{% if techniques %}
+<div class="section-title">Tecnicas MITRE ATT&CK Observadas</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Nombre</th><th>Tactica</th><th>Hits</th><th>Tokens</th><th>Primera Vez</th></tr>
+    </thead>
+    <tbody>
+    {% for t in techniques %}
+      <tr>
+        <td class="mono" style="font-weight:700;color:var(--blue)">{{ t.technique_id }}</td>
+        <td>{{ t.name }}</td>
+        <td><span class="badge badge-blue">{{ t.tactic }}</span></td>
+        <td style="font-weight:700">{{ t.count }}</td>
+        <td>{{ t.unique_tokens }}</td>
+        <td class="mono text-muted">{{ t.first_seen|truncatechars:19 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Threat Actor Profiles -->
+{% if actors %}
+<div class="section-title">Perfiles de Actores de Amenaza</div>
+{% for a in actors %}
+<div class="card mb-2" style="border-left:3px solid {% if a.threat_level == 'CRITICAL' %}var(--red){% elif a.threat_level == 'HIGH' %}var(--orange){% elif a.threat_level == 'MEDIUM' %}var(--yellow){% else %}var(--text-muted){% endif %}">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+    <div>
+      <span class="mono" style="font-weight:700;color:var(--text-bright)">{{ a.actor|truncatechars:40 }}</span>
+      <span class="badge {% if a.threat_level == 'CRITICAL' %}badge-red{% elif a.threat_level == 'HIGH' %}badge-orange{% elif a.threat_level == 'MEDIUM' %}badge-yellow{% else %}badge-blue{% endif %}" style="margin-left:.5rem">{{ a.threat_level }}</span>
+    </div>
+    <span class="text-muted">{{ a.total_events }} eventos</span>
+  </div>
+  <div class="grid grid-4" style="font-size:.85rem">
+    <div>
+      <span class="text-muted">Comportamiento:</span>
+      <span class="text-bright">{{ a.behavior }}</span>
+    </div>
+    <div>
+      <span class="text-muted">Interes:</span>
+      <span class="text-bright">{{ a.interest }}</span>
+    </div>
+    <div>
+      <span class="text-muted">Tokens:</span>
+      <span class="text-bright">{{ a.unique_tokens }}</span>
+    </div>
+    <div>
+      <span class="text-muted">Intervalo medio:</span>
+      <span class="text-bright">{{ a.avg_interval }}s</span>
+    </div>
+  </div>
+  {% if a.tools %}
+  <div class="mt-1" style="font-size:.82rem">
+    <span class="text-muted">Herramientas:</span>
+    {% for tool in a.tools %}<span class="badge" style="margin-left:.3rem;background:rgba(188,140,255,.1);color:var(--purple)">{{ tool }}</span>{% endfor %}
+  </div>
+  {% endif %}
+  {% if a.token_types %}
+  <div class="mt-1" style="font-size:.82rem">
+    <span class="text-muted">Tokens:</span>
+    {% for type, count in a.token_types.items %}<span class="badge badge-blue" style="margin-left:.3rem">{{ type }} ({{ count }})</span>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Detection Rules -->
+{% if rules %}
+<div class="section-title">Reglas de Deteccion Generadas</div>
+{% for r in rules %}
+<div class="card mb-2">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+    <div>
+      <span class="mono text-muted">{{ r.id }}</span>
+      <span style="font-weight:600;color:var(--text-bright);margin-left:.5rem">{{ r.title }}</span>
+    </div>
+    <span class="badge {% if r.level == 'critical' %}badge-red{% elif r.level == 'high' %}badge-orange{% else %}badge-yellow{% endif %}">{{ r.level }}</span>
+  </div>
+  <div class="text-muted" style="font-size:.85rem;margin-bottom:.4rem">{{ r.description }}</div>
+  <div class="code-block" style="max-height:200px;font-size:.78rem">title: {{ r.title }}
+id: {{ r.id }}
+status: {{ r.status }}
+level: {{ r.level }}
+logsource:
+  category: {{ r.logsource.category }}
+  product: {{ r.logsource.product }}
+detection:
+  selection:{% for key, val in r.detection.selection.items %}
+    {{ key }}: {{ val }}{% endfor %}
+tags: {{ r.tags|join:", " }}{% if r.observed_commands %}
+# Observed commands: {{ r.observed_commands|join:", " }}{% endif %}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Observed Procedures -->
+{% if procedures %}
+<div class="section-title">Procedimientos Observados (Ultimos 30)</div>
+<div class="card mb-3">
+  <table>
+    <thead><tr><th>Evento</th><th>Tipo Token</th><th>Descripcion</th><th>Timestamp</th></tr></thead>
+    <tbody>
+    {% for p in procedures %}
+      <tr>
+        <td><span class="badge {% if 'DELETE' in p.event %}badge-red{% elif 'MODIFY' in p.event %}badge-yellow{% else %}badge-blue{% endif %}">{{ p.event }}</span></td>
+        <td><span class="badge badge-blue">{{ p.token_type }}</span></td>
+        <td>{{ p.description }}</td>
+        <td class="mono text-muted">{{ p.timestamp|truncatechars:19 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

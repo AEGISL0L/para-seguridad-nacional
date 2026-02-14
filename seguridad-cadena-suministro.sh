@@ -25,6 +25,20 @@ require_root
 init_backup "seguridad-cadena-suministro"
 securizar_setup_traps
 
+# ── Pre-check: detectar secciones ya aplicadas ──────────────
+_precheck 10
+_pc 'check_executable /usr/local/bin/verificar-firmas-paquetes.sh'
+_pc 'check_executable /usr/local/bin/generar-sbom.sh'
+_pc 'check_executable /usr/local/bin/auditar-cves.sh'
+_pc 'check_executable /usr/local/bin/auditar-repositorios.sh'
+_pc 'check_executable /usr/local/bin/verificar-integridad-binarios.sh'
+_pc 'check_file_exists /etc/securizar/software-policy.conf'
+_pc 'check_executable /usr/local/bin/detectar-troyanizados.sh'
+_pc 'check_executable /usr/local/bin/securizar-install-hook.sh'
+_pc 'check_executable /usr/local/bin/monitorizar-software.sh'
+_pc 'check_executable /usr/local/bin/auditoria-cadena-suministro.sh'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 44 - SEGURIDAD DE CADENA DE SUMINISTRO          ║"
@@ -46,7 +60,9 @@ echo "  - Crea script de verificacion de firmas"
 echo "  - Aplica enforcement si no esta configurado"
 echo ""
 
-if ask "¿Verificar y reforzar firmas de paquetes?"; then
+if check_executable /usr/local/bin/verificar-firmas-paquetes.sh; then
+    log_already "Verificacion de firmas de paquetes (verificar-firmas-paquetes.sh existe)"
+elif ask "¿Verificar y reforzar firmas de paquetes?"; then
 
     mkdir -p /etc/securizar
     mkdir -p /var/lib/securizar
@@ -296,7 +312,9 @@ echo "  - Modo diff: comparar SBOM actual vs anterior"
 echo "  - Timer systemd para generacion diaria"
 echo ""
 
-if ask "¿Crear sistema de inventario SBOM?"; then
+if check_executable /usr/local/bin/generar-sbom.sh; then
+    log_already "Inventario SBOM (generar-sbom.sh existe)"
+elif ask "¿Crear sistema de inventario SBOM?"; then
 
     mkdir -p /var/lib/securizar/sbom
 
@@ -464,7 +482,9 @@ echo "  - Detecta paquetes huerfanos, obsoletos, no confiables"
 echo "  - Instala tarea cron semanal"
 echo ""
 
-if ask "¿Crear sistema de auditoria de dependencias y CVEs?"; then
+if check_executable /usr/local/bin/auditar-cves.sh; then
+    log_already "Auditoria de dependencias y CVEs (auditar-cves.sh existe)"
+elif ask "¿Crear sistema de auditoria de dependencias y CVEs?"; then
 
     cat > /usr/local/bin/auditar-cves.sh << 'EOFCVES'
 #!/bin/bash
@@ -684,7 +704,9 @@ echo "  - Convierte HTTP a HTTPS cuando es posible"
 echo "  - Aplica prioridades de repositorios"
 echo ""
 
-if ask "¿Auditar y reforzar repositorios?"; then
+if check_executable /usr/local/bin/auditar-repositorios.sh; then
+    log_already "Repositorios seguros (auditar-repositorios.sh existe)"
+elif ask "¿Auditar y reforzar repositorios?"; then
 
     mkdir -p /etc/securizar
 
@@ -894,7 +916,9 @@ echo "  - Genera baseline SHA-256 de binarios criticos"
 echo "  - Timer systemd para verificacion diaria"
 echo ""
 
-if ask "¿Verificar y monitorizar integridad de binarios?"; then
+if check_executable /usr/local/bin/verificar-integridad-binarios.sh; then
+    log_already "Integridad de binarios (verificar-integridad-binarios.sh existe)"
+elif ask "¿Verificar y monitorizar integridad de binarios?"; then
 
     mkdir -p /var/lib/securizar/binary-hashes
 
@@ -1107,7 +1131,9 @@ echo "  - Hook de instalacion que registra todas las operaciones"
 echo "  - Configuraciones de enforcement por distro"
 echo ""
 
-if ask "¿Crear politica de instalacion de software?"; then
+if check_file_exists /etc/securizar/software-policy.conf; then
+    log_already "Politica de instalacion de software (software-policy.conf existe)"
+elif ask "¿Crear politica de instalacion de software?"; then
 
     mkdir -p /etc/securizar
 
@@ -1261,7 +1287,9 @@ echo "  - Verifica integridad de bibliotecas compartidas"
 echo "  - Compara systemd units contra paquetes instalados"
 echo ""
 
-if ask "¿Crear sistema de deteccion de paquetes troyanizados?"; then
+if check_executable /usr/local/bin/detectar-troyanizados.sh; then
+    log_already "Deteccion de paquetes troyanizados (detectar-troyanizados.sh existe)"
+elif ask "¿Crear sistema de deteccion de paquetes troyanizados?"; then
 
     cat > /usr/local/bin/detectar-troyanizados.sh << 'EOFTROJAN'
 #!/bin/bash
@@ -1530,7 +1558,9 @@ echo "  - Deshabilita instalacion de recomendados/sugeridos"
 echo "  - Deshabilita refresh desde fuentes no confiables"
 echo ""
 
-if ask "¿Aplicar hardening del gestor de paquetes?"; then
+if check_executable /usr/local/bin/securizar-install-hook.sh; then
+    log_already "Hardening del gestor de paquetes (securizar-install-hook.sh existe)"
+elif ask "¿Aplicar hardening del gestor de paquetes?"; then
 
     case "$DISTRO_FAMILY" in
         suse)
@@ -1668,7 +1698,9 @@ echo "  - Monitoriza /usr/local/bin y /usr/local/sbin"
 echo "  - Timer systemd cada 6 horas"
 echo ""
 
-if ask "¿Crear sistema de monitorizacion de cambios de software?"; then
+if check_executable /usr/local/bin/monitorizar-software.sh; then
+    log_already "Monitorizacion de cambios de software (monitorizar-software.sh existe)"
+elif ask "¿Crear sistema de monitorizacion de cambios de software?"; then
 
     mkdir -p /var/lib/securizar/software-monitor
 
@@ -1925,7 +1957,9 @@ echo "  - Salida JSON para integracion"
 echo "  - Tarea cron mensual"
 echo ""
 
-if ask "¿Crear sistema de auditoria de cadena de suministro?"; then
+if check_executable /usr/local/bin/auditoria-cadena-suministro.sh; then
+    log_already "Auditoria de cadena de suministro (auditoria-cadena-suministro.sh existe)"
+elif ask "¿Crear sistema de auditoria de cadena de suministro?"; then
 
     mkdir -p /var/lib/securizar/auditorias
 

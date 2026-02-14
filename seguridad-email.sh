@@ -25,6 +25,20 @@ require_root
 init_backup "seguridad-email"
 securizar_setup_traps
 
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 10
+_pc 'check_file_contains "/etc/postfix/main.cf" "disable_vrfy_command = yes"'
+_pc 'check_executable "/usr/local/bin/verificar-spf.sh"'
+_pc 'check_file_exists "/etc/opendkim/opendkim.conf"'
+_pc 'check_executable "/usr/local/bin/verificar-dmarc.sh"'
+_pc 'check_file_contains "/etc/postfix/main.cf" "smtpd_tls_security_level"'
+_pc 'check_file_contains "/etc/postfix/main.cf" "smtpd_recipient_restrictions"'
+_pc 'check_executable "/usr/local/bin/detectar-email-spoofing.sh"'
+_pc 'check_file_exists "/etc/mail/spamassassin/local.cf"'
+_pc 'check_executable "/usr/local/bin/monitorizar-email.sh"'
+_pc 'check_executable "/usr/local/bin/auditoria-email.sh"'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 42 - SEGURIDAD DE EMAIL                         ║"
@@ -64,7 +78,9 @@ echo "  - Retraso de rechazo (delay_reject)"
 echo "  - Restricciones de cabeceras (header_checks)"
 echo ""
 
-if ask "¿Aplicar hardening de Postfix?"; then
+if check_file_contains "/etc/postfix/main.cf" "disable_vrfy_command = yes"; then
+    log_already "Hardening de Postfix (disable_vrfy_command ya configurado)"
+elif ask "¿Aplicar hardening de Postfix?"; then
 
     if [[ $HAS_POSTFIX -eq 0 ]]; then
         log_warn "Postfix no esta instalado."
@@ -190,7 +206,9 @@ echo "  - Plantilla de registro SPF recomendado"
 echo "  - Verificador instalado en /usr/local/bin/"
 echo ""
 
-if ask "¿Crear herramientas de verificacion SPF?"; then
+if check_executable "/usr/local/bin/verificar-spf.sh"; then
+    log_already "Herramientas SPF (verificar-spf.sh ya instalado)"
+elif ask "¿Crear herramientas de verificacion SPF?"; then
 
     # Verificar que dig o host estan disponibles
     DIG_CMD=""
@@ -403,7 +421,9 @@ echo "  - Integracion con Postfix via milter"
 echo "  - Script de rotacion de claves"
 echo ""
 
-if ask "¿Configurar DKIM (OpenDKIM)?"; then
+if check_file_exists "/etc/opendkim/opendkim.conf"; then
+    log_already "DKIM (opendkim.conf ya configurado)"
+elif ask "¿Configurar DKIM (OpenDKIM)?"; then
 
     # Instalar opendkim
     if ! command -v opendkim &>/dev/null; then
@@ -683,7 +703,9 @@ echo "  - Script de verificacion DMARC por dominio"
 echo "  - Plantilla de registro DMARC recomendado (p=reject)"
 echo ""
 
-if ask "¿Configurar DMARC (OpenDMARC)?"; then
+if check_executable "/usr/local/bin/verificar-dmarc.sh"; then
+    log_already "DMARC (verificar-dmarc.sh ya instalado)"
+elif ask "¿Configurar DMARC (OpenDMARC)?"; then
 
     # Instalar opendmarc
     if ! command -v opendmarc &>/dev/null; then
@@ -970,7 +992,9 @@ echo "  - Cifrados robustos sin SSLv2/SSLv3/TLSv1.0/TLSv1.1"
 echo "  - Generacion de certificado autofirmado si no existe"
 echo ""
 
-if ask "¿Configurar TLS obligatorio para SMTP?"; then
+if check_file_contains "/etc/postfix/main.cf" "smtpd_tls_security_level"; then
+    log_already "TLS SMTP (smtpd_tls_security_level ya configurado)"
+elif ask "¿Configurar TLS obligatorio para SMTP?"; then
 
     if [[ $HAS_POSTFIX -eq 0 ]]; then
         log_warn "Postfix no detectado. Configuracion TLS omitida."
@@ -1115,7 +1139,9 @@ echo "  - Rate limiting: mensajes, conexiones y tasas"
 echo "  - Puerto de submission (587) para usuarios autenticados"
 echo ""
 
-if ask "¿Aplicar restricciones anti-relay SMTP?"; then
+if check_file_contains "/etc/postfix/main.cf" "smtpd_recipient_restrictions"; then
+    log_already "Anti-relay SMTP (smtpd_recipient_restrictions ya configurado)"
+elif ask "¿Aplicar restricciones anti-relay SMTP?"; then
 
     if [[ $HAS_POSTFIX -eq 0 ]]; then
         log_warn "Postfix no detectado. Restricciones SMTP omitidas."
@@ -1222,7 +1248,9 @@ echo "  - Script de deteccion de spoofing en cabeceras"
 echo "  - Filtros header_checks contra patrones sospechosos"
 echo ""
 
-if ask "¿Aplicar protecciones contra email spoofing?"; then
+if check_executable "/usr/local/bin/detectar-email-spoofing.sh"; then
+    log_already "Anti-spoofing (detectar-email-spoofing.sh ya instalado)"
+elif ask "¿Aplicar protecciones contra email spoofing?"; then
 
     if [[ $HAS_POSTFIX -eq 1 ]]; then
         POSTFIX_MAIN="/etc/postfix/main.cf"
@@ -1434,7 +1462,9 @@ echo "  - Bloqueo de adjuntos peligrosos (.exe, .bat, .scr, etc.)"
 echo "  - Restricciones MIME en header_checks"
 echo ""
 
-if ask "¿Configurar filtrado de contenido y spam?"; then
+if check_file_exists "/etc/mail/spamassassin/local.cf"; then
+    log_already "Filtrado de spam (SpamAssassin local.cf ya configurado)"
+elif ask "¿Configurar filtrado de contenido y spam?"; then
 
     # Instalar SpamAssassin si el usuario acepta
     SPAM_INSTALLED=0
@@ -1601,7 +1631,9 @@ echo "  - Estadisticas de uso TLS"
 echo "  - Alertas de conexiones sin TLS"
 echo ""
 
-if ask "¿Crear sistema de monitorizacion de email?"; then
+if check_executable "/usr/local/bin/monitorizar-email.sh"; then
+    log_already "Monitorizacion email (monitorizar-email.sh ya instalado)"
+elif ask "¿Crear sistema de monitorizacion de email?"; then
 
     # Script principal de monitorizacion
     cat > /usr/local/bin/monitorizar-email.sh << 'EOFMON'
@@ -1896,7 +1928,9 @@ echo "  - Salida JSON opcional"
 echo "  - Tarea cron semanal"
 echo ""
 
-if ask "¿Crear sistema de auditoria de seguridad email?"; then
+if check_executable "/usr/local/bin/auditoria-email.sh"; then
+    log_already "Auditoria email (auditoria-email.sh ya instalado)"
+elif ask "¿Crear sistema de auditoria de seguridad email?"; then
 
     cat > /usr/local/bin/auditoria-email.sh << 'EOFAUDIT'
 #!/bin/bash

@@ -20,6 +20,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 6
+_pc 'check_file_exists "/usr/local/bin/validar-autenticacion.sh"'
+_pc 'check_file_exists "/usr/local/bin/validar-red.sh"'
+_pc 'check_file_exists "/usr/local/bin/validar-endpoint.sh"'
+_pc 'check_file_exists "/usr/local/bin/simular-ataques.sh"'
+_pc 'check_file_exists "/usr/local/bin/validar-metasploit.sh"'
+_pc 'check_file_exists "/usr/local/bin/reporte-validacion.sh"'
+_precheck_result
+
 VALIDATION_DIR="/var/lib/purple-team"
 mkdir -p "$VALIDATION_DIR/results" "$VALIDATION_DIR/evidence"
 
@@ -51,7 +62,9 @@ echo "  - Cuentas sin contraseña y cuentas innecesarias"
 echo "  - MFA (Google Authenticator / TOTP)"
 echo ""
 
-if ask "¿Instalar validador de controles de autenticación?"; then
+if check_file_exists "/usr/local/bin/validar-autenticacion.sh"; then
+    log_already "Validador autenticacion (validar-autenticacion.sh ya instalado)"
+elif ask "¿Instalar validador de controles de autenticación?"; then
 
     cat > /usr/local/bin/validar-autenticacion.sh << 'EOFVALAUTH'
 #!/bin/bash
@@ -286,7 +299,9 @@ echo "  - Anti-exfiltración (puertos bloqueados, rate limiting)"
 echo "  - Segmentación de red"
 echo ""
 
-if ask "¿Instalar validador de controles de red?"; then
+if check_file_exists "/usr/local/bin/validar-red.sh"; then
+    log_already "Validador red (validar-red.sh ya instalado)"
+elif ask "¿Instalar validador de controles de red?"; then
 
     cat > /usr/local/bin/validar-red.sh << 'EOFVALRED'
 #!/bin/bash
@@ -527,7 +542,9 @@ echo "  - Antimalware (ClamAV)"
 echo "  - Sandboxing (Firejail, systemd)"
 echo ""
 
-if ask "¿Instalar validador de controles de endpoint?"; then
+if check_file_exists "/usr/local/bin/validar-endpoint.sh"; then
+    log_already "Validador endpoint (validar-endpoint.sh ya instalado)"
+elif ask "¿Instalar validador de controles de endpoint?"; then
 
     cat > /usr/local/bin/validar-endpoint.sh << 'EOFVALEND'
 #!/bin/bash
@@ -789,7 +806,9 @@ echo "  - NO modifican la configuración del sistema"
 echo "  - NO comprometen la seguridad real"
 echo ""
 
-if ask "¿Instalar simulador de técnicas ATT&CK?"; then
+if check_file_exists "/usr/local/bin/simular-ataques.sh"; then
+    log_already "Simulador ATT&CK (simular-ataques.sh ya instalado)"
+elif ask "¿Instalar simulador de técnicas ATT&CK?"; then
 
     cat > /usr/local/bin/simular-ataques.sh << 'EOFSIMULAR'
 #!/bin/bash
@@ -1055,7 +1074,9 @@ echo "NOTA: Todos los tests apuntan a 127.0.0.1 exclusivamente."
 echo "Si msfconsole no está instalado, todos los tests se marcan SKIP."
 echo ""
 
-if ask "¿Instalar validador ofensivo Metasploit?"; then
+if check_file_exists "/usr/local/bin/validar-metasploit.sh"; then
+    log_already "Validador Metasploit (validar-metasploit.sh ya instalado)"
+elif ask "¿Instalar validador ofensivo Metasploit?"; then
 
     cat > /usr/local/bin/validar-metasploit.sh << 'EOFMSFVAL'
 #!/bin/bash
@@ -1362,7 +1383,9 @@ echo "  - Score global de eficacia"
 echo "  - Recomendaciones de mejora"
 echo ""
 
-if ask "¿Instalar generador de reporte consolidado de validación?"; then
+if check_file_exists "/usr/local/bin/reporte-validacion.sh"; then
+    log_already "Reporte validacion (reporte-validacion.sh ya instalado)"
+elif ask "¿Instalar generador de reporte consolidado de validación?"; then
 
     cat > /usr/local/bin/reporte-validacion.sh << 'EOFREPORTVAL'
 #!/bin/bash
@@ -1627,3 +1650,4 @@ echo "  reporte-validacion.sh      - Reporte consolidado completo"
 echo ""
 echo "Datos en: /var/lib/purple-team/"
 echo ""
+show_changes_summary

@@ -25,6 +25,20 @@ require_root
 securizar_setup_traps
 init_backup "secrets-management"
 
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 10
+_pc 'check_executable "/usr/local/bin/escanear-secretos.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-vault-init.sh"'
+_pc 'check_executable "/usr/local/bin/rotar-credenciales.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-env-secrets.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-ssh-keys.sh"'
+_pc 'check_executable "/usr/local/bin/cifrar-secretos.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-pass-init.sh"'
+_pc 'check_executable "/usr/local/bin/validar-politica-secretos.sh"'
+_pc 'check_executable "/usr/local/bin/monitorizar-acceso-secretos.sh"'
+_pc 'check_executable "/usr/local/bin/auditoria-secrets.sh"'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 51 - GESTION DE SECRETOS (SECRETS MANAGEMENT)   ║"
@@ -62,7 +76,9 @@ log_info "  - Crea wrapper /usr/local/bin/escanear-secretos.sh"
 log_info "  - Crea patrones en /etc/securizar/secrets-patterns.conf"
 log_info ""
 
-if ask "¿Configurar deteccion de secretos expuestos?"; then
+if check_executable "/usr/local/bin/escanear-secretos.sh"; then
+    log_already "Deteccion de secretos (escanear-secretos.sh ya instalado)"
+elif ask "¿Configurar deteccion de secretos expuestos?"; then
 
     mkdir -p /etc/securizar
     mkdir -p /usr/local/bin
@@ -534,7 +550,9 @@ log_info "  - Crea servicio systemd para vault"
 log_info "  - Crea script de inicializacion con politicas"
 log_info ""
 
-if ask "¿Configurar infraestructura de HashiCorp Vault?"; then
+if check_executable "/usr/local/bin/securizar-vault-init.sh"; then
+    log_already "HashiCorp Vault (securizar-vault-init.sh ya instalado)"
+elif ask "¿Configurar infraestructura de HashiCorp Vault?"; then
 
     HAS_VAULT=0
     if command -v vault &>/dev/null; then
@@ -857,7 +875,9 @@ log_info "  - Rotacion de passwords de bases de datos"
 log_info "  - Rotacion de cuentas de servicio"
 log_info ""
 
-if ask "¿Configurar rotacion automatica de credenciales?"; then
+if check_executable "/usr/local/bin/rotar-credenciales.sh"; then
+    log_already "Rotacion credenciales (rotar-credenciales.sh ya instalado)"
+elif ask "¿Configurar rotacion automatica de credenciales?"; then
 
     mkdir -p /var/log/securizar
 
@@ -1140,7 +1160,9 @@ log_info "  - Verifica .bashrc, .bash_profile, .profile"
 log_info "  - Verifica Environment= en servicios systemd"
 log_info ""
 
-if ask "¿Configurar proteccion de variables de entorno?"; then
+if check_executable "/usr/local/bin/auditar-env-secrets.sh"; then
+    log_already "Proteccion env (auditar-env-secrets.sh ya instalado)"
+elif ask "¿Configurar proteccion de variables de entorno?"; then
 
     # ── Auditar procesos actuales ──────────────────────────────
     log_info "Escaneando variables de entorno de procesos..."
@@ -1339,7 +1361,9 @@ log_info "  - Verifica authorized_keys y agent forwarding"
 log_info "  - Ofrece reemplazar claves debiles por ed25519"
 log_info ""
 
-if ask "¿Configurar gestion segura de SSH keys?"; then
+if check_executable "/usr/local/bin/auditar-ssh-keys.sh"; then
+    log_already "SSH keys (auditar-ssh-keys.sh ya instalado)"
+elif ask "¿Configurar gestion segura de SSH keys?"; then
 
     # ── Auditar todas las claves SSH ───────────────────────────
     log_info "Auditando claves SSH del sistema..."
@@ -1643,7 +1667,9 @@ log_info "  - Usa age (preferido) o gpg como fallback"
 log_info "  - Configura clave age en /etc/securizar/secrets-key.txt"
 log_info ""
 
-if ask "¿Configurar cifrado de secretos en reposo?"; then
+if check_executable "/usr/local/bin/cifrar-secretos.sh"; then
+    log_already "Cifrado secretos (cifrar-secretos.sh ya instalado)"
+elif ask "¿Configurar cifrado de secretos en reposo?"; then
 
     # ── Detectar herramientas de cifrado ───────────────────────
     HAS_AGE=0
@@ -1907,7 +1933,9 @@ log_info "  - SOPS (Secrets OPerationS para YAML/JSON)"
 log_info "  - Crea script de inicializacion de pass"
 log_info ""
 
-if ask "¿Configurar integracion con gestores de secretos?"; then
+if check_executable "/usr/local/bin/securizar-pass-init.sh"; then
+    log_already "Gestores secretos (securizar-pass-init.sh ya instalado)"
+elif ask "¿Configurar integracion con gestores de secretos?"; then
 
     # ── Detectar herramientas existentes ───────────────────────
     HAS_PASS=0; HAS_GOPASS=0; HAS_SOPS=0
@@ -2131,7 +2159,9 @@ log_info "  - Tipos de clave permitidos, patrones prohibidos"
 log_info "  - Crea validador /usr/local/bin/validar-politica-secretos.sh"
 log_info ""
 
-if ask "¿Configurar politicas de secretos?"; then
+if check_executable "/usr/local/bin/validar-politica-secretos.sh"; then
+    log_already "Politicas secretos (validar-politica-secretos.sh ya instalado)"
+elif ask "¿Configurar politicas de secretos?"; then
 
     # ── Archivo de politicas ───────────────────────────────────
     SEC_POLICY="/etc/securizar/secrets-policy.conf"
@@ -2411,7 +2441,9 @@ log_info "  - Vigila rutas de vault si esta instalado"
 log_info "  - Crea analizador de logs de acceso"
 log_info ""
 
-if ask "¿Configurar monitorizacion de acceso a secretos?"; then
+if check_executable "/usr/local/bin/monitorizar-acceso-secretos.sh"; then
+    log_already "Monitorizacion secretos (monitorizar-acceso-secretos.sh ya instalado)"
+elif ask "¿Configurar monitorizacion de acceso a secretos?"; then
 
     # ── Reglas auditd ──────────────────────────────────────────
     if command -v auditctl &>/dev/null; then
@@ -2666,7 +2698,9 @@ log_info "  - Verifica expiracion de certificados"
 log_info "  - Genera informe con puntuacion BUENO/MEJORABLE/DEFICIENTE"
 log_info ""
 
-if ask "¿Crear auditoria integral de gestion de secretos?"; then
+if check_executable "/usr/local/bin/auditoria-secrets.sh"; then
+    log_already "Auditoria secretos (auditoria-secrets.sh ya instalado)"
+elif ask "¿Crear auditoria integral de gestion de secretos?"; then
 
     AUDIT_TOOL="/usr/local/bin/auditoria-secrets.sh"
     if [[ -f "$AUDIT_TOOL" ]]; then

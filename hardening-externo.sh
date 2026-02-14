@@ -13,6 +13,22 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-externo"
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 11
+_pc check_file_contains /etc/issue "SISTEMA PRIVADO"
+_pc true  # S2: DNS seguro (depende de estado de red)
+_pc true  # S3: firewall geo/blacklists (condicional)
+_pc check_file_exists /etc/sysctl.d/99-network-hardening.conf
+_pc true  # S5: bloquear WiFi inseguros (depende de red)
+_pc check_file_exists /etc/sysctl.d/99-disable-ipv6.conf
+_pc check_file_contains /etc/hosts "BLOQUEO DE DOMINIOS MALICIOSOS"
+_pc check_file_exists /etc/NetworkManager/conf.d/99-random-mac.conf
+_pc true  # S9: anti-DDoS (depende de firewall)
+_pc check_executable /usr/local/bin/monitor-conexiones.sh
+_pc check_file_exists /etc/fail2ban/jail.local
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   HARDENING CONTRA VECTORES DE ATAQUE EXTERNOS            ║"
@@ -77,7 +93,9 @@ echo "$BANNER" | head -20
 echo "..."
 echo ""
 
-if ask "¿Aplicar este banner disuasivo?"; then
+if check_file_contains /etc/issue "SISTEMA PRIVADO"; then
+    log_already "Banner disuasivo"
+elif ask "¿Aplicar este banner disuasivo?"; then
     echo "$BANNER" > /etc/issue
     log_change "Creado" "/etc/issue"
     echo "$BANNER" > /etc/issue.net
@@ -181,7 +199,9 @@ fi
 log_section "4. PROTECCIÓN CONTRA ATAQUES DE RED"
 # ============================================================
 
-if ask "¿Aplicar protecciones avanzadas contra ataques de red?"; then
+if check_file_exists /etc/sysctl.d/99-network-hardening.conf; then
+    log_already "Protecciones avanzadas contra ataques de red"
+elif ask "¿Aplicar protecciones avanzadas contra ataques de red?"; then
     cat > /etc/sysctl.d/99-network-hardening.conf << 'EOF'
 # ================================================
 # PROTECCIÓN CONTRA ATAQUES DE RED
@@ -283,7 +303,9 @@ log_section "6. BLOQUEAR IPv6 (si no lo usas)"
 # ============================================================
 
 echo "IPv6 puede ser vector de ataque si no está bien configurado"
-if ask "¿Deshabilitar IPv6 completamente?"; then
+if check_file_exists /etc/sysctl.d/99-disable-ipv6.conf; then
+    log_already "Deshabilitar IPv6 completamente"
+elif ask "¿Deshabilitar IPv6 completamente?"; then
     cat > /etc/sysctl.d/99-disable-ipv6.conf << 'EOF'
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
@@ -301,7 +323,9 @@ fi
 log_section "7. HOSTS - BLOQUEAR DOMINIOS MALICIOSOS"
 # ============================================================
 
-if ask "¿Agregar bloqueo de dominios maliciosos conocidos en /etc/hosts?"; then
+if check_file_contains /etc/hosts "BLOQUEO DE DOMINIOS MALICIOSOS"; then
+    log_already "Bloqueo de dominios maliciosos en /etc/hosts"
+elif ask "¿Agregar bloqueo de dominios maliciosos conocidos en /etc/hosts?"; then
     cp /etc/hosts "$BACKUP_DIR/"
     log_change "Backup" "/etc/hosts"
 
@@ -338,7 +362,9 @@ log_section "8. PROTECCIÓN MAC ADDRESS"
 # ============================================================
 
 echo "La MAC address puede usarse para tracking"
-if ask "¿Habilitar MAC address aleatorio para WiFi?"; then
+if check_file_exists /etc/NetworkManager/conf.d/99-random-mac.conf; then
+    log_already "MAC address aleatorio para WiFi"
+elif ask "¿Habilitar MAC address aleatorio para WiFi?"; then
     CONN_NAME=$(nmcli -t -f NAME,TYPE con show --active | grep wireless | cut -d: -f1)
     if [[ -n "$CONN_NAME" ]]; then
         nmcli con mod "$CONN_NAME" wifi.cloned-mac-address random
@@ -397,7 +423,9 @@ fi
 log_section "10. MONITOREO DE CONEXIONES"
 # ============================================================
 
-if ask "¿Crear script de monitoreo de conexiones sospechosas?"; then
+if check_executable /usr/local/bin/monitor-conexiones.sh; then
+    log_already "Script de monitoreo de conexiones sospechosas"
+elif ask "¿Crear script de monitoreo de conexiones sospechosas?"; then
     cat > /usr/local/bin/monitor-conexiones.sh << 'EOF'
 #!/bin/bash
 # Monitor de conexiones sospechosas
@@ -435,7 +463,9 @@ log_section "11. FAIL2BAN - JAILS ADICIONALES"
 # ============================================================
 
 if command -v fail2ban-client &>/dev/null; then
-    if ask "¿Configurar fail2ban con jails adicionales?"; then
+    if check_file_exists /etc/fail2ban/jail.local; then
+        log_already "Configuración fail2ban con jails adicionales"
+    elif ask "¿Configurar fail2ban con jails adicionales?"; then
         cat > /etc/fail2ban/jail.local << 'EOF'
 [DEFAULT]
 bantime = 24h

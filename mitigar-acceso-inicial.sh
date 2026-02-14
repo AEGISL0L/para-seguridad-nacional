@@ -22,6 +22,18 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-acceso-inicial"
 securizar_setup_traps
+
+_precheck 8
+_pc 'check_file_exists /etc/ssh/sshd_config.d/80-acceso-inicial.conf'
+_pc 'check_file_exists /etc/sysctl.d/99-anti-exploit-web.conf'
+_pc true  # S3: auditoría de cuentas (detección)
+_pc 'check_file_contains /etc/hosts ANTI-PHISHING'
+_pc 'check_executable /usr/local/bin/monitor-descargas.sh'
+_pc true  # S6: cadena de suministro (detección)
+_pc 'check_file_exists /etc/modprobe.d/dma-hardening.conf'
+_pc true  # S8: auditoría de servicios expuestos (detección)
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE ACCESO INICIAL - TA0001                   ║"
@@ -43,7 +55,9 @@ if [[ -f /etc/ssh/sshd_config ]]; then
     grep -E "^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|MaxAuthTries|X11Forwarding|AllowTcpForwarding|ClientAliveInterval|LoginGraceTime|Protocol|PermitEmptyPasswords|AllowAgentForwarding)" /etc/ssh/sshd_config 2>/dev/null | sed 's/^/  /' || echo "  (valores por defecto)"
     echo ""
 
-    if ask "¿Aplicar hardening SSH avanzado contra acceso inicial?"; then
+    if check_file_exists /etc/ssh/sshd_config.d/80-acceso-inicial.conf; then
+        log_already "Hardening SSH avanzado (80-acceso-inicial.conf)"
+    elif ask "¿Aplicar hardening SSH avanzado contra acceso inicial?"; then
         # Crear directorio de configuración modular
         mkdir -p /etc/ssh/sshd_config.d
         log_change "Creado" "/etc/ssh/sshd_config.d/"
@@ -147,7 +161,9 @@ if [[ -n "$WEB_PORTS" ]]; then
     done
     echo ""
 
-    if ask "¿Aplicar protecciones contra exploits de aplicaciones web?"; then
+    if check_file_exists /etc/sysctl.d/99-anti-exploit-web.conf; then
+        log_already "Protecciones anti-exploit web (99-anti-exploit-web.conf)"
+    elif ask "¿Aplicar protecciones contra exploits de aplicaciones web?"; then
         # Módulos de seguridad del kernel para proteger contra exploits
         cat > /etc/sysctl.d/99-anti-exploit-web.conf << 'EOF'
 # ============================================================
@@ -276,7 +292,9 @@ log_section "4. ANTI-PHISHING Y PROTECCIÓN DE EMAIL (T1566)"
 echo "Configurando protecciones contra phishing..."
 echo ""
 
-if ask "¿Agregar dominios de phishing conocidos al bloqueo de hosts?"; then
+if check_file_contains /etc/hosts "ANTI-PHISHING"; then
+    log_already "Bloqueo anti-phishing en /etc/hosts"
+elif ask "¿Agregar dominios de phishing conocidos al bloqueo de hosts?"; then
     cp /etc/hosts "$BACKUP_DIR/"
     log_change "Backup" "/etc/hosts"
 
@@ -326,7 +344,9 @@ log_section "5. PROTECCIÓN CONTRA DRIVE-BY (T1189)"
 echo "Configurando protecciones contra descargas maliciosas..."
 echo ""
 
-if ask "¿Aplicar protecciones contra drive-by compromise?"; then
+if check_executable /usr/local/bin/monitor-descargas.sh; then
+    log_already "Protecciones drive-by (monitor-descargas.sh)"
+elif ask "¿Aplicar protecciones contra drive-by compromise?"; then
     # Restringir ejecución en directorios de descarga comunes
     # Crear script de monitoreo de descargas sospechosas
     cat > /usr/local/bin/monitor-descargas.sh << 'DLEOF'
@@ -590,7 +610,9 @@ if [[ -f /etc/modprobe.d/network-hardening.conf ]] || [[ -f /etc/modprobe.d/dma-
         log_warn "Módulos Thunderbolt no bloqueados"
     fi
 else
-    if ask "¿Bloquear módulos DMA peligrosos (FireWire, Thunderbolt)?"; then
+    if check_file_exists /etc/modprobe.d/dma-hardening.conf; then
+        log_already "Módulos DMA bloqueados (dma-hardening.conf)"
+    elif ask "¿Bloquear módulos DMA peligrosos (FireWire, Thunderbolt)?"; then
         cat > /etc/modprobe.d/dma-hardening.conf << 'EOF'
 # Bloquear acceso DMA - T1200
 install firewire-core /bin/false

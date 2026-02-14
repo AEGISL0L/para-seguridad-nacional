@@ -27,6 +27,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-recoleccion"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 6
+_pc check_file_exists /etc/audit/rules.d/65-collection.rules
+_pc 'check_file_contains /etc/audit/rules.d/65-collection.rules network-share-access'
+_pc check_file_exists /etc/udisks2/mount_options.conf
+_pc check_executable /usr/local/bin/detectar-staging.sh
+_pc check_file_exists /etc/udev/rules.d/90-multimedia-restrict.rules
+_pc check_executable /usr/local/bin/detectar-recoleccion.sh
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE RECOLECCIÓN - TA0009                      ║"
@@ -48,7 +59,9 @@ echo "  - Monitoreo de acceso a datos críticos"
 echo "  - Cifrado de directorios sensibles"
 echo ""
 
-if ask "¿Proteger datos locales sensibles?"; then
+if check_file_exists /etc/audit/rules.d/65-collection.rules; then
+    log_already "Protección de datos locales (65-collection.rules)"
+elif ask "¿Proteger datos locales sensibles?"; then
 
     # 1a. Endurecer permisos de directorios sensibles
     echo ""
@@ -122,7 +135,9 @@ log_section "2. PROTECCIÓN DE DATOS EN SHARES (T1039)"
 echo "Monitorear y proteger acceso a datos en recursos compartidos."
 echo ""
 
-if ask "¿Monitorear acceso a datos compartidos?"; then
+if check_file_contains /etc/audit/rules.d/65-collection.rules "network-share-access"; then
+    log_already "Monitoreo de acceso a shares (audit rules)"
+elif ask "¿Monitorear acceso a datos compartidos?"; then
 
     # Auditar acceso a montajes de red
     if command -v auditctl &>/dev/null; then
@@ -165,7 +180,9 @@ echo "Controlar acceso a medios USB y extraíbles para prevenir"
 echo "que un atacante copie datos a dispositivos portátiles."
 echo ""
 
-if ask "¿Restringir medios extraíbles para prevenir exfiltración?"; then
+if check_file_exists /etc/udisks2/mount_options.conf; then
+    log_already "Control de medios extraíbles (udisks2 mount_options.conf)"
+elif ask "¿Restringir medios extraíbles para prevenir exfiltración?"; then
 
     # 3a. Verificar USBGuard
     if command -v usbguard &>/dev/null; then
@@ -233,7 +250,9 @@ echo "Detectar cuando un atacante acumula datos en un directorio"
 echo "antes de exfiltrarlos."
 echo ""
 
-if ask "¿Configurar detección de data staging?"; then
+if check_executable /usr/local/bin/detectar-staging.sh; then
+    log_already "Detección de data staging (detectar-staging.sh)"
+elif ask "¿Configurar detección de data staging?"; then
 
     cat > /usr/local/bin/detectar-staging.sh << 'EOFSTAG'
 #!/bin/bash
@@ -365,7 +384,9 @@ echo "Restringir herramientas de captura de pantalla, video y audio"
 echo "que un atacante podría usar para espionaje."
 echo ""
 
-if ask "¿Restringir herramientas de captura multimedia?"; then
+if check_file_exists /etc/udev/rules.d/90-multimedia-restrict.rules; then
+    log_already "Captura multimedia restringida (90-multimedia-restrict.rules)"
+elif ask "¿Restringir herramientas de captura multimedia?"; then
 
     # 5a. Monitorear uso de herramientas de captura
     echo ""
@@ -437,7 +458,9 @@ echo "Detectar scripts y procesos de recolección automatizada"
 echo "que buscan y copian datos de forma masiva."
 echo ""
 
-if ask "¿Configurar detección de recolección automatizada?"; then
+if check_executable /usr/local/bin/detectar-recoleccion.sh; then
+    log_already "Detección de recolección automatizada (detectar-recoleccion.sh)"
+elif ask "¿Configurar detección de recolección automatizada?"; then
 
     cat > /usr/local/bin/detectar-recoleccion.sh << 'EOFREC'
 #!/bin/bash

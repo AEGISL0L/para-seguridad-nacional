@@ -35,6 +35,20 @@ echo ""
 log_section "MODULO 57: SEGURIDAD DE VIRTUALIZACION"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc check_file_exists /etc/securizar/virt-environment.conf
+_pc true  # S2: hardening KVM/QEMU (depende de entorno, siempre re-evaluar)
+_pc check_executable /usr/local/bin/securizar-libvirt.sh
+_pc check_dir_exists /etc/securizar/vm-templates
+_pc check_executable /usr/local/bin/auditar-storage-vm.sh
+_pc check_dir_exists /etc/securizar/vm-templates
+_pc check_executable /usr/local/bin/auditar-contenedores-locales.sh
+_pc check_executable /usr/local/bin/verificar-escape-vm.sh
+_pc check_executable /usr/local/bin/monitorizar-vms.sh
+_pc check_executable /usr/local/bin/auditar-virtualizacion.sh
+_precheck_result
+
 # ── Variables globales del modulo ───────────────────────────
 VIRT_CONF_DIR="/etc/securizar"
 VIRT_ENV_CONF="${VIRT_CONF_DIR}/virt-environment.conf"
@@ -324,7 +338,9 @@ detect_virtualization_environment() {
     fi
 
     # --- Guardar configuracion detectada ---
-    if ask "Guardar informacion del entorno de virtualizacion en $VIRT_ENV_CONF?"; then
+    if check_file_exists "$VIRT_ENV_CONF"; then
+        log_already "Entorno de virtualizacion ($VIRT_ENV_CONF existe)"
+    elif ask "Guardar informacion del entorno de virtualizacion en $VIRT_ENV_CONF?"; then
         mkdir -p "$VIRT_CONF_DIR"
         cat > "$VIRT_ENV_CONF" <<VEOF
 # Entorno de virtualizacion detectado por securizar
@@ -429,7 +445,9 @@ harden_kvm_qemu() {
     if [[ -f "$qemu_conf" ]]; then
         log_info "Archivo de configuracion QEMU encontrado: $qemu_conf"
 
-        if ask "Aplicar hardening a $qemu_conf?"; then
+        if check_file_contains "$qemu_conf" 'vnc_tls.*=.*1'; then
+            log_already "Hardening de $qemu_conf (vnc_tls ya configurado)"
+        elif ask "Aplicar hardening a $qemu_conf?"; then
             safe_backup "$qemu_conf"
 
             # VNC TLS
@@ -686,7 +704,9 @@ harden_libvirt() {
     safe_backup "$libvirtd_conf"
     log_info "Backup de $libvirtd_conf realizado"
 
-    if ask "Aplicar hardening a $libvirtd_conf?"; then
+    if check_file_contains "$libvirtd_conf" 'listen_tls.*=.*1'; then
+        log_already "Hardening de $libvirtd_conf (listen_tls ya configurado)"
+    elif ask "Aplicar hardening a $libvirtd_conf?"; then
 
         # --- TLS para conexiones remotas ---
         log_info "Configurando TLS para conexiones remotas..."
@@ -875,7 +895,9 @@ PKEOF
 
     # --- Script de verificacion de libvirt ---
     local libvirt_script="/usr/local/bin/securizar-libvirt.sh"
-    if ask "Crear script de verificacion de libvirt en $libvirt_script?"; then
+    if check_executable "$libvirt_script"; then
+        log_already "Script de verificacion de libvirt ($libvirt_script existe)"
+    elif ask "Crear script de verificacion de libvirt en $libvirt_script?"; then
         cat > "$libvirt_script" <<'LVEOF'
 #!/bin/bash
 # ============================================================
@@ -1205,7 +1227,9 @@ harden_vm_networking() {
     fi
 
     # --- Crear templates de red aislada ---
-    if ask "Crear templates de red aislada para VMs?"; then
+    if check_file_exists "${VIRT_TEMPLATES_DIR}/isolated-network.xml"; then
+        log_already "Templates de red aislada (isolated-network.xml existe)"
+    elif ask "Crear templates de red aislada para VMs?"; then
         mkdir -p "${VIRT_TEMPLATES_DIR}"
 
         # Template de red aislada
@@ -1461,7 +1485,9 @@ harden_vm_storage() {
 
     # --- Script de auditoria de storage ---
     local storage_script="/usr/local/bin/auditar-storage-vm.sh"
-    if ask "Crear script de auditoria de almacenamiento en $storage_script?"; then
+    if check_executable "$storage_script"; then
+        log_already "Script de auditoria de almacenamiento ($storage_script existe)"
+    elif ask "Crear script de auditoria de almacenamiento en $storage_script?"; then
         cat > "$storage_script" <<'STEOF'
 #!/bin/bash
 # ============================================================
@@ -1616,7 +1642,9 @@ log_section "S6: Hardening de VMs guests (plantillas)"
 create_vm_security_templates() {
     log_info "Creando plantillas de seguridad para nuevas VMs..."
 
-    if ask "Crear plantillas de seguridad de VM en $VIRT_TEMPLATES_DIR?"; then
+    if check_file_exists "${VIRT_TEMPLATES_DIR}/secure-domain-template.xml"; then
+        log_already "Plantillas de seguridad de VM (secure-domain-template.xml existe)"
+    elif ask "Crear plantillas de seguridad de VM en $VIRT_TEMPLATES_DIR?"; then
         mkdir -p "$VIRT_TEMPLATES_DIR"
 
         # --- Template XML de dominio seguro ---
@@ -2227,7 +2255,9 @@ LCEOF
 
     # --- Script de auditoria de contenedores ---
     local cont_script="/usr/local/bin/auditar-contenedores-locales.sh"
-    if ask "Crear script de auditoria de contenedores en $cont_script?"; then
+    if check_executable "$cont_script"; then
+        log_already "Script de auditoria de contenedores ($cont_script existe)"
+    elif ask "Crear script de auditoria de contenedores en $cont_script?"; then
         cat > "$cont_script" <<'CTEOF'
 #!/bin/bash
 # ============================================================
@@ -2660,7 +2690,9 @@ protect_vm_escape() {
 
     # --- Script de verificacion de escape ---
     local escape_script="/usr/local/bin/verificar-escape-vm.sh"
-    if ask "Crear script de verificacion de escape de VM en $escape_script?"; then
+    if check_executable "$escape_script"; then
+        log_already "Script de verificacion de escape de VM ($escape_script existe)"
+    elif ask "Crear script de verificacion de escape de VM en $escape_script?"; then
         cat > "$escape_script" <<'ESCEOF'
 #!/bin/bash
 # ============================================================
@@ -2878,7 +2910,9 @@ setup_vm_monitoring() {
 
     # --- Script de monitorizacion ---
     local monitor_script="/usr/local/bin/monitorizar-vms.sh"
-    if ask "Crear script de monitorizacion de VMs en $monitor_script?"; then
+    if check_executable "$monitor_script"; then
+        log_already "Script de monitorizacion de VMs ($monitor_script existe)"
+    elif ask "Crear script de monitorizacion de VMs en $monitor_script?"; then
         cat > "$monitor_script" <<'MONEOF'
 #!/bin/bash
 # ============================================================
@@ -3207,7 +3241,9 @@ setup_virt_audit() {
 
     # --- Script de auditoria completa ---
     local audit_script="/usr/local/bin/auditar-virtualizacion.sh"
-    if ask "Crear script de auditoria integral en $audit_script?"; then
+    if check_executable "$audit_script"; then
+        log_already "Script de auditoria integral ($audit_script existe)"
+    elif ask "Crear script de auditoria integral en $audit_script?"; then
         cat > "$audit_script" <<'AUDEOF'
 #!/bin/bash
 # ============================================================

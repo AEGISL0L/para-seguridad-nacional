@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Correlacion{% endblock %}
+{% block page_title %}Correlacion de Incidentes{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">Total Incidentes</div>
+    <div class="card-value text-red">{{ total_incidents }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Tokens Unicos</div>
+    <div class="card-value text-blue">{{ unique_tokens }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Alertas Unicas</div>
+    <div class="card-value {% if dedup.dedup_ratio > 50 %}text-yellow{% else %}text-green{% endif %}">{{ dedup.unique }}</div>
+    <div class="card-sub">de {{ dedup.total }} totales ({{ dedup.dedup_ratio }}% duplicadas)</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Bucles Feedback</div>
+    <div class="card-value {% if feedback_loops %}text-red{% else %}text-green{% endif %}">{{ feedback_loops|length }}</div>
+    <div class="card-sub">Tokens con >5 incidentes en 5 min</div>
+  </div>
+</div>
+
+<!-- Feedback Loop Detection -->
+{% if feedback_loops %}
+<div class="card mb-2" style="border-color:var(--orange);border-width:2px">
+  <div class="section-title" style="color:var(--orange)">Bucles de Feedback Detectados</div>
+  <p class="text-muted mb-1" style="font-size:.85rem">
+    Estos tokens generaron cascadas de alertas, probablemente por el hash sha256sum re-leyendo el archivo durante la captura forense.
+    Si persisten, verifica que honey-monitor.sh tenga la correccion de copia temporal.
+  </p>
+  <table>
+    <thead><tr><th>Token</th><th>Incidentes</th><th>Inicio</th><th>Fin</th></tr></thead>
+    <tbody>
+    {% for loop in feedback_loops %}
+    <tr>
+      <td><a href="{% url 'dashboard:token_detail' loop.canary_id %}" class="mono">{{ loop.canary_id }}</a></td>
+      <td class="text-red">{{ loop.count }}</td>
+      <td class="mono text-muted" style="font-size:.82rem">{{ loop.window_start }}</td>
+      <td class="mono text-muted" style="font-size:.82rem">{{ loop.window_end }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Unique Accessors -->
+{% if unique_accessors %}
+<div class="card mb-2">
+  <div class="section-title">Procesos Accesores Detectados</div>
+  <table>
+    <thead><tr><th>Usuario</th><th>Comando</th></tr></thead>
+    <tbody>
+    {% for acc in unique_accessors %}
+    <tr>
+      <td class="mono">{{ acc|truncatechars:20 }}</td>
+      <td class="mono text-muted" style="font-size:.82rem;word-break:break-all">{{ acc }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Incidents by Token -->
+<div class="card">
+  <div class="section-title">Incidentes por Token</div>
+  <table>
+    <thead><tr><th>Token ID</th><th>Tipo</th><th>Incidentes</th><th>Proporcion</th></tr></thead>
+    <tbody>
+    {% for g in groups %}
+    <tr>
+      <td><a href="{% url 'dashboard:token_detail' g.canary_id %}" class="mono">{{ g.canary_id }}</a></td>
+      <td><span class="badge badge-blue">{{ g.type|token_type_icon }}</span></td>
+      <td class="text-yellow">{{ g.count }}</td>
+      <td>
+        <div style="background:var(--bg-primary);border-radius:4px;height:20px;width:100%;position:relative">
+          <div style="background:var(--blue);border-radius:4px;height:100%;width:{% widthratio g.count total_incidents 100 %}%"></div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

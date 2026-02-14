@@ -20,7 +20,7 @@
 #   S10 - Auditoría y scoring
 # ============================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
@@ -40,6 +40,20 @@ echo ""
 log_section "MÓDULO 45: SEGMENTACIÓN DE RED Y ZERO TRUST"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc check_file_exists /etc/securizar/zonas-red.conf
+_pc check_executable /usr/local/bin/aplicar-politicas-zona.sh
+_pc check_executable /usr/local/bin/microsegmentar-servicio.sh
+_pc check_executable /usr/local/bin/aislar-contenedores-red.sh
+_pc check_executable /usr/local/bin/evaluar-postura-dispositivo.sh
+_pc check_executable /usr/local/bin/aplicar-acceso-identidad.sh
+_pc check_executable /usr/local/bin/monitorizar-trafico-zonas.sh
+_pc check_executable /usr/local/bin/validar-segmentacion.sh
+_pc check_executable /usr/local/bin/verificar-zt-continuo.sh
+_pc check_executable /usr/local/bin/auditoria-segmentacion-zt.sh
+_precheck_result
+
 # Directorios base
 mkdir -p /etc/securizar /var/log/securizar /etc/nftables.d /usr/local/bin
 
@@ -55,7 +69,9 @@ echo "  - Crea estructura de cadenas nftables por zona"
 echo "  - Instala nftables si no está disponible"
 echo ""
 
-if ask "¿Configurar zonas de red con nftables?"; then
+if check_file_exists /etc/securizar/zonas-red.conf; then
+    log_already "Zonas de red (zonas-red.conf existe)"
+elif ask "¿Configurar zonas de red con nftables?"; then
 
     # Instalar nftables si no está disponible
     if ! command -v nft &>/dev/null; then
@@ -117,7 +133,13 @@ ZONASEOF
 # Generado por securizar - Módulo 45
 # ============================================================
 # Cargar con: nft -f /etc/nftables.d/securizar-zonas.nft
+# Poblar blocklist: nft add element inet securizar_zonas blocklist_ips { 1.2.3.4 }
+# Poblar blocklist: nft add element inet securizar_zonas blocklist_nets { 198.18.0.0/15 }
 # ============================================================
+
+# Idempotente: crear si no existe, borrar, recrear limpio
+table inet securizar_zonas
+delete table inet securizar_zonas
 
 table inet securizar_zonas {
 
@@ -146,15 +168,120 @@ table inet securizar_zonas {
         elements = { 10.0.200.0/24, 10.0.201.0/24, 10.0.202.0/24 }
     }
 
-    # --- Cadena de clasificación por zona ---
+    # --- Sets defensivos ---
+    set bogon_nets {
+        type ipv4_addr
+        flags interval
+        elements = {
+            0.0.0.0/8,
+            169.254.0.0/16,
+            192.0.0.0/24,
+            192.0.2.0/24,
+            198.51.100.0/24,
+            203.0.113.0/24,
+            224.0.0.0/4,
+            240.0.0.0/4
+        }
+    }
+
+    set blocklist_ips {
+        type ipv4_addr
+        flags timeout
+        timeout 24h
+    }
+
+    set blocklist_nets {
+        type ipv4_addr
+        flags interval,timeout
+        timeout 24h
+    }
+
+    set port_scanners {
+        type ipv4_addr
+        flags dynamic,timeout
+        timeout 5m
+        size 65535
+    }
+
+    set ssh_bruteforce {
+        type ipv4_addr
+        flags dynamic,timeout
+        timeout 10m
+        size 65535
+    }
+
+    # --- Anti-spoofing (prerouting, raw priority) ---
+    chain antispoof {
+        type filter hook prerouting priority -300; policy accept;
+
+        # Descartar direcciones origen que nunca son legítimas
+        ip saddr @bogon_nets counter drop
+
+        # Descartar loopback fuera de interfaz lo
+        iif != lo ip saddr 127.0.0.0/8 counter drop
+
+        # Descartar broadcast como origen
+        ip saddr 255.255.255.255 counter drop
+    }
+
+    # --- Filtro IPv6 (defensa en profundidad - IPv6 deshabilitado vía sysctl) ---
+    chain ipv6_filter {
+        # Permitir IPv6 en loopback
+        iif lo accept
+
+        # Permitir NDP link-local (necesario en algunos kernels)
+        ip6 saddr fe80::/10 icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, nd-redirect } accept
+
+        # Descartar el resto de IPv6
+        counter drop
+    }
+
+    # --- Filtro ICMP ---
+    chain icmp_filter {
+        # Tipos esenciales: PMTUD, traceroute, respuestas
+        icmp type { destination-unreachable, time-exceeded, echo-reply, parameter-problem } accept
+
+        # Ping con rate limit
+        icmp type echo-request limit rate 5/second burst 10 packets accept
+
+        # Descartar el resto (redirect, source-quench, timestamp, etc.)
+        counter drop
+    }
+
+    # --- Protección SYN flood ---
+    chain syn_flood_protect {
+        limit rate 25/second burst 50 packets return
+        counter drop
+    }
+
+    # --- Cadena de clasificación por zona (input) ---
     chain zona_input {
         type filter hook input priority -10; policy accept;
 
         # Tráfico loopback siempre permitido
         iif lo accept
 
+        # Filtro IPv6 (defensa en profundidad)
+        meta nfproto ipv6 jump ipv6_filter
+
+        # Blocklist - bloquear IPs maliciosas incluso en conexiones activas
+        ip saddr @blocklist_ips counter drop
+        ip saddr @blocklist_nets counter drop
+
         # Conexiones establecidas
         ct state established,related accept
+
+        # Descartar estado inválido
+        ct state invalid counter drop
+
+        # Bloquear escáneres de puertos detectados
+        ip saddr @port_scanners counter drop
+
+        # Filtro ICMP
+        ip protocol icmp jump icmp_filter
+
+        # Protección SYN flood (solo SYN nuevos)
+        tcp flags & (fin | syn | rst | ack) == syn ct state new jump syn_flood_protect
 
         # Clasificar por zona de origen
         ip saddr @trusted_nets jump trusted_input
@@ -162,15 +289,32 @@ table inet securizar_zonas {
         ip saddr @dmz_nets jump dmz_input
         ip saddr @restricted_nets jump restricted_input
 
-        # Tráfico no clasificado: log y pasar a política por defecto
-        log prefix "securizar-zonas-noclasif: " level warn
+        # Tráfico no clasificado: log con rate limit
+        limit rate 10/minute log prefix "securizar-zonas-noclasif: " level warn
     }
 
     chain zona_forward {
         type filter hook forward priority -10; policy drop;
 
+        # Blocklist (origen y destino)
+        ip saddr @blocklist_ips counter drop
+        ip daddr @blocklist_ips counter drop
+        ip saddr @blocklist_nets counter drop
+        ip daddr @blocklist_nets counter drop
+
+        # Bloquear acceso saliente al admin del router
+        ip daddr 192.168.1.1 tcp dport { 80, 443, 8080 } counter log prefix "ROUTER-ADMIN-BLOCK: " reject with icmp port-unreachable
+        ip daddr 192.168.1.1 tcp dport 53 counter log prefix "ROUTER-DNS-BLOCK: " drop
+        ip daddr 192.168.1.1 udp dport 53 counter log prefix "ROUTER-DNS-BLOCK: " drop
+
         # Conexiones establecidas
         ct state established,related accept
+
+        # Descartar estado inválido
+        ct state invalid counter drop
+
+        # Políticas inter-zona dinámicas (gestionadas por aplicar-politicas-zona.sh)
+        jump politicas_forward
 
         # Clasificar tráfico inter-zona
         ip saddr @trusted_nets jump trusted_forward
@@ -178,64 +322,106 @@ table inet securizar_zonas {
         ip saddr @dmz_nets jump dmz_forward
         ip saddr @restricted_nets jump restricted_forward
 
-        # Denegar no clasificado
-        log prefix "securizar-zonas-fwd-deny: " level warn
-        drop
+        # Denegar no clasificado con log rate-limited
+        limit rate 10/minute log prefix "securizar-zonas-fwd-deny: " level warn
+        counter drop
     }
 
     # --- Cadenas por zona (input) ---
     chain trusted_input {
         # TRUSTED puede acceder a todo
-        accept
+        counter accept
     }
 
     chain internal_input {
-        # INTERNAL: solo servicios permitidos
-        tcp dport { 22, 80, 443, 53 } accept
-        udp dport { 53, 123 } accept
-        log prefix "securizar-internal-deny: " level info
-        drop
+        # SSH con rate limit per-IP (5/min burst 3, bloqueo 10min)
+        tcp dport 22 ct state new add @ssh_bruteforce { ip saddr limit rate over 5/minute burst 3 packets } counter drop
+        tcp dport 22 counter accept
+
+        # INTERNAL: servicios permitidos
+        tcp dport { 80, 443, 53 } counter accept
+        udp dport { 53, 123 } counter accept
+
+        # Detección de escáneres + log rate-limited + drop
+        limit rate 10/minute log prefix "securizar-internal-deny: " level info
+        update @port_scanners { ip saddr } counter drop
     }
 
     chain dmz_input {
         # DMZ: acceso limitado al host
-        tcp dport { 80, 443 } accept
-        log prefix "securizar-dmz-deny: " level info
-        drop
+        tcp dport { 80, 443 } counter accept
+
+        # Detección de escáneres + log rate-limited + drop
+        limit rate 10/minute log prefix "securizar-dmz-deny: " level info
+        update @port_scanners { ip saddr } counter drop
     }
 
     chain restricted_input {
         # RESTRICTED: sin acceso directo
-        log prefix "securizar-restricted-deny: " level warn
-        drop
+        limit rate 10/minute log prefix "securizar-restricted-deny: " level warn
+        counter drop
     }
 
     # --- Cadenas por zona (forward) ---
     chain trusted_forward {
         # TRUSTED puede reenviar a cualquier zona
-        accept
+        counter accept
     }
 
     chain internal_forward {
         # INTERNAL solo puede llegar a DMZ (http/https)
-        ip daddr @dmz_nets tcp dport { 80, 443 } accept
-        log prefix "securizar-int-fwd-deny: " level info
-        drop
+        ip daddr @dmz_nets tcp dport { 80, 443 } counter accept
+        limit rate 10/minute log prefix "securizar-int-fwd-deny: " level info
+        counter drop
     }
 
     chain dmz_forward {
         # DMZ NO puede llegar a RESTRICTED
-        ip daddr @restricted_nets log prefix "securizar-dmz-restricted-block: " level warn
-        ip daddr @restricted_nets drop
-        # DMZ puede salir a internet (no a internal/trusted)
-        ip daddr @trusted_nets drop
-        ip daddr @internal_nets drop
+        ip daddr @restricted_nets limit rate 10/minute log prefix "securizar-dmz-restricted-block: " level warn
+        ip daddr @restricted_nets counter drop
+        # DMZ no puede llegar a TRUSTED ni INTERNAL
+        ip daddr @trusted_nets counter drop
+        ip daddr @internal_nets counter drop
     }
 
     chain restricted_forward {
         # RESTRICTED no reenvía a ningún lado
-        log prefix "securizar-restricted-fwd-deny: " level warn
-        drop
+        limit rate 10/minute log prefix "securizar-restricted-fwd-deny: " level warn
+        counter drop
+    }
+
+    # --- Cadena de políticas dinámicas (flush-safe) ---
+    chain politicas_forward {
+        # Poblada por aplicar-politicas-zona.sh
+        # Se puede hacer flush sin afectar reglas base de zona_forward
+    }
+
+    # --- Cadena de salida (egress visibility) ---
+    chain zona_output {
+        type filter hook output priority -10; policy accept;
+
+        # Loopback
+        oif lo accept
+
+        # Conexiones establecidas
+        ct state established,related accept
+
+        # Blocklist egress - no conectar a IPs maliciosas conocidas
+        ip daddr @blocklist_ips counter drop
+        ip daddr @blocklist_nets counter drop
+
+        # Bloquear acceso saliente al admin del router
+        ip daddr 192.168.1.1 tcp dport { 80, 443, 8080 } counter log prefix "ROUTER-ADMIN-BLOCK: " reject with icmp port-unreachable
+        ip daddr 192.168.1.1 tcp dport 53 counter log prefix "ROUTER-DNS-BLOCK: " drop
+        ip daddr 192.168.1.1 udp dport 53 counter log prefix "ROUTER-DNS-BLOCK: " drop
+
+        # Tráfico saliente común (silencioso)
+        tcp dport { 22, 53, 80, 443 } accept
+        udp dport { 53, 123 } accept
+        ip protocol icmp accept
+
+        # Tráfico saliente no común: log para visibilidad
+        limit rate 10/minute log prefix "securizar-zonas-egress: " level info
     }
 }
 NFTEOF
@@ -267,6 +453,20 @@ NFTEOF
             fi
         fi
 
+        # Ajustar sysctl ICMP: delegar control a nftables icmp_filter
+        # (icmp_echo_ignore_all=1 bloquea echo-request antes de nftables)
+        if [[ "$(sysctl -n net.ipv4.icmp_echo_ignore_all 2>/dev/null)" == "1" ]]; then
+            sysctl -w net.ipv4.icmp_echo_ignore_all=0 &>/dev/null || true
+            # Persistir override (mayor prioridad que 99-paranoid-max.conf)
+            cat > /etc/sysctl.d/99-securizar-zonas.conf << 'SYSCTLEOF'
+# Override ICMP: nftables icmp_filter gestiona echo-request con rate-limit
+# Desactiva bloqueo total del kernel para que nftables tenga control granular
+net.ipv4.icmp_echo_ignore_all = 0
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+SYSCTLEOF
+            log_change "Ajustado" "sysctl icmp_echo_ignore_all=0 (delegado a nftables icmp_filter)"
+        fi
+
         log_info "Zonas de red configuradas: TRUSTED, INTERNAL, DMZ, RESTRICTED"
     else
         log_warn "nftables no disponible - no se pueden crear zonas"
@@ -287,7 +487,9 @@ echo "  - DMZ->RESTRICTED(deny), RESTRICTED->ninguno"
 echo "  - Script de aplicación de políticas"
 echo ""
 
-if ask "¿Configurar políticas inter-zona?"; then
+if check_executable /usr/local/bin/aplicar-politicas-zona.sh; then
+    log_already "Politicas inter-zona (aplicar-politicas-zona.sh existe)"
+elif ask "¿Configurar políticas inter-zona?"; then
 
     # Crear fichero de políticas inter-zona
     log_info "Creando matriz de políticas inter-zona..."
@@ -474,7 +676,9 @@ echo "  - Reglas nftables por servicio individual"
 echo "  - Script para aplicar microsegmentación"
 echo ""
 
-if ask "¿Configurar microsegmentación por servicio?"; then
+if check_executable /usr/local/bin/microsegmentar-servicio.sh; then
+    log_already "Microsegmentacion por servicio (microsegmentar-servicio.sh existe)"
+elif ask "¿Configurar microsegmentación por servicio?"; then
 
     log_info "Creando configuración de microsegmentación..."
 
@@ -674,7 +878,9 @@ echo "  - Bloqueo de comunicación inter-contenedor"
 echo "  - Script de aislamiento automático"
 echo ""
 
-if ask "¿Configurar aislamiento de red para contenedores?"; then
+if check_executable /usr/local/bin/aislar-contenedores-red.sh; then
+    log_already "Aislamiento de red para contenedores (aislar-contenedores-red.sh existe)"
+elif ask "¿Configurar aislamiento de red para contenedores?"; then
 
     CONTAINER_ENGINE=""
     if command -v docker &>/dev/null; then
@@ -989,7 +1195,9 @@ echo "  - Puntuación 0-100 del dispositivo"
 echo "  - Reporte JSON en /var/log/securizar/"
 echo ""
 
-if ask "¿Crear herramienta de evaluación de postura de dispositivo?"; then
+if check_executable /usr/local/bin/evaluar-postura-dispositivo.sh; then
+    log_already "Evaluacion de postura de dispositivo (evaluar-postura-dispositivo.sh existe)"
+elif ask "¿Crear herramienta de evaluación de postura de dispositivo?"; then
 
     log_info "Creando script de evaluación de postura..."
 
@@ -1382,7 +1590,9 @@ echo "  - Mapeo usuarios/grupos a zonas de red permitidas"
 echo "  - Reglas sudo condicionadas por zona de red"
 echo ""
 
-if ask "¿Configurar control de acceso basado en identidad?"; then
+if check_executable /usr/local/bin/aplicar-acceso-identidad.sh; then
+    log_already "Control de acceso basado en identidad (aplicar-acceso-identidad.sh existe)"
+elif ask "¿Configurar control de acceso basado en identidad?"; then
 
     # Crear configuración de acceso por identidad
     log_info "Creando configuración de acceso por identidad..."
@@ -1695,7 +1905,9 @@ echo "  - Detección de port scans y movimiento lateral"
 echo "  - Log en /var/log/securizar/trafico-zonas.log"
 echo ""
 
-if ask "¿Configurar monitorización de tráfico entre zonas?"; then
+if check_executable /usr/local/bin/monitorizar-trafico-zonas.sh; then
+    log_already "Monitorizacion de trafico entre zonas (monitorizar-trafico-zonas.sh existe)"
+elif ask "¿Configurar monitorización de tráfico entre zonas?"; then
 
     # Instalar herramientas necesarias
     for tool in tcpdump conntrack; do
@@ -1978,7 +2190,9 @@ echo "  - Comprobación de carga de nftables"
 echo "  - Verificación de políticas inter-zona"
 echo ""
 
-if ask "¿Crear herramienta de validación de segmentación?"; then
+if check_executable /usr/local/bin/validar-segmentacion.sh; then
+    log_already "Validacion de segmentacion (validar-segmentacion.sh existe)"
+elif ask "¿Crear herramienta de validación de segmentación?"; then
 
     log_info "Creando script de validación de segmentación..."
 
@@ -2287,7 +2501,9 @@ echo "  - Verificación de integridad de segmentación"
 echo "  - Alertas por degradación"
 echo ""
 
-if ask "¿Configurar verificación continua Zero Trust?"; then
+if check_executable /usr/local/bin/verificar-zt-continuo.sh; then
+    log_already "Verificacion continua Zero Trust (verificar-zt-continuo.sh existe)"
+elif ask "¿Configurar verificación continua Zero Trust?"; then
 
     log_info "Creando script de verificación continua..."
 
@@ -2503,7 +2719,9 @@ echo "  - Postura de dispositivo, identidad, monitorización"
 echo "  - Puntuación global: BUENO / MEJORABLE / DEFICIENTE"
 echo ""
 
-if ask "¿Crear herramienta de auditoría de segmentación y ZT?"; then
+if check_executable /usr/local/bin/auditoria-segmentacion-zt.sh; then
+    log_already "Auditoria de segmentacion y ZT (auditoria-segmentacion-zt.sh existe)"
+elif ask "¿Crear herramienta de auditoría de segmentación y ZT?"; then
 
     log_info "Creando script de auditoría integral..."
 

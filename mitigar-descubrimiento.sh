@@ -26,6 +26,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-descubrimiento"
 securizar_setup_traps
+
+# ── Pre-check: detectar secciones ya aplicadas ──
+_precheck 6
+_pc check_executable /usr/local/bin/detectar-portscan.sh
+_pc check_file_contains /etc/fstab hidepid
+_pc check_file_exists /etc/sysctl.d/92-discovery-protection.conf
+_pc check_executable /usr/local/bin/detectar-reconocimiento.sh
+_pc check_perm /usr/bin/who 750
+_pc 'check_file_contains /etc/audit/rules.d/63-discovery.rules software-discovery'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MITIGACIÓN DE DESCUBRIMIENTO - TA0007                   ║"
@@ -47,7 +58,9 @@ echo "  - Detección con auditd de herramientas de scan"
 echo "  - Limitación de rate en conexiones"
 echo ""
 
-if ask "¿Configurar detección de port scanning interno?"; then
+if check_executable /usr/local/bin/detectar-portscan.sh; then
+    log_already "Detección de port scanning (detectar-portscan.sh)"
+elif ask "¿Configurar detección de port scanning interno?"; then
 
     # 1a. Reglas de firewall para detectar/limitar escaneos
     echo ""
@@ -185,7 +198,9 @@ echo "Limitar la capacidad de listar procesos de otros usuarios."
 echo "Esto dificulta que un atacante descubra servicios y usuarios."
 echo ""
 
-if ask "¿Restringir enumeración de procesos?"; then
+if check_file_contains /etc/fstab hidepid; then
+    log_already "Restricción de enumeración de procesos (hidepid en fstab)"
+elif ask "¿Restringir enumeración de procesos?"; then
 
     # hidepid en /proc (ya puede estar de credenciales)
     if ! grep -q "hidepid" /etc/fstab 2>/dev/null; then
@@ -231,7 +246,9 @@ echo "Reducir la información del sistema accesible a usuarios no privilegiados.
 echo "Atacantes recopilan versión de kernel, SO y hardware para exploits."
 echo ""
 
-if ask "¿Limitar información del sistema expuesta?"; then
+if check_file_exists /etc/sysctl.d/92-discovery-protection.conf; then
+    log_already "Información del sistema restringida (92-discovery-protection.conf)"
+elif ask "¿Limitar información del sistema expuesta?"; then
 
     # 3a. Restringir acceso a información del kernel
     echo ""
@@ -319,7 +336,9 @@ echo "  - T1016: Descubrimiento de configuración de red"
 echo "  - T1049: Descubrimiento de conexiones de red"
 echo ""
 
-if ask "¿Monitorear comandos de reconocimiento de red?"; then
+if check_executable /usr/local/bin/detectar-reconocimiento.sh; then
+    log_already "Monitoreo de reconocimiento de red (detectar-reconocimiento.sh)"
+elif ask "¿Monitorear comandos de reconocimiento de red?"; then
 
     if command -v auditctl &>/dev/null; then
         cat >> /etc/audit/rules.d/63-discovery.rules << 'EOF'
@@ -436,7 +455,9 @@ echo "  - T1087: Descubrimiento de cuentas locales"
 echo "  - T1069: Descubrimiento de grupos de permisos"
 echo ""
 
-if ask "¿Restringir enumeración de cuentas y grupos?"; then
+if check_perm /usr/bin/who 750; then
+    log_already "Enumeración de cuentas restringida (who=750)"
+elif ask "¿Restringir enumeración de cuentas y grupos?"; then
 
     # Restringir acceso a /etc/passwd (lectura para otros)
     # Nota: /etc/passwd necesita ser legible por muchos servicios
@@ -493,7 +514,9 @@ echo "Limitar la capacidad de listar software instalado."
 echo "Atacantes buscan software vulnerable para escalar o moverse."
 echo ""
 
-if ask "¿Restringir descubrimiento de software?"; then
+if check_file_contains /etc/audit/rules.d/63-discovery.rules "software-discovery"; then
+    log_already "Descubrimiento de software monitoreado (audit rules)"
+elif ask "¿Restringir descubrimiento de software?"; then
 
     # Monitorear uso de gestores de paquetes
     if command -v auditctl &>/dev/null; then

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Timeline{% endblock %}
+{% block page_title %}Timeline Cronologico{% endblock %}
+
+{% block content %}
+<!-- Summary -->
+<div class="grid grid-3 mb-3">
+  <div class="card">
+    <div class="card-title">Eventos Totales</div>
+    <div class="card-value text-blue">{{ total_raw }}</div>
+    <div class="card-sub">Alertas + incidentes forenses</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Eventos Deduplicados</div>
+    <div class="card-value text-green">{{ total_deduped }}</div>
+    <div class="card-sub">{{ total_raw|add:"-total_deduped" }} colapsados por repeticion</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Limite</div>
+    <div class="card-value text-muted">{{ limit }}</div>
+    <div class="card-sub">
+      <a href="?limit=200" class="btn btn-sm btn-blue">200</a>
+      <a href="?limit=500" class="btn btn-sm btn-blue">500</a>
+    </div>
+  </div>
+</div>
+
+<!-- Export -->
+<div class="flex justify-between items-center mb-2">
+  <div class="section-title" style="border:0;margin:0;padding:0">Eventos en orden cronologico</div>
+  <a href="{% url 'dashboard:api_export' %}?download=1" class="btn btn-green">Exportar JSON</a>
+</div>
+
+<!-- Timeline -->
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Hora</th>
+        <th>Tipo</th>
+        <th>Evento</th>
+        <th>Token</th>
+        <th>Detalle</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for e in events %}
+    <tr>
+      <td class="mono text-muted" style="font-size:.82rem;white-space:nowrap">{{ e.timestamp_str }}</td>
+      <td>
+        {% if e.type == 'forensic' %}
+        <span class="badge badge-red">FORENSE</span>
+        {% else %}
+        <span class="badge badge-yellow">ALERTA</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="{{ e.event|event_color }}" style="font-weight:700;font-size:.85rem">{{ e.event }}</span>
+      </td>
+      <td>
+        <a href="{% url 'dashboard:token_detail' e.canary_id %}" class="mono" style="font-size:.82rem">{{ e.canary_id }}</a>
+      </td>
+      <td class="mono text-muted" style="font-size:.82rem;word-break:break-all">
+        {{ e.detail|truncatechars:80 }}
+        {% if e.dup_count %}
+        <span class="badge badge-orange">+{{ e.dup_count }} duplicadas</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if e.incident_id %}
+        <a href="{% url 'dashboard:incident_detail' e.incident_id %}" class="btn btn-sm btn-red">Ver</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6" class="empty-state">Sin eventos registrados</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

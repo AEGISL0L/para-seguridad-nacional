@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Threat Feed{% endblock %}
+{% block page_title %}Threat Intelligence Feed{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{% url 'dashboard:index' %}">Dashboard</a> / Threat Feed</div>
+
+<!-- IOC Summary -->
+<div class="grid grid-4 mb-3">
+  <div class="card">
+    <div class="card-title">IOCs Totales</div>
+    <div class="card-value">{{ ioc_count }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">IPs Externas</div>
+    <div class="card-value">{{ summary.ips }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Hashes</div>
+    <div class="card-value">{{ summary.hashes }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Eventos Red</div>
+    <div class="card-value">{{ network_events }}</div>
+  </div>
+</div>
+
+<!-- Download Feeds -->
+<div class="section-title">Descargar Feed</div>
+<div class="card mb-3">
+  <p class="text-muted mb-2">Exporta los IOCs recopilados por la plataforma de engano en el formato que necesites para tu SIEM o plataforma de inteligencia.</p>
+  <div class="flex gap-2 flex-wrap">
+    <a href="{% url 'dashboard:threat_feed' %}?format=json" class="btn btn-blue">
+      JSON Feed ({{ ioc_count }} IOCs)
+    </a>
+    <a href="{% url 'dashboard:threat_feed' %}?format=csv" class="btn btn-green">
+      CSV para SIEM
+    </a>
+    <a href="{% url 'dashboard:threat_feed' %}?format=stix" class="btn" style="border-color:var(--purple);color:var(--purple)">
+      STIX 2.1 para MISP/OpenCTI
+    </a>
+  </div>
+</div>
+
+<!-- Integration Guide -->
+<div class="section-title">Integracion</div>
+<div class="grid grid-2 mb-3">
+  <div class="card">
+    <div class="card-title">SIEM (Splunk, ELK, QRadar)</div>
+    <div class="code-block mt-1"># Importar CSV periodicamente
+curl -s http://localhost:3000/threat-feed/?format=csv \
+  -o /opt/siem/feeds/securizar-iocs.csv
+
+# Splunk: index=threat_intel sourcetype=csv
+# ELK: filebeat -> logstash -> elasticsearch</div>
+  </div>
+  <div class="card">
+    <div class="card-title">MISP / OpenCTI</div>
+    <div class="code-block mt-1"># Importar STIX 2.1
+curl -s http://localhost:3000/threat-feed/?format=stix \
+  -o /tmp/securizar-stix.json
+
+# MISP: Import -> STIX 2.1
+# OpenCTI: Connector -> Internal Import</div>
+  </div>
+</div>
+
+<!-- CLI Integration -->
+<div class="card mb-3">
+  <div class="card-title">CLI (honey-monitor.sh)</div>
+  <div class="code-block mt-1"># Generar feed desde linea de comandos
+honey-monitor.sh threat-feed json   # Feed JSON completo
+honey-monitor.sh threat-feed csv    # CSV para SIEM
+honey-monitor.sh threat-feed stix   # STIX 2.1
+
+# Exportar IOCs STIX con mas detalle
+honey-monitor.sh stix-export</div>
+</div>
+
+{% if network_recent %}
+<!-- Recent Network Trap Events -->
+<div class="section-title">Ultimos Eventos de Trampas de Red</div>
+<div class="card mb-3">
+  <table>
+    <thead>
+      <tr><th>Timestamp</th><th>Tipo</th><th>Origen</th><th>Puerto</th></tr>
+    </thead>
+    <tbody>
+    {% for evt in network_recent %}
+      <tr>
+        <td class="mono text-muted">{{ evt.timestamp }}</td>
+        <td>
+          {% if 'AUTH' in evt.type %}
+          <span class="badge badge-red">{{ evt.type }}</span>
+          {% elif 'SSH' in evt.type %}
+          <span class="badge badge-yellow">{{ evt.type }}</span>
+          {% elif 'HTTP' in evt.type %}
+          <span class="badge badge-blue">{{ evt.type }}</span>
+          {% else %}
+          <span class="badge">{{ evt.type }}</span>
+          {% endif %}
+        </td>
+        <td class="mono">{{ evt.from|default:"-" }}</td>
+        <td class="mono">{{ evt.port|default:"-" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

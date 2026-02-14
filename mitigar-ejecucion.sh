@@ -22,6 +22,17 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "mitigar-ejecucion"
 securizar_setup_traps
+
+_precheck 7
+_pc 'check_service_active apparmor'
+_pc true  # S2: restricción bash por grupo (condicional)
+_pc 'check_file_contains /etc/fstab "noexec.*tmp\|tmp.*noexec"'
+_pc 'check_file_exists /etc/profile.d/restrict-ld-env.sh'
+_pc true  # S5: restricción intérpretes (condicional)
+_pc 'check_executable /usr/local/bin/monitor-ejecucion.sh'
+_pc true  # S7: verificación de controles existentes (detección)
+_precheck_result
+
 CURRENT_USER="${SUDO_USER:-$USER}"
 
 echo ""
@@ -60,7 +71,9 @@ fi
 echo ""
 
 if [[ "$AA_STATUS" == "no_instalado" ]]; then
-    if ask "¿Instalar AppArmor con perfiles y utilidades?"; then
+    if check_pkg apparmor-profiles && check_pkg apparmor-utils; then
+        log_already "AppArmor paquetes instalados"
+    elif ask "¿Instalar AppArmor con perfiles y utilidades?"; then
         pkg_install apparmor-profiles apparmor-utils apparmor-parser
         if command -v aa-status &>/dev/null; then
             systemctl enable --now apparmor 2>/dev/null || true
@@ -74,7 +87,9 @@ if [[ "$AA_STATUS" == "no_instalado" ]]; then
         log_skip "Instalar AppArmor"
     fi
 elif [[ "$AA_STATUS" == "instalado_inactivo" ]]; then
-    if ask "¿Activar AppArmor?"; then
+    if check_service_active apparmor; then
+        log_already "AppArmor activo"
+    elif ask "¿Activar AppArmor?"; then
         systemctl enable --now apparmor 2>/dev/null || true
         if aa-status --enabled 2>/dev/null; then
             log_change "Servicio" "apparmor enable --now"
@@ -92,7 +107,9 @@ fi
 # Instalar paquete de perfiles adicionales si no existe
 if [[ "$AA_STATUS" == "activo" ]]; then
     if ! pkg_is_installed apparmor-profiles; then
-        if ask "¿Instalar paquete de perfiles adicionales de AppArmor?"; then
+        if check_pkg apparmor-profiles; then
+            log_already "Paquete apparmor-profiles"
+        elif ask "¿Instalar paquete de perfiles adicionales de AppArmor?"; then
             pkg_install apparmor-profiles
             log_info "Paquete apparmor-profiles instalado"
         else
@@ -122,7 +139,9 @@ if [[ "$AA_STATUS" == "activo" ]]; then
     fi
 
     # Crear perfiles personalizados para herramientas de red
-    if ask "¿Crear perfiles AppArmor para herramientas de red (curl, wget)?"; then
+    if check_file_exists /etc/apparmor.d/usr.bin.curl && check_file_exists /etc/apparmor.d/usr.bin.wget; then
+        log_already "Perfiles AppArmor para curl/wget"
+    elif ask "¿Crear perfiles AppArmor para herramientas de red (curl, wget)?"; then
         # Perfil para curl
         if [[ -x /usr/bin/curl ]] && [[ ! -f /etc/apparmor.d/usr.bin.curl ]]; then
             cat > /etc/apparmor.d/usr.bin.curl << 'EOF'
@@ -217,7 +236,9 @@ EOF
         GRUB_LINE=$(grep "^GRUB_CMDLINE_LINUX_DEFAULT" /etc/default/grub 2>/dev/null || true)
         if ! echo "$GRUB_LINE" | grep -q "apparmor=1"; then
             log_warn "Parámetro 'apparmor=1' NO encontrado en GRUB"
-            if ask "¿Agregar 'apparmor=1 security=apparmor' a GRUB?"; then
+            if check_file_contains /etc/default/grub "apparmor=1"; then
+                log_already "AppArmor en parámetros GRUB"
+            elif ask "¿Agregar 'apparmor=1 security=apparmor' a GRUB?"; then
                 cp /etc/default/grub "$BACKUP_DIR/"
                 log_change "Backup" "/etc/default/grub"
                 if grep -q "^GRUB_CMDLINE_LINUX_DEFAULT=" /etc/default/grub; then
@@ -297,7 +318,9 @@ echo -e "  ${DIM}Solo root y miembros de 'shell-users' podrán ejecutar bash.${N
 echo -e "  ${DIM}Se añadirán automáticamente: root, $CURRENT_USER y usuarios con UID>=1000${NC}"
 echo ""
 
-if ask "¿Restringir acceso a /bin/bash mediante grupo 'shell-users'?"; then
+if check_perm /usr/bin/bash 750; then
+    log_already "Acceso a /bin/bash restringido (750)"
+elif ask "¿Restringir acceso a /bin/bash mediante grupo 'shell-users'?"; then
     # Crear grupo si no existe
     if ! getent group shell-users &>/dev/null; then
         groupadd shell-users
@@ -375,7 +398,9 @@ for mp in /tmp /var/tmp /dev/shm; do
 done
 echo ""
 
-if ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
+if check_file_contains /etc/fstab "noexec.*tmp\|tmp.*noexec"; then
+    log_already "noexec en montajes temporales (fstab)"
+elif ask "¿Configurar noexec,nosuid,nodev en montajes temporales?"; then
     cp /etc/fstab "$BACKUP_DIR/fstab.backup"
     log_change "Backup" "/etc/fstab"
 
@@ -494,7 +519,9 @@ else
 fi
 echo ""
 
-if ask "¿Aplicar restricciones sobre LD_PRELOAD y LD_LIBRARY_PATH?"; then
+if check_file_exists /etc/profile.d/restrict-ld-env.sh; then
+    log_already "Restricciones LD_PRELOAD (restrict-ld-env.sh)"
+elif ask "¿Aplicar restricciones sobre LD_PRELOAD y LD_LIBRARY_PATH?"; then
     # 1. Proteger /etc/ld.so.preload
     if [[ ! -f /etc/ld.so.preload ]]; then
         touch /etc/ld.so.preload
@@ -605,7 +632,9 @@ else
     echo -e "  ${DIM}Se añadirá automáticamente a: root, $CURRENT_USER${NC}"
     echo ""
 
-    if ask "¿Restringir intérpretes al grupo 'interp-users'?"; then
+    if getent group interp-users &>/dev/null; then
+        log_already "Intérpretes restringidos (grupo interp-users existe)"
+    elif ask "¿Restringir intérpretes al grupo 'interp-users'?"; then
         # Crear grupo si no existe
         if ! getent group interp-users &>/dev/null; then
             groupadd interp-users
@@ -642,7 +671,9 @@ log_section "6. SCRIPT DE MONITOREO DE EJECUCIÓN SOSPECHOSA"
 echo "Script auxiliar para detectar ejecución anómala de procesos."
 echo ""
 
-if ask "¿Crear script de monitoreo de ejecución sospechosa?"; then
+if check_executable /usr/local/bin/monitor-ejecucion.sh; then
+    log_already "Script de monitoreo de ejecución (/usr/local/bin/monitor-ejecucion.sh)"
+elif ask "¿Crear script de monitoreo de ejecución sospechosa?"; then
     cat > /usr/local/bin/monitor-ejecucion.sh << 'EXECEOF'
 #!/bin/bash
 # ============================================================

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% load dashboard_tags %}
+
+{% block title %}Amenazas{% endblock %}
+{% block page_title %}Inteligencia de Amenazas{% endblock %}
+
+{% block content %}
+<!-- Aggregate Threat Level -->
+<div class="grid grid-4 mb-3">
+  <div class="card" style="border-color:{% if max_score >= 70 %}var(--red){% elif max_score >= 50 %}var(--orange){% elif max_score >= 30 %}var(--yellow){% else %}var(--green){% endif %};border-width:2px">
+    <div class="card-title">Puntuacion Maxima</div>
+    <div class="card-value {% if max_score >= 70 %}text-red{% elif max_score >= 50 %}text-yellow{% elif max_score >= 30 %}text-yellow{% else %}text-green{% endif %}">{{ max_score }}/100</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Puntuacion Media</div>
+    <div class="card-value text-yellow">{{ avg_score }}/100</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Velocidad Ataque</div>
+    <div class="card-value text-blue" style="font-size:1rem">{{ profile.speed }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Intencion Estimada</div>
+    <div class="card-value {% if profile.intent == 'Destructivo/Ransomware' %}text-red{% elif profile.intent == 'Exfiltracion dirigida' %}text-yellow{% else %}text-blue{% endif %}" style="font-size:1rem">{{ profile.intent }}</div>
+  </div>
+</div>
+
+<!-- Attacker Profile -->
+<div class="card mb-2" style="border-color:var(--red);border-width:2px">
+  <div class="section-title" style="color:var(--red)">Perfil del Atacante</div>
+  <div class="grid grid-3" style="gap:.6rem">
+    <div>
+      <div class="card-title">Tokens Objetivo</div>
+      <div style="font-size:1.3rem;font-weight:700;color:var(--text-bright)">{{ profile.tokens_targeted }}</div>
+      <div class="card-sub">{{ profile.high_value_targeted }} de alto valor</div>
+    </div>
+    <div>
+      <div class="card-title">Eventos Destructivos</div>
+      <div style="font-size:1.3rem;font-weight:700;{% if profile.destructive_events %}color:var(--red){% else %}color:var(--green){% endif %}">{{ profile.destructive_events }}</div>
+      <div class="card-sub">MODIFY + DELETE</div>
+    </div>
+    <div>
+      <div class="card-title">Duracion Total</div>
+      <div style="font-size:1.3rem;font-weight:700;color:var(--text-bright)">
+        {% if profile.total_duration_sec > 3600 %}{{ profile.total_duration_sec|floatformat:0 }}s
+        {% elif profile.total_duration_sec > 60 %}{{ profile.total_duration_sec|floatformat:0 }}s
+        {% else %}{{ profile.total_duration_sec|floatformat:1 }}s{% endif %}
+      </div>
+      <div class="card-sub">Intervalo medio: {{ profile.avg_interval_sec }}s</div>
+    </div>
+  </div>
+</div>
+
+<!-- Kill Chain Phases -->
+{% if phases %}
+<div class="card mb-2">
+  <div class="section-title">Cadena de Ataque (Kill Chain)</div>
+  <div style="display:flex;gap:0;align-items:stretch">
+    {% for p in phases %}
+    <div style="flex:1;text-align:center;padding:.8rem .5rem;background:{% if p.name == 'Destruccion' %}var(--red-bg){% elif p.name == 'Manipulacion' %}var(--yellow-bg){% elif p.name == 'Acceso a Credenciales' %}rgba(209,134,22,.1){% else %}var(--blue-bg){% endif %};border:1px solid var(--border);position:relative">
+      {% if not forloop.last %}
+      <div style="position:absolute;right:-12px;top:50%;transform:translateY(-50%);font-size:1.2rem;color:var(--text-muted);z-index:1">&rarr;</div>
+      {% endif %}
+      <div style="font-size:.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">{{ p.name }}</div>
+      <div style="font-size:1.5rem;font-weight:700;color:var(--text-bright);margin:.3rem 0">{{ p.count }}</div>
+      <div style="font-size:.78rem;color:var(--text-muted)">{{ p.tokens|length }} token{{ p.tokens|length|pluralize:"es" }}</div>
+      {% if p.duration_sec > 0 %}
+      <div style="font-size:.75rem;color:var(--text-muted)">{{ p.duration_sec|floatformat:0 }}s</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- External IPs with Enrichment -->
+{% if profile.enriched_ips %}
+<div class="card mb-2">
+  <div class="section-title">IPs Externas Enriquecidas</div>
+  <table>
+    <thead><tr><th>IP</th><th>rDNS</th><th>Tipo</th><th>Proveedor</th></tr></thead>
+    <tbody>
+    {% for ip in profile.enriched_ips %}
+    <tr>
+      <td class="mono text-yellow">{{ ip.ip }}</td>
+      <td class="mono text-muted" style="font-size:.82rem;word-break:break-all">{{ ip.rdns|default:"-" }}</td>
+      <td><span class="badge {% if ip.type == 'public' %}badge-red{% else %}badge-blue{% endif %}">{{ ip.type }}</span></td>
+      <td>{% if ip.asn_hint %}<span class="badge badge-orange">{{ ip.asn_hint }}</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Accessors -->
+{% if profile.unique_accessors %}
+<div class="card mb-2">
+  <div class="section-title">Procesos Accesores</div>
+  <table>
+    <thead><tr><th>Usuario</th><th>Comando</th></tr></thead>
+    <tbody>
+    {% for acc in profile.unique_accessors %}
+    <tr>
+      <td class="mono text-blue">{{ acc|truncatechars:20 }}</td>
+      <td class="mono text-muted" style="font-size:.82rem;word-break:break-all">{{ acc }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Top Threats by Score -->
+{% if scores %}
+<div class="card">
+  <div class="section-title">Incidentes por Nivel de Amenaza</div>
+  <table>
+    <thead><tr><th>Score</th><th>Nivel</th><th>Incidente</th><th>Evento</th><th>Token</th><th></th></tr></thead>
+    <tbody>
+    {% for s in scores %}
+    <tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:.4rem">
+          <div style="background:var(--bg-primary);border-radius:4px;height:12px;width:60px;overflow:hidden">
+            <div style="background:{% if s.score >= 70 %}var(--red){% elif s.score >= 50 %}var(--orange){% elif s.score >= 30 %}var(--yellow){% else %}var(--green){% endif %};height:100%;width:{{ s.score }}%;min-width:2px"></div>
+          </div>
+          <span class="mono" style="font-weight:700;font-size:.85rem">{{ s.score }}</span>
+        </div>
+      </td>
+      <td><span class="badge {{ s.level|threat_color }}">{{ s.level }}</span></td>
+      <td><a href="{% url 'dashboard:incident_detail' s.incident_id %}" class="mono" style="font-size:.82rem">{{ s.incident_id|truncatechars:30 }}</a></td>
+      <td><span class="{{ s.event|event_color }}" style="font-weight:600">{{ s.event }}</span></td>
+      <td class="mono text-muted" style="font-size:.82rem">{{ s.canary_id|truncatechars:20 }}</td>
+      <td><a href="{% url 'dashboard:incident_detail' s.incident_id %}" class="btn btn-sm btn-red">Ver</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

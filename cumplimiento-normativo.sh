@@ -28,6 +28,20 @@ init_backup "compliance-frameworks"
 log_section "MODULO 54: CUMPLIMIENTO NORMATIVO (REGULATORY COMPLIANCE)"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc check_file_exists /etc/securizar/compliance-framework.conf
+_pc check_executable /usr/local/bin/evaluar-pci-dss.sh
+_pc check_executable /usr/local/bin/evaluar-gdpr.sh
+_pc check_executable /usr/local/bin/evaluar-hipaa.sh
+_pc check_executable /usr/local/bin/evaluar-soc2.sh
+_pc check_executable /usr/local/bin/evaluar-iso27001.sh
+_pc check_executable /usr/local/bin/recopilar-evidencias.sh
+_pc check_executable /usr/local/bin/generar-informe-compliance.sh
+_pc check_executable /usr/local/bin/remediar-compliance.sh
+_pc check_executable /usr/local/bin/auditoria-cumplimiento.sh
+_precheck_result
+
 # ── Directorios base ──────────────────────────────────────
 COMPLIANCE_CONF_DIR="/etc/securizar"
 COMPLIANCE_EVIDENCE_DIR="/var/lib/securizar/compliance-evidence"
@@ -95,7 +109,9 @@ log_info "  - Archivo de configuracion con frameworks activos"
 log_info "  - Estructura de directorios para evidencias"
 log_info "  - Script de inicializacion de cumplimiento"
 
-if ask "¿Configurar framework de cumplimiento normativo?"; then
+if check_file_exists /etc/securizar/compliance-framework.conf; then
+    log_already "Framework de cumplimiento (compliance-framework.conf existe)"
+elif ask "¿Configurar framework de cumplimiento normativo?"; then
 
     # ── S1.1: Archivo de configuracion principal ──────────
     COMPLIANCE_CONF="$COMPLIANCE_CONF_DIR/compliance-framework.conf"
@@ -293,7 +309,9 @@ log_info "  - Firewalls, contrasenas por defecto, cifrado"
 log_info "  - Anti-malware, parcheo, control de acceso"
 log_info "  - Autenticacion, logging, pruebas de seguridad"
 
-if ask "¿Crear script de evaluacion PCI-DSS v4.0?"; then
+if check_executable /usr/local/bin/evaluar-pci-dss.sh; then
+    log_already "Script evaluacion PCI-DSS v4.0 (evaluar-pci-dss.sh existe)"
+elif ask "¿Crear script de evaluacion PCI-DSS v4.0?"; then
 
     PCI_SCRIPT="$COMPLIANCE_BIN_DIR/evaluar-pci-dss.sh"
 
@@ -799,7 +817,9 @@ log_info "  - Art.32: Seguridad del procesamiento"
 log_info "  - Art.33: Notificacion de brechas"
 log_info "  - Art.35: Evaluacion de impacto (DPIA)"
 
-if ask "¿Crear script de evaluacion GDPR?"; then
+if check_executable /usr/local/bin/evaluar-gdpr.sh; then
+    log_already "Script evaluacion GDPR (evaluar-gdpr.sh existe)"
+elif ask "¿Crear script de evaluacion GDPR?"; then
 
     GDPR_SCRIPT="$COMPLIANCE_BIN_DIR/evaluar-gdpr.sh"
 
@@ -1097,7 +1117,9 @@ log_info "  - Technical Safeguards"
 log_info "  - Cifrado en reposo y en transito"
 log_info "  - Audit logging para ePHI"
 
-if ask "¿Crear script de evaluacion HIPAA?"; then
+if check_executable /usr/local/bin/evaluar-hipaa.sh; then
+    log_already "Script evaluacion HIPAA (evaluar-hipaa.sh existe)"
+elif ask "¿Crear script de evaluacion HIPAA?"; then
 
     HIPAA_SCRIPT="$COMPLIANCE_BIN_DIR/evaluar-hipaa.sh"
 
@@ -1464,7 +1486,9 @@ log_info "Script de evaluacion SOC 2 Trust Service Criteria:"
 log_info "  - Security, Availability, Processing Integrity"
 log_info "  - Confidentiality, Privacy"
 
-if ask "¿Crear script de evaluacion SOC 2?"; then
+if check_executable /usr/local/bin/evaluar-soc2.sh; then
+    log_already "Script evaluacion SOC 2 (evaluar-soc2.sh existe)"
+elif ask "¿Crear script de evaluacion SOC 2?"; then
 
     SOC2_SCRIPT="$COMPLIANCE_BIN_DIR/evaluar-soc2.sh"
 
@@ -1875,7 +1899,9 @@ log_info "  - A.9 Acceso, A.10 Criptografia, A.12 Operaciones"
 log_info "  - A.13 Comunicaciones, A.14 Desarrollo, A.16 Incidentes"
 log_info "  - A.18 Cumplimiento"
 
-if ask "¿Crear script de evaluacion ISO 27001?"; then
+if check_executable /usr/local/bin/evaluar-iso27001.sh; then
+    log_already "Script evaluacion ISO 27001 (evaluar-iso27001.sh existe)"
+elif ask "¿Crear script de evaluacion ISO 27001?"; then
 
     ISO_SCRIPT="$COMPLIANCE_BIN_DIR/evaluar-iso27001.sh"
 
@@ -2279,7 +2305,9 @@ log_info "  - Exportacion de audit logs"
 log_info "  - Paquetes de evidencia con SHA-256 y cadena de custodia"
 log_info "  - Cron mensual automatico"
 
-if ask "¿Crear sistema de recoleccion de evidencias?"; then
+if check_executable /usr/local/bin/recopilar-evidencias.sh; then
+    log_already "Sistema de recoleccion de evidencias (recopilar-evidencias.sh existe)"
+elif ask "¿Crear sistema de recoleccion de evidencias?"; then
 
     # ── S7.1: Script de recoleccion de evidencias ─────────
     EVIDENCE_SCRIPT="$COMPLIANCE_BIN_DIR/recopilar-evidencias.sh"
@@ -2551,7 +2579,9 @@ log_info "  - Informe HTML con resumen ejecutivo"
 log_info "  - Informe JSON legible por maquina"
 log_info "  - Recomendaciones de remediacion"
 
-if ask "¿Crear generador de informes de cumplimiento?"; then
+if check_executable /usr/local/bin/generar-informe-compliance.sh; then
+    log_already "Generador de informes de cumplimiento (generar-informe-compliance.sh existe)"
+elif ask "¿Crear generador de informes de cumplimiento?"; then
 
     REPORT_SCRIPT="$COMPLIANCE_BIN_DIR/generar-informe-compliance.sh"
 
@@ -2892,7 +2922,9 @@ log_info "  - Instrucciones paso a paso"
 log_info "  - Auto-fix con confirmacion del usuario"
 log_info "  - Tracking de progreso"
 
-if ask "¿Crear herramienta de remediacion guiada?"; then
+if check_executable /usr/local/bin/remediar-compliance.sh; then
+    log_already "Herramienta de remediacion guiada (remediar-compliance.sh existe)"
+elif ask "¿Crear herramienta de remediacion guiada?"; then
 
     REMEDIATION_SCRIPT="$COMPLIANCE_BIN_DIR/remediar-compliance.sh"
 
@@ -3263,7 +3295,9 @@ log_info "  - Analisis cross-framework de gaps"
 log_info "  - Score unificado y overlapping"
 log_info "  - Reporte a /var/log/securizar/"
 
-if ask "¿Crear auditoria integral de cumplimiento?"; then
+if check_executable /usr/local/bin/auditoria-cumplimiento.sh; then
+    log_already "Auditoria integral de cumplimiento (auditoria-cumplimiento.sh existe)"
+elif ask "¿Crear auditoria integral de cumplimiento?"; then
 
     AUDIT_SCRIPT="$COMPLIANCE_BIN_DIR/auditoria-cumplimiento.sh"
 

@@ -27,6 +27,20 @@ init_backup "wireless-security"
 log_section "MODULO 56: SEGURIDAD WIRELESS EMPRESARIAL"
 log_info "Distro detectada: $DISTRO_NAME ($DISTRO_FAMILY)"
 
+# ── Pre-check rapido ────────────────────────────────────
+_precheck 10
+_pc check_executable /usr/local/bin/auditar-wireless.sh
+_pc check_file_exists /etc/NetworkManager/conf.d/99-securizar-wifi.conf
+_pc check_dir_exists /etc/securizar/wifi-enterprise
+_pc check_dir_exists /etc/securizar/freeradius
+_pc check_executable /usr/local/bin/detectar-rogue-ap.sh
+_pc check_executable /usr/local/bin/verificar-protecciones-wifi.sh
+_pc check_executable /usr/local/bin/securizar-bluetooth.sh
+_pc check_executable /usr/local/bin/monitorizar-wireless.sh
+_pc check_file_exists /etc/securizar/wireless-policy.conf
+_pc check_executable /usr/local/bin/auditoria-wireless-completa.sh
+_precheck_result
+
 # ── Helpers de deteccion wireless ──────────────────────────
 
 # Detectar interfaces wireless disponibles
@@ -147,7 +161,9 @@ log_info "  - Evaluacion: wireless necesario (servidor vs escritorio)"
 log_info "  - Opcion: deshabilitar wireless en servidores"
 log_info "  - Script: /usr/local/bin/auditar-wireless.sh"
 
-if ask "¿Realizar auditoria de interfaces wireless?"; then
+if check_executable /usr/local/bin/auditar-wireless.sh; then
+    log_already "Auditoria wireless (auditar-wireless.sh existe)"
+elif ask "¿Realizar auditoria de interfaces wireless?"; then
 
     # Instalar herramientas wireless si no estan
     if ! command -v iw &>/dev/null; then
@@ -182,7 +198,6 @@ if ask "¿Realizar auditoria de interfaces wireless?"; then
     if [[ ${#WIRELESS_IFACES[@]} -eq 0 ]]; then
         log_info "No se detectaron interfaces wireless en el sistema"
         log_info "Verificando modulos kernel wireless cargados..."
-        local loaded_modules
         loaded_modules=$(get_wireless_modules)
         if [[ -n "$loaded_modules" ]]; then
             log_warn "Modulos wireless cargados sin interfaces activas:"
@@ -195,7 +210,6 @@ if ask "¿Realizar auditoria de interfaces wireless?"; then
     else
         log_info "Interfaces wireless detectadas: ${#WIRELESS_IFACES[@]}"
         for wif in "${WIRELESS_IFACES[@]}"; do
-            local driver chipset has_monitor has_ap
             driver=$(get_wireless_driver "$wif")
             chipset=$(get_wireless_chipset "$wif")
             has_monitor="No"
@@ -213,12 +227,10 @@ if ask "¿Realizar auditoria de interfaces wireless?"; then
             log_info "    Modo AP:      $has_ap"
 
             # Estado de la interfaz
-            local state
             state=$(cat "/sys/class/net/${wif}/operstate" 2>/dev/null || echo "desconocido")
             log_info "    Estado:       $state"
 
             # Direccion MAC
-            local mac
             mac=$(cat "/sys/class/net/${wif}/address" 2>/dev/null || echo "desconocida")
             log_info "    MAC:          $mac"
         done
@@ -237,7 +249,7 @@ if ask "¿Realizar auditoria de interfaces wireless?"; then
                 fi
 
                 # Blacklist de modulos wireless
-                local blacklist_file="/etc/modprobe.d/securizar-no-wireless.conf"
+                blacklist_file="/etc/modprobe.d/securizar-no-wireless.conf"
                 if [[ -f "$blacklist_file" ]]; then
                     cp -a "$blacklist_file" "$BACKUP_DIR/"
                 fi
@@ -292,7 +304,6 @@ EOFBLACKLIST
                 log_change "Creado" "$blacklist_file (blacklist modulos wireless)"
 
                 # Descargar modulos cargados
-                local loaded_mods
                 loaded_mods=$(get_wireless_modules)
                 if [[ -n "$loaded_mods" ]]; then
                     while IFS= read -r mod; do
@@ -461,7 +472,9 @@ log_info "  - Requerir PMF/802.11w (pmf=2)"
 log_info "  - Preferir WPA3-SAE sobre WPA2"
 log_info "  - Purgar perfiles de redes abiertas guardadas"
 
-if ask "¿Aplicar hardening de NetworkManager WiFi?"; then
+if check_file_exists /etc/NetworkManager/conf.d/99-securizar-wifi.conf; then
+    log_already "Hardening NetworkManager WiFi (99-securizar-wifi.conf existe)"
+elif ask "¿Aplicar hardening de NetworkManager WiFi?"; then
 
     NM_CONF_DIR="/etc/NetworkManager/conf.d"
     NM_CONN_DIR="/etc/NetworkManager/system-connections"
@@ -505,8 +518,8 @@ EOFNMWIFI
 
         # Verificar y modificar perfiles de conexion existentes
         if [[ -d "$NM_CONN_DIR" ]]; then
-            local open_networks=0
-            local total_wifi=0
+            open_networks=0
+            total_wifi=0
 
             for conn_file in "$NM_CONN_DIR"/*; do
                 [[ -f "$conn_file" ]] || continue
@@ -514,7 +527,6 @@ EOFNMWIFI
                    grep -q "type=802-11-wireless" "$conn_file" 2>/dev/null; then
                     ((total_wifi++)) || true
 
-                    local conn_name
                     conn_name=$(basename "$conn_file")
 
                     # Detectar redes abiertas (sin key-mgmt o key-mgmt=none)
@@ -543,7 +555,6 @@ EOFNMWIFI
                            grep -q "type=802-11-wireless" "$conn_file" 2>/dev/null; then
                             if ! grep -q "key-mgmt=" "$conn_file" 2>/dev/null || \
                                grep -q "key-mgmt=none" "$conn_file" 2>/dev/null; then
-                                local conn_name
                                 conn_name=$(basename "$conn_file")
                                 cp -a "$conn_file" "$BACKUP_DIR/"
                                 rm -f "$conn_file"
@@ -578,7 +589,6 @@ EOFNMWIFI
 pmf=2
 EOFPMF
                             fi
-                            local conn_name
                             conn_name=$(basename "$conn_file")
                             log_change "Configurado" "PMF=2 (requerido) en: $conn_name"
                         fi
@@ -618,7 +628,9 @@ log_info "  - EAP-TTLS (autenticacion interna flexible)"
 log_info "  - wpa_supplicant.conf templates"
 log_info "  - Guia de colocacion de certificados"
 
-if ask "¿Crear plantillas de configuracion WPA3 Enterprise?"; then
+if check_dir_exists /etc/securizar/wifi-enterprise; then
+    log_already "Plantillas WPA3 Enterprise (wifi-enterprise/ existe)"
+elif ask "¿Crear plantillas de configuracion WPA3 Enterprise?"; then
 
     WIFI_ENTERPRISE_DIR="/etc/securizar/wifi-enterprise"
     mkdir -p "$WIFI_ENTERPRISE_DIR"
@@ -937,7 +949,9 @@ log_info "  - Script de generacion de certificados"
 log_info "  - Hardening systemd override"
 log_info "  - Script: /usr/local/bin/securizar-radius-setup.sh"
 
-if ask "¿Configurar plantillas de servidor FreeRADIUS?"; then
+if check_dir_exists /etc/securizar/freeradius; then
+    log_already "Plantillas FreeRADIUS (freeradius/ existe)"
+elif ask "¿Configurar plantillas de servidor FreeRADIUS?"; then
 
     RADIUS_CONF_DIR="/etc/securizar/freeradius"
     mkdir -p "$RADIUS_CONF_DIR"
@@ -1177,7 +1191,7 @@ eap {
         # ca_crls = /etc/raddb/certs/crl.pem
 
         # Opciones TLS seguras
-        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"
+        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256"
         cipher_server_preference = yes
 
         # TLS minimo 1.2 (deshabilitar versiones inseguras)
@@ -1353,7 +1367,7 @@ EOFGENCERTS
     log_change "Creado" "${RADIUS_CONF_DIR}/generar-certs-radius.sh"
 
     # Systemd override para FreeRADIUS hardening
-    local radius_service=""
+    radius_service=""
     if systemctl list-unit-files 2>/dev/null | grep -q "freeradius"; then
         radius_service="freeradius"
     elif systemctl list-unit-files 2>/dev/null | grep -q "radiusd"; then
@@ -1361,7 +1375,7 @@ EOFGENCERTS
     fi
 
     if [[ -n "$radius_service" ]]; then
-        local override_dir="/etc/systemd/system/${radius_service}.service.d"
+        override_dir="/etc/systemd/system/${radius_service}.service.d"
         mkdir -p "$override_dir"
 
         if [[ -f "${override_dir}/securizar-hardening.conf" ]]; then
@@ -1569,7 +1583,9 @@ log_info "  - Deteccion: evil twin, rogue AP, redes abiertas"
 log_info "  - Deteccion de ataques de deautenticacion"
 log_info "  - Timer systemd para escaneo periodico"
 
-if ask "¿Crear sistema de deteccion de rogue APs?"; then
+if check_executable /usr/local/bin/detectar-rogue-ap.sh; then
+    log_already "Deteccion de rogue APs (detectar-rogue-ap.sh existe)"
+elif ask "¿Crear sistema de deteccion de rogue APs?"; then
 
     AP_WHITELIST="/etc/securizar/ap-whitelist.conf"
     ROGUE_LOG_DIR="/var/log/securizar/rogue-ap"
@@ -1873,16 +1889,16 @@ log_info "  - PMKID: deshabilitar PMKID caching"
 log_info "  - Evil twin: certificate pinning para enterprise"
 log_info "  - Script: /usr/local/bin/verificar-protecciones-wifi.sh"
 
-if ask "¿Verificar y aplicar protecciones contra ataques wireless?"; then
+if check_executable /usr/local/bin/verificar-protecciones-wifi.sh; then
+    log_already "Protecciones wireless (verificar-protecciones-wifi.sh existe)"
+elif ask "¿Verificar y aplicar protecciones contra ataques wireless?"; then
 
     # Verificar version de wpa_supplicant
     if command -v wpa_supplicant &>/dev/null; then
-        local wpa_version
         wpa_version=$(wpa_supplicant -v 2>&1 | head -1 || echo "desconocida")
         log_info "wpa_supplicant version: $wpa_version"
 
         # Extraer numero de version
-        local ver_num
         ver_num=$(echo "$wpa_version" | grep -oP 'v\K[0-9.]+' || echo "0.0")
 
         # KRACK: parcheado desde wpa_supplicant 2.7+
@@ -1918,7 +1934,7 @@ if ask "¿Verificar y aplicar protecciones contra ataques wireless?"; then
     fi
 
     # Verificar configuracion de wpa_supplicant global
-    local wpa_conf=""
+    wpa_conf=""
     for f in /etc/wpa_supplicant/wpa_supplicant.conf /etc/wpa_supplicant.conf; do
         if [[ -f "$f" ]]; then
             wpa_conf="$f"
@@ -2171,10 +2187,12 @@ log_info "  - Deshabilitar legacy pairing"
 log_info "  - Verificar parches BlueBorne y KNOB"
 log_info "  - Script: /usr/local/bin/securizar-bluetooth.sh"
 
-if ask "¿Aplicar hardening de Bluetooth?"; then
+if check_executable /usr/local/bin/securizar-bluetooth.sh; then
+    log_already "Hardening Bluetooth (securizar-bluetooth.sh existe)"
+elif ask "¿Aplicar hardening de Bluetooth?"; then
 
     # Verificar presencia de hardware Bluetooth
-    local bt_present=0
+    bt_present=0
     if command -v bluetoothctl &>/dev/null; then
         bt_present=1
     elif [[ -d /sys/class/bluetooth ]]; then
@@ -2201,7 +2219,7 @@ if ask "¿Aplicar hardening de Bluetooth?"; then
                 fi
 
                 # Blacklist modulos Bluetooth
-                local bt_blacklist="/etc/modprobe.d/securizar-no-bluetooth.conf"
+                bt_blacklist="/etc/modprobe.d/securizar-no-bluetooth.conf"
                 if [[ -f "$bt_blacklist" ]]; then
                     cp -a "$bt_blacklist" "$BACKUP_DIR/"
                 fi
@@ -2245,7 +2263,7 @@ EOFBTBLACKLIST
             # Estacion de trabajo: hardening de Bluetooth
             log_info "Aplicando hardening de Bluetooth para estacion de trabajo..."
 
-            local bt_main_conf="/etc/bluetooth/main.conf"
+            bt_main_conf="/etc/bluetooth/main.conf"
             if [[ -f "$bt_main_conf" ]]; then
                 cp -a "$bt_main_conf" "$BACKUP_DIR/"
                 log_change "Backup" "$bt_main_conf"
@@ -2328,7 +2346,6 @@ EOFBTBLACKLIST
         log_info "Verificando parches de vulnerabilidades Bluetooth..."
 
         # BlueBorne (CVE-2017-1000251): parcheado en kernel 4.14+
-        local kernel_major kernel_minor
         kernel_major=$(uname -r | cut -d. -f1)
         kernel_minor=$(uname -r | cut -d. -f2)
         if [[ "$kernel_major" -gt 4 ]] || { [[ "$kernel_major" -eq 4 ]] && [[ "$kernel_minor" -ge 14 ]]; }; then
@@ -2511,7 +2528,9 @@ log_info "  - Tracking de asociacion de clientes"
 log_info "  - Servicio systemd: securizar-wireless-monitor.service"
 log_info "  - Alertas: nuevos APs, cambios de senal, deauth floods"
 
-if ask "¿Crear sistema de monitoreo wireless continuo?"; then
+if check_executable /usr/local/bin/monitorizar-wireless.sh; then
+    log_already "Monitoreo wireless continuo (monitorizar-wireless.sh existe)"
+elif ask "¿Crear sistema de monitoreo wireless continuo?"; then
 
     MONITOR_LOG_DIR="/var/log/securizar/wireless-monitor"
     mkdir -p "$MONITOR_LOG_DIR"
@@ -2880,7 +2899,9 @@ log_info "  - MAX_OPEN_NETWORK_CONNECTIONS"
 log_info "  - BLUETOOTH_POLICY, SCAN_INTERVAL"
 log_info "  - Script de validacion: /usr/local/bin/validar-politica-wireless.sh"
 
-if ask "¿Crear politicas de seguridad wireless?"; then
+if check_file_exists /etc/securizar/wireless-policy.conf; then
+    log_already "Politicas wireless (wireless-policy.conf existe)"
+elif ask "¿Crear politicas de seguridad wireless?"; then
 
     POLICY_FILE="/etc/securizar/wireless-policy.conf"
 
@@ -3264,7 +3285,9 @@ log_info "  - Cumplimiento de politica"
 log_info "  - Rating: BUENO/MEJORABLE/DEFICIENTE"
 log_info "  - Cron semanal: /etc/cron.weekly/auditoria-wireless"
 
-if ask "¿Crear sistema de auditoria integral wireless?"; then
+if check_executable /usr/local/bin/auditoria-wireless-completa.sh; then
+    log_already "Auditoria integral wireless (auditoria-wireless-completa.sh existe)"
+elif ask "¿Crear sistema de auditoria integral wireless?"; then
 
     AUDIT_LOG_DIR="/var/log/securizar"
     mkdir -p "$AUDIT_LOG_DIR"

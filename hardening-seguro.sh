@@ -14,6 +14,21 @@ require_root
 init_backup "hardening-seguro"
 securizar_setup_traps
 
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 11
+_pc check_perm /etc/shadow "640"
+_pc check_file_exists /etc/sysctl.d/99-process-hardening.conf
+_pc check_executable /usr/local/bin/verificar-integridad.sh
+_pc check_executable /usr/local/bin/auditar-suid.sh
+_pc true  # S5: proteccion sesion usuario (depende de USER_ACTUAL en runtime)
+_pc check_executable /usr/local/bin/procesos-sospechosos.sh
+_pc check_file_exists /etc/cron.allow
+_pc check_executable /usr/local/bin/verificar-paquetes.sh
+_pc check_perm /boot "700"
+_pc check_executable /usr/local/bin/monitor-cambios.sh
+_pc check_executable /usr/local/bin/auditoria-rapida.sh
+_precheck_result
+
 USER_ACTUAL="${SUDO_USER:-$USER}"
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -27,31 +42,38 @@ log_info "Usuario protegido: $USER_ACTUAL"
 # ============================================================
 log_info "1. Protegiendo archivos críticos del sistema..."
 
-# Hacer copias de seguridad
-cp /etc/passwd /etc/shadow /etc/group /etc/sudoers "$BACKUP_DIR/" 2>/dev/null || true
-log_change "Backup" "/etc/passwd, /etc/shadow, /etc/group, /etc/sudoers"
-
-# Permisos correctos (no inmutables para no quedarte fuera)
-chmod 644 /etc/passwd
-log_change "Permisos" "/etc/passwd -> 644"
-chmod 640 /etc/shadow
-log_change "Permisos" "/etc/shadow -> 640"
-chmod 644 /etc/group
-log_change "Permisos" "/etc/group -> 644"
-if [[ -f /etc/sudoers ]]; then
-    chmod 440 /etc/sudoers
-    log_change "Permisos" "/etc/sudoers -> 440"
+if check_perm /etc/shadow "640"; then
+    log_already "Permisos de archivos críticos del sistema"
 else
-    log_skip "Permisos /etc/sudoers (archivo no existe)"
-fi
+    # Hacer copias de seguridad
+    cp /etc/passwd /etc/shadow /etc/group /etc/sudoers "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/passwd, /etc/shadow, /etc/group, /etc/sudoers"
 
-log_info "   Permisos de archivos críticos asegurados"
+    # Permisos correctos (no inmutables para no quedarte fuera)
+    chmod 644 /etc/passwd
+    log_change "Permisos" "/etc/passwd -> 644"
+    chmod 640 /etc/shadow
+    log_change "Permisos" "/etc/shadow -> 640"
+    chmod 644 /etc/group
+    log_change "Permisos" "/etc/group -> 644"
+    if [[ -f /etc/sudoers ]]; then
+        chmod 440 /etc/sudoers
+        log_change "Permisos" "/etc/sudoers -> 440"
+    else
+        log_skip "Permisos /etc/sudoers (archivo no existe)"
+    fi
+
+    log_info "   Permisos de archivos críticos asegurados"
+fi
 
 # ============================================================
 # 2. PROTECCIÓN DE PROCESOS Y MEMORIA
 # ============================================================
 log_info "2. Protección de procesos..."
 
+if check_file_exists /etc/sysctl.d/99-process-hardening.conf; then
+    log_already "Protección de procesos (sysctl)"
+else
 cat > /etc/sysctl.d/99-process-hardening.conf << 'EOF'
 # Protección de procesos
 kernel.randomize_va_space = 2
@@ -85,12 +107,16 @@ log_change "Creado" "/etc/sysctl.d/99-process-hardening.conf"
 /usr/sbin/sysctl --system > /dev/null 2>&1 || true
 log_change "Aplicado" "sysctl --system (protección de memoria y procesos)"
 log_info "   Protección de memoria y procesos activa"
+fi
 
 # ============================================================
 # 3. MONITOREAR CAMBIOS EN ARCHIVOS CRÍTICOS
 # ============================================================
 log_info "3. Configurando monitoreo de integridad..."
 
+if check_executable /usr/local/bin/verificar-integridad.sh; then
+    log_already "Monitoreo de integridad"
+else
 # Guardar hashes de archivos críticos
 HASH_FILE="/root/.critical-hashes"
 cat > "$HASH_FILE" << EOF
@@ -146,12 +172,16 @@ chmod +x /usr/local/bin/verificar-integridad.sh
 log_change "Permisos" "/usr/local/bin/verificar-integridad.sh -> +x"
 
 log_info "   Ejecutar: verificar-integridad.sh"
+fi
 
 # ============================================================
 # 4. PROTEGER CONTRA ESCALADA DE PRIVILEGIOS
 # ============================================================
 log_info "4. Protección contra escalada de privilegios..."
 
+if check_executable /usr/local/bin/auditar-suid.sh; then
+    log_already "Script de auditoría SUID"
+else
 # Limitar SUID/SGID (solo los esenciales)
 cat > /usr/local/bin/auditar-suid.sh << 'EOFSUID'
 #!/bin/bash
@@ -166,6 +196,7 @@ EOFSUID
 log_change "Creado" "/usr/local/bin/auditar-suid.sh"
 chmod +x /usr/local/bin/auditar-suid.sh
 log_change "Permisos" "/usr/local/bin/auditar-suid.sh -> +x"
+fi
 
 # Asegurar que sudo requiere contraseña
 if [[ -f /etc/sudoers ]]; then
@@ -201,6 +232,9 @@ fi
 # ============================================================
 log_info "6. Configurando detección de procesos sospechosos..."
 
+if check_executable /usr/local/bin/procesos-sospechosos.sh; then
+    log_already "Script de detección de procesos sospechosos"
+else
 cat > /usr/local/bin/procesos-sospechosos.sh << 'EOFPROC'
 #!/bin/bash
 echo "=== PROCESOS SOSPECHOSOS ==="
@@ -225,12 +259,16 @@ EOFPROC
 log_change "Creado" "/usr/local/bin/procesos-sospechosos.sh"
 chmod +x /usr/local/bin/procesos-sospechosos.sh
 log_change "Permisos" "/usr/local/bin/procesos-sospechosos.sh -> +x"
+fi
 
 # ============================================================
 # 7. PROTEGER CRON Y TAREAS PROGRAMADAS
 # ============================================================
 log_info "7. Asegurando cron..."
 
+if check_file_exists /etc/cron.allow; then
+    log_already "Configuración de cron segura"
+else
 # Ver crontabs sospechosos
 cat > /usr/local/bin/auditar-cron.sh << 'EOFCRON'
 #!/bin/bash
@@ -265,12 +303,16 @@ echo "$USER_ACTUAL" >> /etc/cron.allow
 log_change "Modificado" "/etc/cron.allow (añadido $USER_ACTUAL)"
 chmod 600 /etc/cron.allow
 log_change "Permisos" "/etc/cron.allow -> 600"
+fi
 
 # ============================================================
 # 8. AUDITORÍA DE PAQUETES
 # ============================================================
 log_info "8. Verificando integridad de paquetes instalados..."
 
+if check_executable /usr/local/bin/verificar-paquetes.sh; then
+    log_already "Script de verificación de paquetes"
+else
 cat > /usr/local/bin/verificar-paquetes.sh << 'EOFPKG'
 #!/bin/bash
 echo "Verificando integridad de paquetes instalados..."
@@ -299,23 +341,31 @@ EOFPKG
 log_change "Creado" "/usr/local/bin/verificar-paquetes.sh"
 chmod +x /usr/local/bin/verificar-paquetes.sh
 log_change "Permisos" "/usr/local/bin/verificar-paquetes.sh -> +x"
+fi
 
 # ============================================================
 # 9. PROTEGER BOOT
 # ============================================================
 log_info "9. Protegiendo arranque..."
 
-# Permisos de GRUB
-chmod 600 $GRUB_CFG 2>/dev/null || true
-log_change "Permisos" "$GRUB_CFG -> 600"
-chmod 700 /boot 2>/dev/null || true
-log_change "Permisos" "/boot -> 700"
+if check_perm /boot "700"; then
+    log_already "Protección de arranque"
+else
+    # Permisos de GRUB
+    chmod 600 "$GRUB_CFG" 2>/dev/null || true
+    log_change "Permisos" "$GRUB_CFG -> 600"
+    chmod 700 /boot 2>/dev/null || true
+    log_change "Permisos" "/boot -> 700"
+fi
 
 # ============================================================
 # 10. MONITOREO DE CAMBIOS EN TIEMPO REAL
 # ============================================================
 log_info "10. Configurando monitor de cambios..."
 
+if check_executable /usr/local/bin/monitor-cambios.sh; then
+    log_already "Monitor de cambios en tiempo real"
+else
 cat > /usr/local/bin/monitor-cambios.sh << 'EOFMON'
 #!/bin/bash
 # Monitor de cambios en directorios críticos
@@ -334,12 +384,16 @@ log_change "Permisos" "/usr/local/bin/monitor-cambios.sh -> +x"
 if ! command -v inotifywait &>/dev/null; then
     pkg_install inotify-tools
 fi
+fi
 
 # ============================================================
 # 11. SCRIPT DE AUDITORÍA RÁPIDA
 # ============================================================
 log_info "11. Creando script de auditoría rápida..."
 
+if check_executable /usr/local/bin/auditoria-rapida.sh; then
+    log_already "Script de auditoría rápida"
+else
 cat > /usr/local/bin/auditoria-rapida.sh << 'EOFAUDIT'
 #!/bin/bash
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -383,6 +437,7 @@ EOFAUDIT
 log_change "Creado" "/usr/local/bin/auditoria-rapida.sh"
 chmod +x /usr/local/bin/auditoria-rapida.sh
 log_change "Permisos" "/usr/local/bin/auditoria-rapida.sh -> +x"
+fi
 
 # ============================================================
 # RESUMEN

@@ -15,6 +15,27 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 require_root
 init_backup "hardening-paranoico"
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 16
+_pc check_file_exists /etc/sysctl.d/99-paranoid.conf
+_pc check_file_exists /etc/modprobe.d/paranoid-blacklist.conf
+_pc check_file_exists /etc/systemd/coredump.conf.d/disable.conf
+_pc check_file_exists /etc/profile.d/timeout.sh
+_pc true  # S5: restringir su (seguridad PAM, siempre re-evaluar)
+_pc check_file_exists /etc/cron.allow
+_pc check_file_contains /etc/issue "ACCESO NO AUTORIZADO PROHIBIDO"
+_pc check_perm /etc/shadow "600"
+_pc true  # S9: GRUB password (interactivo)
+_pc true  # S10: herramientas de seguridad (multiples installs opcionales)
+_pc true  # S11: firewall paranoico (condicional)
+_pc true  # S12: CUPS restringir (condicional)
+_pc check_file_contains /etc/login.defs "UMASK 027"
+_pc true  # S14: USB storage (opcional con ask)
+_pc check_file_exists /etc/audit/rules.d/99-paranoid.rules
+_pc check_file_contains /etc/fail2ban/jail.local "bantime = 48h"
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║     HARDENING PARANOICO - Linux Multi-Distro              ║"
@@ -27,7 +48,9 @@ log_info "Backups en: $BACKUP_DIR"
 log_section "1. KERNEL HARDENING EXTREMO"
 # ============================================================
 
-if ask "¿Aplicar hardening extremo del kernel?"; then
+if check_file_exists /etc/sysctl.d/99-paranoid.conf; then
+    log_already "Hardening extremo del kernel"
+elif ask "¿Aplicar hardening extremo del kernel?"; then
     cat > /etc/sysctl.d/99-paranoid.conf << 'EOF'
 # ===========================================
 # KERNEL HARDENING PARANOICO
@@ -108,7 +131,9 @@ echo "  - bluetooth (si no lo usas)"
 echo "  - cramfs, freevxfs, jffs2, hfs, hfsplus, udf (filesystems raros)"
 echo ""
 
-if ask "¿Bloquear módulos peligrosos (NO incluye USB)?"; then
+if check_file_exists /etc/modprobe.d/paranoid-blacklist.conf; then
+    log_already "Módulos peligrosos bloqueados"
+elif ask "¿Bloquear módulos peligrosos (NO incluye USB)?"; then
     cat > /etc/modprobe.d/paranoid-blacklist.conf << 'EOF'
 # Bloquear protocolos de red obsoletos/peligrosos
 install dccp /bin/false
@@ -159,7 +184,9 @@ fi
 log_section "3. DESHABILITAR CORE DUMPS"
 # ============================================================
 
-if ask "¿Deshabilitar core dumps completamente?"; then
+if check_file_exists /etc/systemd/coredump.conf.d/disable.conf; then
+    log_already "Core dumps deshabilitados"
+elif ask "¿Deshabilitar core dumps completamente?"; then
     # limits.conf
     cp /etc/security/limits.conf "$BACKUP_DIR/" 2>/dev/null || true
     log_change "Backup" "/etc/security/limits.conf"
@@ -192,11 +219,12 @@ fi
 log_section "4. TIMEOUTS DE SESIÓN"
 # ============================================================
 
-if ask "¿Configurar timeout automático de sesiones (15 min)?"; then
+if check_file_exists /etc/profile.d/timeout.sh; then
+    log_already "Timeout automático de sesiones"
+elif ask "¿Configurar timeout automático de sesiones (15 min)?"; then
     cat > /etc/profile.d/timeout.sh << 'EOF'
 # Auto-logout después de 15 minutos de inactividad
 TMOUT=900
-readonly TMOUT
 export TMOUT
 EOF
     log_change "Creado" "/etc/profile.d/timeout.sh"
@@ -210,49 +238,21 @@ fi
 log_section "5. RESTRINGIR ACCESO A SU"
 # ============================================================
 
-echo "Limitar 'su' solo a usuarios del grupo wheel"
-if ask "¿Restringir 'su' al grupo wheel?"; then
-    # En algunas distribuciones, /etc/pam.d/su puede no existir
-    # Crear archivo PAM para su si no existe
-    if [[ -f /etc/pam.d/su ]]; then
-        cp /etc/pam.d/su "$BACKUP_DIR/"
-        log_change "Backup" "/etc/pam.d/su"
-        # Habilitar pam_wheel en su existente
-        if grep -q "^#.*pam_wheel.so" /etc/pam.d/su; then
-            sed -i 's/^#\(.*pam_wheel.so.*\)/\1/' /etc/pam.d/su
-            log_change "Modificado" "/etc/pam.d/su"
-        elif ! grep -q "pam_wheel.so" /etc/pam.d/su; then
-            sed -i '1a auth\t\trequired\tpam_wheel.so use_uid' /etc/pam.d/su
-            log_change "Modificado" "/etc/pam.d/su"
-        fi
-    else
-        # Crear /etc/pam.d/su para openSUSE
-        cat > /etc/pam.d/su << 'EOF'
-#%PAM-1.0
-# Restringir su al grupo wheel
-auth     sufficient     pam_rootok.so
-auth     required       pam_wheel.so use_uid
-auth     include        common-auth
-account  include        common-account
-password include        common-password
-session  include        common-session
-session  optional       pam_xauth.so
-EOF
-        log_change "Creado" "/etc/pam.d/su"
-        log_info "Archivo /etc/pam.d/su creado"
-    fi
-
-    log_info "'su' restringido al grupo wheel"
-    log_info "Solo usuarios en grupo wheel pueden usar 'su'"
-else
-    log_skip "Restringir su al grupo wheel"
-fi
+# ── SECCIÓN ELIMINADA: Modificar /etc/pam.d/su ──
+# Motivo: modificar PAM puede causar lockout del sistema.
+# Para restringir 'su' al grupo wheel, configurar manualmente:
+#   Descomentar 'auth required pam_wheel.so use_uid' en /etc/pam.d/su
+log_warn "S5: Restringir 'su' al grupo wheel - OMITIDO (protección PAM)"
+log_warn "  Para aplicar manualmente: descomentar pam_wheel.so en /etc/pam.d/su"
+log_skip "Restringir su al grupo wheel (protección PAM)"
 
 # ============================================================
 log_section "6. RESTRINGIR CRON"
 # ============================================================
 
-if ask "¿Restringir cron solo a root y tu usuario?"; then
+if check_file_exists /etc/cron.allow; then
+    log_already "Restricción de cron"
+elif ask "¿Restringir cron solo a root y tu usuario?"; then
     echo "root" > /etc/cron.allow
     echo "${SUDO_USER:-root}" >> /etc/cron.allow
     log_change "Creado" "/etc/cron.allow"
@@ -277,7 +277,9 @@ fi
 log_section "7. BANNER DE ADVERTENCIA LEGAL"
 # ============================================================
 
-if ask "¿Agregar banner de advertencia legal?"; then
+if check_file_contains /etc/issue "ACCESO NO AUTORIZADO PROHIBIDO"; then
+    log_already "Banner de advertencia legal"
+elif ask "¿Agregar banner de advertencia legal?"; then
     BANNER="
 ╔═══════════════════════════════════════════════════════════════════╗
 ║  SISTEMA PRIVADO - ACCESO NO AUTORIZADO PROHIBIDO                 ║
@@ -312,7 +314,9 @@ fi
 log_section "8. PERMISOS RESTRICTIVOS"
 # ============================================================
 
-if ask "¿Aplicar permisos restrictivos a archivos del sistema?"; then
+if check_perm /etc/shadow "600"; then
+    log_already "Permisos restrictivos a archivos del sistema"
+elif ask "¿Aplicar permisos restrictivos a archivos del sistema?"; then
     # Archivos de configuración críticos
     chmod 600 /etc/shadow 2>/dev/null || true
     log_change "Permisos" "/etc/shadow -> 600"
@@ -346,7 +350,7 @@ if ask "¿Aplicar permisos restrictivos a archivos del sistema?"; then
     log_change "Permisos" "/etc/ssh/ssh_host_*_key -> 600"
 
     # GRUB (si existe)
-    chmod 600 $GRUB_CFG 2>/dev/null || true
+    chmod 600 "$GRUB_CFG" 2>/dev/null || true
     log_change "Permisos" "$GRUB_CFG -> 600"
 
     log_info "Permisos restrictivos aplicados"
@@ -482,7 +486,9 @@ fi
 log_section "13. UMASK RESTRICTIVO"
 # ============================================================
 
-if ask "¿Configurar umask restrictivo (027)?"; then
+if check_file_contains /etc/login.defs "UMASK 027"; then
+    log_already "Umask restrictivo (027)"
+elif ask "¿Configurar umask restrictivo (027)?"; then
     # /etc/profile
     if ! grep -q "umask 027" /etc/profile; then
         echo "umask 027" >> /etc/profile
@@ -523,7 +529,9 @@ log_section "15. AUDITORÍA AVANZADA"
 # ============================================================
 
 if systemctl is-active auditd &>/dev/null; then
-    if ask "¿Configurar reglas de auditoría paranoicas?"; then
+    if check_file_exists /etc/audit/rules.d/99-paranoid.rules; then
+        log_already "Reglas de auditoría paranoicas"
+    elif ask "¿Configurar reglas de auditoría paranoicas?"; then
         cat > /etc/audit/rules.d/99-paranoid.rules << 'EOF'
 # Eliminar reglas anteriores
 -D
@@ -611,7 +619,9 @@ log_section "16. FAIL2BAN AGRESIVO"
 # ============================================================
 
 if command -v fail2ban-client &>/dev/null; then
-    if ask "¿Configurar fail2ban en modo agresivo?"; then
+    if check_file_contains /etc/fail2ban/jail.local "bantime = 48h"; then
+        log_already "Fail2ban en modo agresivo"
+    elif ask "¿Configurar fail2ban en modo agresivo?"; then
         cat > /etc/fail2ban/jail.local << 'EOF'
 [DEFAULT]
 bantime = 24h

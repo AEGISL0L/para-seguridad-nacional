@@ -23,6 +23,20 @@ require_root
 securizar_setup_traps
 init_backup "ldap-ad-security"
 
+# ── Pre-check: detectar secciones ya aplicadas ────────────
+_precheck 10
+_pc 'check_file_exists "/etc/securizar/ldap-environment.conf"'
+_pc 'check_executable "/usr/local/bin/securizar-slapd.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-sssd.sh"'
+_pc 'check_executable "/usr/local/bin/verificar-kerberos.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-freeipa.sh"'
+_pc 'check_executable "/usr/local/bin/securizar-samba.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-acceso-ldap.sh"'
+_pc 'check_executable "/usr/local/bin/monitorizar-directorio.sh"'
+_pc 'check_executable "/usr/local/bin/backup-ldap.sh"'
+_pc 'check_executable "/usr/local/bin/auditar-ldap-seguridad.sh"'
+_precheck_result
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║   MODULO 53 - SEGURIDAD LDAP Y ACTIVE DIRECTORY          ║"
@@ -98,7 +112,9 @@ echo "  - FreeIPA server/client"
 echo "  - Kerberos configurado"
 echo ""
 
-if ask "¿Detectar infraestructura LDAP/AD en este sistema?"; then
+if check_file_exists "/etc/securizar/ldap-environment.conf"; then
+    log_already "Deteccion LDAP/AD (ldap-environment.conf ya existe)"
+elif ask "¿Detectar infraestructura LDAP/AD en este sistema?"; then
 
     log_info "Analizando infraestructura LDAP/AD..."
 
@@ -313,7 +329,9 @@ echo "  - Deshabilitar LDAPv2 (solo LDAPv3)"
 echo "  - Verificar olcLogLevel"
 echo ""
 
-if ask "¿Aplicar hardening de servidor OpenLDAP?"; then
+if check_executable "/usr/local/bin/securizar-slapd.sh"; then
+    log_already "Hardening OpenLDAP (securizar-slapd.sh ya instalado)"
+elif ask "¿Aplicar hardening de servidor OpenLDAP?"; then
 
     if [[ "$HAS_SLAPD" == true ]]; then
         log_info "Procediendo con hardening de slapd..."
@@ -806,7 +824,9 @@ echo "  - Rangos min/max UID/GID"
 echo "  - Hardening Kerberos en SSSD"
 echo ""
 
-if ask "¿Aplicar hardening de cliente LDAP/SSSD?"; then
+if check_executable "/usr/local/bin/securizar-sssd.sh"; then
+    log_already "Hardening LDAP/SSSD (securizar-sssd.sh ya instalado)"
+elif ask "¿Aplicar hardening de cliente LDAP/SSSD?"; then
 
     # ── Hardening de SSSD ────────────────────────────────────
     if [[ "$HAS_SSSD" == true ]] || [[ -f /etc/sssd/sssd.conf ]]; then
@@ -1193,7 +1213,9 @@ echo "  - Permisos de keytab (0600 root:root)"
 echo "  - Verificar ticket encryption"
 echo ""
 
-if ask "¿Aplicar hardening de Kerberos?"; then
+if check_executable "/usr/local/bin/verificar-kerberos.sh"; then
+    log_already "Seguridad Kerberos (verificar-kerberos.sh ya instalado)"
+elif ask "¿Aplicar hardening de Kerberos?"; then
 
     KRB5_CONF="/etc/krb5.conf"
 
@@ -1585,7 +1607,9 @@ echo "  - Seguridad de zonas DNS (si FreeIPA gestiona DNS)"
 echo "  - Perfiles de certificados"
 echo ""
 
-if ask "¿Verificar y fortalecer FreeIPA Server?"; then
+if check_executable "/usr/local/bin/auditar-freeipa.sh"; then
+    log_already "FreeIPA hardening (auditar-freeipa.sh ya instalado)"
+elif ask "¿Verificar y fortalecer FreeIPA Server?"; then
 
     # ── Crear script de auditoria FreeIPA ────────────────────
     cat > /usr/local/bin/auditar-freeipa.sh << 'EOFFREEIPA'
@@ -1948,7 +1972,9 @@ echo "  - Deshabilitar sesiones nulas"
 echo "  - Configuracion registry vs smb.conf"
 echo ""
 
-if ask "¿Aplicar hardening de Samba/Winbind?"; then
+if check_executable "/usr/local/bin/securizar-samba.sh"; then
+    log_already "Samba/Winbind hardening (securizar-samba.sh ya instalado)"
+elif ask "¿Aplicar hardening de Samba/Winbind?"; then
 
     SMB_CONF="/etc/samba/smb.conf"
 
@@ -2328,7 +2354,9 @@ echo "  - Integracion sudo con LDAP/SSSD"
 echo "  - Ordenamiento nsswitch.conf (sss antes de files)"
 echo ""
 
-if ask "¿Configurar control de acceso basado en LDAP?"; then
+if check_executable "/usr/local/bin/auditar-acceso-ldap.sh"; then
+    log_already "Control acceso LDAP (auditar-acceso-ldap.sh ya instalado)"
+elif ask "¿Configurar control de acceso basado en LDAP?"; then
 
     # ── Verificar integracion PAM ────────────────────────────
     log_info "Analizando integracion PAM para LDAP..."
@@ -2676,7 +2704,9 @@ echo "  - Deteccion de lockouts y escalada"
 echo "  - Cambios de grupo y schema"
 echo ""
 
-if ask "¿Configurar monitorizacion de directorio LDAP/AD?"; then
+if check_executable "/usr/local/bin/monitorizar-directorio.sh"; then
+    log_already "Monitorizacion LDAP (monitorizar-directorio.sh ya instalado)"
+elif ask "¿Configurar monitorizacion de directorio LDAP/AD?"; then
 
     # ── Reglas auditd ────────────────────────────────────────
     log_info "Configurando reglas auditd para LDAP/AD..."
@@ -2998,7 +3028,9 @@ echo "  - Script de restauracion"
 echo "  - Cron diario de backup"
 echo ""
 
-if ask "¿Configurar replicacion segura y backups LDAP?"; then
+if check_executable "/usr/local/bin/backup-ldap.sh"; then
+    log_already "Backup LDAP (backup-ldap.sh ya instalado)"
+elif ask "¿Configurar replicacion segura y backups LDAP?"; then
 
     LDAP_BACKUP_DIR="/var/backups/securizar/ldap"
     mkdir -p "$LDAP_BACKUP_DIR"
@@ -3408,7 +3440,9 @@ echo "  - Reporte en /var/log/securizar/"
 echo "  - Cron semanal de auditoria"
 echo ""
 
-if ask "¿Crear sistema de auditoria integral LDAP/AD?"; then
+if check_executable "/usr/local/bin/auditar-ldap-seguridad.sh"; then
+    log_already "Auditoria LDAP (auditar-ldap-seguridad.sh ya instalado)"
+elif ask "¿Crear sistema de auditoria integral LDAP/AD?"; then
 
     cat > /usr/local/bin/auditar-ldap-seguridad.sh << 'EOFAUDITLDAP'
 #!/bin/bash

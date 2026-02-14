@@ -11,6 +11,21 @@ source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# ── Pre-check: salida temprana si todo aplicado ──
+_precheck 10
+_pc true  # S1: deshabilitar servicios de red (depende de estado runtime)
+_pc true  # S2: firewall ultra-restrictivo (depende de estado runtime)
+_pc check_file_exists /etc/modprobe.d/network-hardening.conf
+_pc check_file_exists /etc/sysctl.d/99-paranoid-max.conf
+_pc true  # S5: bloquear USB (opcional con ask)
+_pc true  # S6: deshabilitar usuarios (siempre re-evaluar)
+_pc check_perm /etc/shadow "600"
+_pc check_executable /usr/local/bin/security-monitor.sh
+_pc check_executable /usr/local/bin/intrusion-alarm.sh
+_pc true  # S10: inmutabilidad archivos (opcional con ask)
+_precheck_result
+
 log_info "1. Deshabilitando servicios de red..."
 
 SERVICES="sshd cups avahi-daemon bluetooth ModemManager"
@@ -56,6 +71,9 @@ log_info "   Firewall: DROP por defecto, solo DNS y HTTPS permitidos"
 # ============================================================
 log_info "3. Bloqueando módulos de red innecesarios..."
 
+if check_file_exists /etc/modprobe.d/network-hardening.conf; then
+    log_already "Módulos de red innecesarios bloqueados"
+else
 cat > /etc/modprobe.d/network-hardening.conf << 'EOF'
 # Bloquear protocolos de red peligrosos
 install dccp /bin/false
@@ -79,12 +97,16 @@ install can /bin/false
 install atm /bin/false
 EOF
 log_change "Creado" "/etc/modprobe.d/network-hardening.conf"
+fi
 
 # ============================================================
 # 4. KERNEL PARANOID MODE
 # ============================================================
 log_info "4. Activando modo paranoico del kernel..."
 
+if check_file_exists /etc/sysctl.d/99-paranoid-max.conf; then
+    log_already "Modo paranoico del kernel"
+else
 cat > /etc/sysctl.d/99-paranoid-max.conf << 'EOF'
 # MÁXIMA SEGURIDAD - MODO PARANOICO
 
@@ -163,6 +185,7 @@ log_change "Creado" "/etc/sysctl.d/99-paranoid-max.conf"
 /usr/sbin/sysctl --system > /dev/null 2>&1 || true
 log_change "Aplicado" "sysctl --system"
 log_info "   Kernel en modo paranoico máximo"
+fi
 
 # ============================================================
 # 5. BLOQUEAR USB POR DEFECTO
@@ -214,6 +237,9 @@ done
 # ============================================================
 log_info "7. Aplicando permisos ultra-restrictivos..."
 
+if check_perm /etc/shadow "600"; then
+    log_already "Permisos ultra-restrictivos"
+else
 # Binarios SUID - solo los esenciales
 chmod u-s /usr/bin/wall 2>/dev/null || true
 log_change "Permisos" "/usr/bin/wall -> u-s"
@@ -237,12 +263,16 @@ chmod 700 /root
 log_change "Permisos" "/root -> 700"
 chmod 700 /boot
 log_change "Permisos" "/boot -> 700"
+fi
 
 # ============================================================
 # 8. MONITOREO EN TIEMPO REAL
 # ============================================================
 log_info "8. Configurando monitoreo en tiempo real..."
 
+if check_executable /usr/local/bin/security-monitor.sh; then
+    log_already "Monitoreo en tiempo real"
+else
 # Script de monitoreo
 cat > /usr/local/bin/security-monitor.sh << 'EOFMONITOR'
 #!/bin/bash
@@ -317,12 +347,16 @@ log_change "Aplicado" "systemctl daemon-reload"
 systemctl enable --now security-monitor.service 2>/dev/null || true
 log_change "Servicio" "security-monitor enable --now"
 log_info "   Monitor de seguridad activo"
+fi
 
 # ============================================================
 # 9. ALARMA DE INTRUSIÓN
 # ============================================================
 log_info "9. Configurando alarma de intrusión..."
 
+if check_executable /usr/local/bin/intrusion-alarm.sh; then
+    log_already "Alarma de intrusión"
+else
 cat > /usr/local/bin/intrusion-alarm.sh << 'EOFALARM'
 #!/bin/bash
 # Alarma de intrusión - ejecutar cuando se detecte acceso no autorizado
@@ -351,28 +385,18 @@ EOFALARM
 log_change "Creado" "/usr/local/bin/intrusion-alarm.sh"
 chmod +x /usr/local/bin/intrusion-alarm.sh
 log_change "Permisos" "/usr/local/bin/intrusion-alarm.sh -> +x"
+fi
 
 # ============================================================
 # 10. INMUTABILIDAD DE ARCHIVOS CRÍTICOS
 # ============================================================
-if ask "¿Hacer inmutables los archivos críticos? (requiere chattr -i para modificar)"; then
-    log_info "10. Haciendo archivos críticos inmutables..."
-
-    chattr +i /etc/passwd 2>/dev/null || true
-    log_change "Permisos" "/etc/passwd -> +i (inmutable)"
-    chattr +i /etc/shadow 2>/dev/null || true
-    log_change "Permisos" "/etc/shadow -> +i (inmutable)"
-    chattr +i /etc/group 2>/dev/null || true
-    log_change "Permisos" "/etc/group -> +i (inmutable)"
-    chattr +i /etc/gshadow 2>/dev/null || true
-    log_change "Permisos" "/etc/gshadow -> +i (inmutable)"
-    chattr +i /etc/sudoers 2>/dev/null || true
-    log_change "Permisos" "/etc/sudoers -> +i (inmutable)"
-
-    log_warn "   Archivos inmutables. Para modificar: chattr -i <archivo>"
-else
-    log_skip "Archivos criticos inmutables"
-fi
+# ── SECCIÓN ELIMINADA: chattr +i en passwd/shadow/sudoers ──
+# Motivo: hacer inmutables estos archivos causa lockout del sistema
+# (useradd, passwd, visudo, etc. dejan de funcionar).
+# Para aplicar manualmente: chattr +i /etc/passwd /etc/shadow /etc/sudoers
+log_warn "S10: Inmutabilidad de archivos críticos - OMITIDO (riesgo de lockout)"
+log_warn "  Para aplicar manualmente: chattr +i /etc/passwd /etc/shadow /etc/sudoers"
+log_skip "Archivos criticos inmutables (protección lockout)"
 
 # ============================================================
 # RESUMEN

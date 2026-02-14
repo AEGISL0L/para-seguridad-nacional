@@ -15,13 +15,28 @@
 #   S10 - Auditoria y puntuacion de preparacion forense
 # ============================================================
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
 
 require_root
 securizar_setup_traps
+
+# --- Pre-check: verificar si ya está todo aplicado ---
+_precheck 10
+_pc 'check_executable /usr/local/bin/forense-capturar-ram.sh'
+_pc 'check_executable /usr/local/bin/forense-imagen-disco.sh'
+_pc 'check_executable /usr/local/bin/forense-volatil.sh'
+_pc 'check_executable /usr/local/bin/forense-artefactos.sh'
+_pc 'check_executable /usr/local/bin/forense-timeline.sh'
+_pc 'check_executable /usr/local/bin/forense-yara-scan.sh'
+_pc 'check_executable /usr/local/bin/forense-custodia.sh'
+_pc 'check_executable /usr/local/bin/forense-analizar-logs.sh'
+_pc 'check_executable /usr/local/bin/forense-recopilar-todo.sh'
+_pc 'check_executable /usr/local/bin/auditoria-forense.sh'
+_precheck_result
+
 init_backup "forense-avanzado"
 
 echo ""
@@ -52,7 +67,9 @@ echo "  - Hash SHA-256 automatico del volcado"
 echo "  - Metadatos: timestamp, hostname, kernel version"
 echo ""
 
-if ask "¿Instalar kit de adquisicion de memoria?"; then
+if check_executable /usr/local/bin/forense-capturar-ram.sh; then
+    log_already "Kit de adquisicion de memoria (forense-capturar-ram.sh)"
+elif ask "¿Instalar kit de adquisicion de memoria?"; then
 
     # Crear directorios de evidencia forense
     mkdir -p "${FORENSICS_BASE}/memory"
@@ -273,7 +290,9 @@ echo "  - Guia de bloqueo de escritura"
 echo "  - Indicador de progreso con pv si esta disponible"
 echo ""
 
-if ask "¿Instalar herramienta de imagen de disco forense?"; then
+if check_executable /usr/local/bin/forense-imagen-disco.sh; then
+    log_already "Herramienta de imagen de disco forense (forense-imagen-disco.sh)"
+elif ask "¿Instalar herramienta de imagen de disco forense?"; then
 
     # Instalar dc3dd si esta disponible
     log_info "Instalando herramientas de imagen forense..."
@@ -530,7 +549,9 @@ echo "  - Usuarios conectados, variables de entorno"
 echo "  - Modulos de kernel cargados, servicios activos"
 echo ""
 
-if ask "¿Instalar herramienta de preservacion de datos volatiles?"; then
+if check_executable /usr/local/bin/forense-volatil.sh; then
+    log_already "Herramienta de preservacion de datos volatiles (forense-volatil.sh)"
+elif ask "¿Instalar herramienta de preservacion de datos volatiles?"; then
 
     cat > "${FORENSICS_TOOLS}/forense-volatil.sh" << 'EOFVOL'
 #!/bin/bash
@@ -738,7 +759,9 @@ echo "  - Archivos sospechosos en /dev"
 echo "  - Empaqueta todo en tarball firmado"
 echo ""
 
-if ask "¿Instalar herramienta de recopilacion de artefactos?"; then
+if check_executable /usr/local/bin/forense-artefactos.sh; then
+    log_already "Herramienta de recopilacion de artefactos (forense-artefactos.sh)"
+elif ask "¿Instalar herramienta de recopilacion de artefactos?"; then
 
     cat > "${FORENSICS_TOOLS}/forense-artefactos.sh" << 'EOFART'
 #!/bin/bash
@@ -992,7 +1015,9 @@ echo "  - Salida en formato CSV para analisis"
 echo "  - Soporte de filtrado por rango temporal"
 echo ""
 
-if ask "¿Instalar herramienta de linea temporal forense?"; then
+if check_executable /usr/local/bin/forense-timeline.sh; then
+    log_already "Herramienta de linea temporal forense (forense-timeline.sh)"
+elif ask "¿Instalar herramienta de linea temporal forense?"; then
 
     cat > "${FORENSICS_TOOLS}/forense-timeline.sh" << 'EOFTL'
 #!/bin/bash
@@ -1197,7 +1222,9 @@ echo "  - Script de escaneo: forense-yara-scan.sh"
 echo "  - Analisis estatico: forense-analizar-binario.sh"
 echo ""
 
-if ask "¿Instalar toolkit de analisis de malware?"; then
+if check_executable /usr/local/bin/forense-yara-scan.sh; then
+    log_already "Toolkit de analisis de malware (forense-yara-scan.sh)"
+elif ask "¿Instalar toolkit de analisis de malware?"; then
 
     # Instalar YARA
     log_info "Instalando YARA..."
@@ -1783,7 +1810,9 @@ echo "  - Manifiesto JSON firmado con sha256"
 echo "  - Plantilla reutilizable"
 echo ""
 
-if ask "¿Instalar sistema de cadena de custodia digital?"; then
+if check_executable /usr/local/bin/forense-custodia.sh; then
+    log_already "Sistema de cadena de custodia digital (forense-custodia.sh)"
+elif ask "¿Instalar sistema de cadena de custodia digital?"; then
 
     mkdir -p "${FORENSICS_ETC}"
     mkdir -p "${FORENSICS_BASE}/custody"
@@ -2184,7 +2213,9 @@ echo "  - Intentos fallidos de sudo"
 echo "  - Genera reporte consolidado"
 echo ""
 
-if ask "¿Instalar toolkit de analisis de logs?"; then
+if check_executable /usr/local/bin/forense-analizar-logs.sh; then
+    log_already "Toolkit de analisis de logs (forense-analizar-logs.sh)"
+elif ask "¿Instalar toolkit de analisis de logs?"; then
 
     cat > "${FORENSICS_TOOLS}/forense-analizar-logs.sh" << 'EOFLOGS'
 #!/bin/bash
@@ -2479,7 +2510,9 @@ echo "  8. Cadena de custodia"
 echo "  Un solo comando para preservacion completa de evidencia."
 echo ""
 
-if ask "¿Instalar script maestro de recopilacion forense?"; then
+if check_executable /usr/local/bin/forense-recopilar-todo.sh; then
+    log_already "Script maestro de recopilacion forense (forense-recopilar-todo.sh)"
+elif ask "¿Instalar script maestro de recopilacion forense?"; then
 
     cat > "${FORENSICS_TOOLS}/forense-recopilar-todo.sh" << 'EOFMASTER'
 #!/bin/bash
@@ -2684,7 +2717,9 @@ echo "  - Almacenamiento de evidencia configurado"
 echo "  - Puntuacion: BUENO / MEJORABLE / DEFICIENTE"
 echo ""
 
-if ask "¿Instalar auditoria de preparacion forense?"; then
+if check_executable /usr/local/bin/auditoria-forense.sh; then
+    log_already "Auditoria de preparacion forense (auditoria-forense.sh)"
+elif ask "¿Instalar auditoria de preparacion forense?"; then
 
     cat > "${FORENSICS_TOOLS}/auditoria-forense.sh" << 'EOFAUDIT'
 #!/bin/bash
