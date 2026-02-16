@@ -1090,6 +1090,76 @@ for proto_port in "21:FTP" "23:Telnet" "110:POP3" "143:IMAP"; do
     fi
 done
 
+# Check 13: Spotify Connect broadcast (UDP 57621 - descubrimiento)
+SPOTIFY_COUNT=$(tshark -r "$TEMP_PCAP" -Y "udp.port == 57621" 2>/dev/null | wc -l || echo "0")
+if [[ "$SPOTIFY_COUNT" -gt 0 ]]; then
+    SPOTIFY_SRCS=$(tshark -r "$TEMP_PCAP" -Y "udp.port == 57621" -T fields -e ip.src 2>/dev/null | sort -u | tr '\n' ' ')
+    log_alert "Spotify Connect broadcast: $SPOTIFY_COUNT paquetes desde: $SPOTIFY_SRCS (expone dispositivos en LAN)"
+else
+    log_ok "Sin Spotify Connect broadcasts"
+fi
+
+# Check 14: Google Cast / Chromecast (puertos 8008, 8009, 8443)
+CAST_COUNT=$(tshark -r "$TEMP_PCAP" -Y "tcp.port == 8008 or tcp.port == 8009 or tcp.port == 8443" 2>/dev/null | wc -l || echo "0")
+if [[ "$CAST_COUNT" -gt 0 ]]; then
+    CAST_SRCS=$(tshark -r "$TEMP_PCAP" -Y "tcp.port == 8008 or tcp.port == 8009 or tcp.port == 8443" -T fields -e ip.src 2>/dev/null | sort -u | tr '\n' ' ')
+    log_alert "Google Cast activo: $CAST_COUNT paquetes (dispositivos: $CAST_SRCS). API eureka_info expuesta sin auth en :8008"
+else
+    log_ok "Sin trafico Google Cast"
+fi
+
+# Check 15: SSDP/UPnP broadcast (239.255.255.250 / UDP 1900)
+SSDP_COUNT=$(tshark -r "$TEMP_PCAP" -Y "udp.dstport == 1900 or ip.dst == 239.255.255.250" 2>/dev/null | wc -l || echo "0")
+if [[ "$SSDP_COUNT" -gt 0 ]]; then
+    SSDP_SRCS=$(tshark -r "$TEMP_PCAP" -Y "udp.dstport == 1900" -T fields -e ip.src 2>/dev/null | sort -u | tr '\n' ' ')
+    log_alert "SSDP/UPnP broadcast: $SSDP_COUNT paquetes desde: $SSDP_SRCS (superficie de ataque IoT)"
+else
+    log_ok "Sin SSDP/UPnP broadcasts"
+fi
+
+# Check 16: DHCP device identification (detecta dispositivos por vendor/hostname)
+DHCP_DEVICES=$(tshark -r "$TEMP_PCAP" -Y "dhcp" -T fields -e dhcp.option.hostname -e dhcp.option.vendor_class_id -e eth.src 2>/dev/null | sort -u | grep -v "^$" || true)
+if [[ -n "$DHCP_DEVICES" ]]; then
+    echo -e "  ${YELLOW}[i]${NC} Dispositivos detectados via DHCP:"
+    while IFS=$'\t' read -r hostname vendor mac; do
+        [[ -z "$hostname" && -z "$vendor" ]] && continue
+        local eol_warn=""
+        # Detectar dispositivos EOL por vendor class
+        if echo "$vendor" | grep -qi "android.*[0-8]\." 2>/dev/null; then
+            eol_warn=" [EOL - SIN PARCHES]"
+        elif echo "$vendor" | grep -qi "EMUI.*9\.\|EMUI.*8\.\|EMUI.*[0-7]\." 2>/dev/null; then
+            eol_warn=" [EOL - SIN PARCHES]"
+        fi
+        echo -e "      MAC=$mac Hostname=${hostname:--} Vendor=${vendor:--}${eol_warn}"
+    done <<< "$DHCP_DEVICES"
+fi
+
+# Check 17: MAC randomization detection (LAA bit set = locally administered)
+RANDOM_MACS=$(tshark -r "$TEMP_PCAP" -T fields -e eth.src 2>/dev/null | sort -u | while read -r mac; do
+    [[ -z "$mac" ]] && continue
+    # Bit 1 del primer octeto = locally administered (randomizado)
+    first_octet=$((16#${mac%%:*}))
+    if (( first_octet & 2 )); then
+        echo "$mac"
+    fi
+done | sort -u || true)
+if [[ -n "$RANDOM_MACS" ]]; then
+    mac_count=$(echo "$RANDOM_MACS" | wc -l)
+    echo -e "  ${YELLOW}[i]${NC} MACs randomizadas detectadas ($mac_count): dispositivos ocultan hardware MAC"
+    echo "$RANDOM_MACS" | while read -r rmac; do
+        echo -e "      $rmac (locally administered)"
+    done
+fi
+
+# Check 18: SNMP exposure (UDP 161/162 - info del sistema expuesta)
+SNMP_COUNT=$(tshark -r "$TEMP_PCAP" -Y "snmp" 2>/dev/null | wc -l || echo "0")
+if [[ "$SNMP_COUNT" -gt 0 ]]; then
+    SNMP_SRCS=$(tshark -r "$TEMP_PCAP" -Y "snmp" -T fields -e ip.src 2>/dev/null | sort -u | tr '\n' ' ')
+    log_alert "SNMP expuesto: $SNMP_COUNT paquetes (dispositivos: $SNMP_SRCS). Puede filtrar info del sistema"
+else
+    log_ok "Sin trafico SNMP"
+fi
+
 # Resumen
 echo ""
 echo -e "${CYAN}━━ Resumen ━━${NC}"

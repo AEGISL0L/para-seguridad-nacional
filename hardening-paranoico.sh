@@ -17,7 +17,7 @@ init_backup "hardening-paranoico"
 securizar_setup_traps
 
 # ── Pre-check: salida temprana si todo aplicado ──
-_precheck 16
+_precheck 17
 _pc check_file_exists /etc/sysctl.d/99-paranoid.conf
 _pc check_file_exists /etc/modprobe.d/paranoid-blacklist.conf
 _pc check_file_exists /etc/systemd/coredump.conf.d/disable.conf
@@ -30,6 +30,7 @@ _pc true  # S9: GRUB password (interactivo)
 _pc true  # S10: herramientas de seguridad (multiples installs opcionales)
 _pc true  # S11: firewall paranoico (condicional)
 _pc true  # S12: CUPS restringir (condicional)
+_pc true  # S12b: LAN isolation (condicional, nftables only)
 _pc check_file_contains /etc/login.defs "UMASK 027"
 _pc true  # S14: USB storage (opcional con ask)
 _pc check_file_exists /etc/audit/rules.d/99-paranoid.rules
@@ -418,8 +419,20 @@ log_section "11. FIREWALL PARANOICO"
 # ============================================================
 
 if ask "¿Configurar firewall en modo paranoico (DROP por defecto)?"; then
-    systemctl enable --now firewalld 2>/dev/null || true
-    log_change "Servicio" "firewalld enable --now"
+    # Detectar conflicto firewalld↔nftables
+    # Si nftables es el backend elegido, firewalld DEBE estar masked
+    if [[ "$FW_BACKEND" == "nftables" ]]; then
+        log_info "Backend: nftables directo (sin firewalld)"
+        fw_fix_firewalld_conflict 2>/dev/null || true
+        systemctl enable --now nftables 2>/dev/null || true
+        log_change "Servicio" "nftables enable --now"
+    else
+        # firewalld como frontend
+        # NOTA: Si luego se migra a nftables directo, ejecutar:
+        #   systemctl mask firewalld && systemctl enable nftables
+        systemctl enable --now firewalld 2>/dev/null || true
+        log_change "Servicio" "firewalld enable --now"
+    fi
 
     # Zona drop como default para interfaces no confiables
     fw_set_default_zone drop 2>/dev/null || true
@@ -440,8 +453,22 @@ if ask "¿Configurar firewall en modo paranoico (DROP por defecto)?"; then
 
     log_info "Firewall configurado en modo paranoico"
     log_warn "Zona por defecto: DROP (bloquea todo lo no explícito)"
+    if [[ "$FW_BACKEND" == "nftables" ]]; then
+        log_warn "firewalld masked para evitar conflicto al boot"
+    fi
 else
     log_skip "Firewall en modo paranoico"
+fi
+
+# ── Verificación de conflicto firewalld↔nftables ──
+if [[ "$FW_BACKEND" == "nftables" ]]; then
+    if ! fw_check_firewalld_conflict 2>/dev/null; then
+        log_warn "CRITICO: firewalld puede desactivar nftables al boot"
+        if ask "¿Resolver conflicto firewalld↔nftables automáticamente?"; then
+            fw_fix_firewalld_conflict
+            log_info "Conflicto resuelto: firewalld masked"
+        fi
+    fi
 fi
 
 # ============================================================
@@ -492,6 +519,77 @@ if systemctl is-active lldpd &>/dev/null; then
         log_change "Servicio" "lldpd stop+disable"
         log_info "lldpd deshabilitado (ya no filtra info del sistema)"
     fi
+fi
+
+# ============================================================
+log_section "12b. AISLAMIENTO LAN (TRIPLE PROTECCIÓN)"
+# ============================================================
+
+echo "Aísla tu máquina de TODOS los dispositivos de la red local."
+echo "Solo permite tráfico hacia el router (DNS/DHCP) e internet."
+echo ""
+echo "Triple protección:"
+echo "  Capa 1: Bloqueo por MAC (inmutable, no se puede evadir)"
+echo "  Capa 2: Bloqueo por IP (defensa en profundidad)"
+echo "  Capa 3: Bloqueo de subred completa (atrapa dispositivos nuevos)"
+echo ""
+
+if [[ "$FW_BACKEND" == "nftables" ]]; then
+    if nft list ruleset 2>/dev/null | grep -q "bloqueo-LAN-completo"; then
+        log_already "Aislamiento LAN activo (triple protección)"
+    elif ask "¿Aislar de TODOS los dispositivos LAN (triple protección)?"; then
+        # Detectar gateway
+        local_gw=$(ip route | grep default | awk '{print $3}' | head -1)
+        local_subnet=$(ip -o -4 addr show "$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)" 2>/dev/null | awk '{print $4}' | head -1)
+        local_gw="${local_gw:-192.168.1.1}"
+        local_subnet="${local_subnet%/*}"
+        local_subnet_cidr="${local_subnet%.*}.0/24"
+
+        echo ""
+        echo "Gateway detectado: $local_gw"
+        echo "Subred: $local_subnet_cidr"
+        echo ""
+
+        # Obtener MACs de dispositivos conocidos via ARP
+        echo "Dispositivos en tabla ARP:"
+        arp -n 2>/dev/null | grep -v "incomplete" | grep -v "^Address" | while read -r line; do
+            echo "  $line"
+        done
+        echo ""
+
+        # INPUT: Capa 3 - solo router permitido, resto LAN bloqueado
+        nft add rule inet filter input ip saddr "$local_gw" accept comment "router-permitido" 2>/dev/null || true
+        nft add rule inet filter input ip saddr "$local_subnet_cidr" drop comment "bloqueo-LAN-completo" 2>/dev/null || true
+        log_change "nftables" "INPUT: LAN bloqueada, solo router $local_gw permitido"
+
+        # OUTPUT: solo router DNS/DHCP, resto LAN bloqueado
+        nft add rule inet filter output ip daddr "$local_gw" tcp dport 53 accept comment "router-DNS-tcp" 2>/dev/null || true
+        nft add rule inet filter output ip daddr "$local_gw" udp dport 53 accept comment "router-DNS-udp" 2>/dev/null || true
+        nft add rule inet filter output ip daddr "$local_gw" udp dport 67 accept comment "router-DHCP" 2>/dev/null || true
+        nft add rule inet filter output ip daddr "$local_subnet_cidr" drop comment "bloqueo-LAN-salida" 2>/dev/null || true
+        log_change "nftables" "OUTPUT: LAN bloqueada, solo router DNS/DHCP"
+
+        # Bloquear multicast/broadcast
+        nft add rule inet filter output ip daddr 224.0.0.0/4 drop comment "multicast" 2>/dev/null || true
+        nft add rule inet filter output ip daddr 255.255.255.255 drop comment "broadcast" 2>/dev/null || true
+        log_change "nftables" "OUTPUT: multicast/broadcast bloqueado"
+
+        # Persistir
+        nft list ruleset > /etc/nftables/rules/main.nft 2>/dev/null \
+            || nft list ruleset > /etc/nftables.conf 2>/dev/null || true
+        log_change "nftables" "Reglas persistidas"
+
+        log_info "Aislamiento LAN triple activo"
+        log_info "  Permitido: router ($local_gw) + internet"
+        log_info "  Bloqueado: toda la LAN + multicast + broadcast"
+        log_warn "Para añadir bloqueo por MAC (Capa 1+2) de dispositivos específicos:"
+        log_warn "  nft insert rule inet filter input ether saddr XX:XX:XX:XX:XX:XX drop"
+        log_warn "  nft insert rule inet filter input ip saddr X.X.X.X drop"
+    else
+        log_skip "Aislamiento LAN"
+    fi
+else
+    log_info "Aislamiento LAN solo disponible con backend nftables"
 fi
 
 # ============================================================

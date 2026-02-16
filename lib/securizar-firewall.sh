@@ -32,6 +32,60 @@ fi
 
 export FW_BACKEND
 
+# ── Deteccion de conflicto firewalld↔nftables ─────────────
+# firewalld usa nftables como backend pero Conflicts=nftables.service
+# impide que ambos estén activos. Si el usuario elige nftables directo,
+# firewalld debe estar masked para evitar que lo desactive al iniciar.
+fw_check_firewalld_conflict() {
+    if [[ "$FW_BACKEND" == "nftables" ]]; then
+        if systemctl is-enabled firewalld &>/dev/null 2>&1; then
+            local state
+            state=$(systemctl show firewalld -p LoadState --value 2>/dev/null || echo "unknown")
+            if [[ "$state" != "masked" ]]; then
+                echo "CRITICO: firewalld está habilitado y tiene Conflicts=nftables.service" >&2
+                echo "  Esto causa que nftables NO arranque al boot." >&2
+                echo "  Solución: systemctl mask firewalld" >&2
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
+# ── fw_fix_firewalld_conflict ──────────────────────────────
+# Resuelve el conflicto firewalld↔nftables automáticamente
+fw_fix_firewalld_conflict() {
+    if [[ "$FW_BACKEND" != "nftables" ]]; then
+        return 0
+    fi
+
+    local needs_fix=0
+    if systemctl is-active firewalld &>/dev/null 2>&1; then
+        systemctl stop firewalld 2>/dev/null || true
+        needs_fix=1
+    fi
+
+    local state
+    state=$(systemctl show firewalld -p LoadState --value 2>/dev/null || echo "not-found")
+    if [[ "$state" != "masked" && "$state" != "not-found" ]]; then
+        systemctl disable firewalld 2>/dev/null || true
+        systemctl mask firewalld 2>/dev/null || true
+        needs_fix=1
+    fi
+
+    if [[ $needs_fix -eq 1 ]]; then
+        systemctl daemon-reload 2>/dev/null || true
+        echo "INFO: firewalld masked para evitar conflicto con nftables" >&2
+        if type log_change &>/dev/null; then
+            log_change "Firewall" "firewalld masked (conflicto con nftables)"
+        fi
+    fi
+
+    # Asegurar que nftables arranca
+    systemctl enable nftables 2>/dev/null || true
+    return 0
+}
+
 # ── fw_is_active ────────────────────────────────────────────
 fw_is_active() {
     case "$FW_BACKEND" in
@@ -386,10 +440,18 @@ fw_reload() {
     case "$FW_BACKEND" in
         firewalld) firewall-cmd --reload 2>/dev/null || true ;;
         ufw)       ufw reload 2>/dev/null || true ;;
-        nftables)  systemctl reload nftables 2>/dev/null \
-                       || /usr/sbin/nft -f /etc/nftables/rules/main.nft 2>/dev/null \
-                       || /usr/sbin/nft -f /etc/nftables.conf 2>/dev/null \
-                       || true ;;
+        nftables)
+            # Verificar conflicto firewalld antes de reload
+            fw_check_firewalld_conflict 2>/dev/null || true
+            # Intentar reload del servicio; si falla, cargar ruleset directo
+            # openSUSE: /etc/nftables/rules/main.nft
+            # Debian/Ubuntu: /etc/nftables.conf
+            systemctl reload nftables 2>/dev/null \
+                || systemctl restart nftables 2>/dev/null \
+                || /usr/sbin/nft -f /etc/nftables/rules/main.nft 2>/dev/null \
+                || /usr/sbin/nft -f /etc/nftables.conf 2>/dev/null \
+                || true
+            ;;
         iptables)  true ;;  # iptables no tiene reload
     esac
     log_change "Firewall" "reglas recargadas"

@@ -437,14 +437,14 @@ echo ""
 OUTFILE="${SCAN_DIR}/discovery-${TIMESTAMP}"
 
 # Fase 1: Descubrimiento ARP (L2 - solo red local)
-echo -e "${CYAN}[1/5] Descubrimiento ARP (capa 2)...${NC}"
+echo -e "${CYAN}[1/8] Descubrimiento ARP (capa 2)...${NC}"
 if command -v arp-scan &>/dev/null; then
     arp-scan --localnet --interface="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)" 2>/dev/null | tee "${OUTFILE}-arp.txt" || true
     echo ""
 fi
 
 # Fase 2: Descubrimiento nmap (multi-tecnica)
-echo -e "${CYAN}[2/5] Descubrimiento de hosts activos (nmap)...${NC}"
+echo -e "${CYAN}[2/8] Descubrimiento de hosts activos (nmap)...${NC}"
 if ! command -v nmap &>/dev/null; then
     echo -e "${RED}nmap no instalado. Ejecute primero S1 del modulo.${NC}"
     exit 1
@@ -471,24 +471,103 @@ echo ""
 
 # Fase 3: Fingerprinting de OS (solo en modo full)
 if [[ "$MODE" == "--full" ]] && [[ $TOTAL_HOSTS -gt 0 ]] && [[ $TOTAL_HOSTS -le 256 ]]; then
-    echo -e "${CYAN}[3/5] Fingerprinting de sistemas operativos...${NC}"
+    echo -e "${CYAN}[3/8] Fingerprinting de sistemas operativos...${NC}"
     nmap -O --osscan-guess -T3 -iL "$LIVE_HOSTS" -oA "${OUTFILE}-os" 2>/dev/null || true
     echo ""
 else
-    echo -e "${YELLOW}[3/5] Fingerprinting de OS omitido (modo: $MODE, hosts: $TOTAL_HOSTS)${NC}"
+    echo -e "${YELLOW}[3/8] Fingerprinting de OS omitido (modo: $MODE, hosts: $TOTAL_HOSTS)${NC}"
 fi
 
 # Fase 4: NetBIOS/SMB
-echo -e "${CYAN}[4/5] Escaneo NetBIOS/SMB...${NC}"
+echo -e "${CYAN}[4/8] Escaneo NetBIOS/SMB...${NC}"
 if command -v nbtscan &>/dev/null && [[ $TOTAL_HOSTS -gt 0 ]]; then
     nbtscan -r "$SUBNET" 2>/dev/null | tee "${OUTFILE}-netbios.txt" || true
     echo ""
 else
-    echo -e "${YELLOW}[4/5] nbtscan no disponible o sin hosts${NC}"
+    echo -e "${YELLOW}[4/8] nbtscan no disponible o sin hosts${NC}"
 fi
 
-# Fase 5: Inventario consolidado con MAC vendor
-echo -e "${CYAN}[5/5] Generando inventario consolidado...${NC}"
+# Fase 5: Google Cast / Chromecast device identification
+echo -e "${CYAN}[5/8] Detectando dispositivos Google Cast (eureka_info)...${NC}"
+CAST_FILE="${OUTFILE}-cast.txt"
+> "$CAST_FILE"
+if [[ $TOTAL_HOSTS -gt 0 ]] && command -v curl &>/dev/null; then
+    while IFS= read -r ip; do
+        # Google Cast expone API sin auth en puerto 8008
+        cast_info=$(curl -s --connect-timeout 2 --max-time 3 "http://${ip}:8008/setup/eureka_info" 2>/dev/null || true)
+        if [[ -n "$cast_info" ]] && echo "$cast_info" | grep -q "cast_build_revision" 2>/dev/null; then
+            cast_name=$(echo "$cast_info" | grep -oP '"name"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"name"\s*:\s*"\([^"]*\)".*/\1/')
+            cast_build=$(echo "$cast_info" | grep -oP '"cast_build_revision"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
+            echo -e "  ${RED}[!]${NC} Google Cast: $ip - ${cast_name:-unknown} (build: ${cast_build:-?})"
+            echo -e "      ${YELLOW}API eureka_info expuesta sin autenticación${NC}"
+            echo "$ip | ${cast_name:-unknown} | ${cast_build:-?}" >> "$CAST_FILE"
+        fi
+    done < "$LIVE_HOSTS"
+    [[ ! -s "$CAST_FILE" ]] && echo -e "  ${GREEN}[+]${NC} Sin dispositivos Google Cast detectados"
+else
+    echo -e "  ${YELLOW}[-]${NC} curl no disponible o sin hosts"
+fi
+echo ""
+
+# Fase 6: Deteccion de dispositivos EOL (End of Life)
+echo -e "${CYAN}[6/8] Detectando dispositivos EOL/vulnerables...${NC}"
+EOL_FILE="${OUTFILE}-eol.txt"
+> "$EOL_FILE"
+if [[ -f "${OUTFILE}-hosts.xml" ]]; then
+    while IFS= read -r ip; do
+        vendor=$(grep -A5 "addr=\"$ip\"" "${OUTFILE}-hosts.xml" 2>/dev/null | grep 'addrtype="mac"' | sed 's/.*vendor="\([^"]*\)".*/\1/' | head -1)
+        os_guess=""
+        [[ -f "${OUTFILE}-os.xml" ]] && os_guess=$(grep -A20 "addr=\"$ip\"" "${OUTFILE}-os.xml" 2>/dev/null | grep 'osmatch name' | head -1 | sed 's/.*name="\([^"]*\)".*/\1/')
+        eol_reason=""
+        # Detectar Android <= 12 como posible EOL
+        if echo "$os_guess" | grep -qi "android" 2>/dev/null; then
+            android_ver=$(echo "$os_guess" | grep -oP 'Android \K[0-9]+' | head -1)
+            if [[ -n "$android_ver" && "$android_ver" -le 11 ]]; then
+                eol_reason="Android $android_ver (EOL, sin parches de seguridad)"
+            fi
+        fi
+        # FreeBSD 11 = PS5 con Orbis OS (generalmente aislado)
+        if echo "$os_guess" | grep -qi "FreeBSD 11" 2>/dev/null; then
+            if echo "$vendor" | grep -qi "sony\|playstation" 2>/dev/null || echo "$vendor" | grep -qi "^$" 2>/dev/null; then
+                eol_reason="Sony PS5 (Orbis OS / FreeBSD 11) - verificar aislamiento"
+            fi
+        fi
+        # Huawei EMUI antiguo
+        if echo "$vendor" | grep -qi "huawei" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }Huawei - verificar version EMUI (EOL si < 12)"
+        fi
+        # Earda Technologies = módulo WiFi en dispositivos IoT (Mi TV Stick etc)
+        if echo "$vendor" | grep -qi "earda" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }Earda Technologies (módulo WiFi IoT) - verificar dispositivo contenedor"
+        fi
+        if [[ -n "$eol_reason" ]]; then
+            echo -e "  ${RED}[!]${NC} $ip: $eol_reason"
+            echo "$ip | $eol_reason" >> "$EOL_FILE"
+        fi
+    done < "$LIVE_HOSTS"
+    [[ ! -s "$EOL_FILE" ]] && echo -e "  ${GREEN}[+]${NC} Sin dispositivos EOL detectados"
+fi
+echo ""
+
+# Fase 7: Recomendaciones de aislamiento LAN
+echo -e "${CYAN}[7/8] Evaluando necesidad de aislamiento LAN...${NC}"
+VULN_COUNT=0
+[[ -s "$CAST_FILE" ]] && VULN_COUNT=$((VULN_COUNT + $(wc -l < "$CAST_FILE")))
+[[ -s "$EOL_FILE" ]] && VULN_COUNT=$((VULN_COUNT + $(wc -l < "$EOL_FILE")))
+if [[ $VULN_COUNT -gt 0 ]]; then
+    echo -e "  ${RED}[!]${NC} $VULN_COUNT dispositivos vulnerables/expuestos detectados"
+    echo -e "  ${YELLOW}RECOMENDACIÓN: Aplicar triple aislamiento LAN (MAC + IP + Subnet)${NC}"
+    echo -e "  ${YELLOW}  Capa 1: Bloqueo por MAC (inmutable, no evitable)${NC}"
+    echo -e "  ${YELLOW}  Capa 2: Bloqueo por IP (defensa en profundidad)${NC}"
+    echo -e "  ${YELLOW}  Capa 3: Bloqueo de subred completa (atrapa nuevos dispositivos)${NC}"
+    echo -e "  ${YELLOW}  Usar: nftables con reglas en input + output${NC}"
+else
+    echo -e "  ${GREEN}[+]${NC} Red limpia, aislamiento opcional"
+fi
+echo ""
+
+# Fase 8: Inventario consolidado con MAC vendor
+echo -e "${CYAN}[8/8] Generando inventario consolidado...${NC}"
 {
     echo "# Inventario de Red - $SUBNET - $(date '+%Y-%m-%d %H:%M:%S')"
     echo "# Modo: $MODE | Hosts activos: $TOTAL_HOSTS"
