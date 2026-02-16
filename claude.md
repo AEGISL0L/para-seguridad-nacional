@@ -117,7 +117,7 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 41. `logging-centralizado.sh` - rsyslog TLS, SIEM, correlación, forense
 44. `forense-avanzado.sh` - Memoria, disco, timeline, custodia
 64. `auditoria-red-wireshark.sh` - Wireshark, tshark, capturas, anomalías
-65. `auditoria-red-infraestructura.sh` - nmap, TLS/SSL, SNMP, baseline, drift
+65. `auditoria-red-infraestructura.sh` - Provisionador: instala 22 scripts de auditoría de red en `/usr/local/bin/auditoria-red-*.sh` (discovery, puertos, TLS/SSL, SNMP, config, inventario, baseline/drift, reporte global con scoring 0-100)
 68. `respuesta-incidentes.sh` - Forense, custodia, IOCs, escalación, hunting, métricas
 69. `edr-osquery.sh` - Osquery, Wazuh, threat queries, fleet, baseline
 70. `gestion-vulnerabilidades.sh` - Trivy, grype, SCAP, CVSS/EPSS, drift, madurez
@@ -247,6 +247,27 @@ El proyecto cubre las 14 tácticas del framework MITRE ATT&CK enterprise:
 - `/usr/local/bin/detectar-tool-transfer.sh` - T1105 tool transfer (cron diario)
 - `/usr/local/bin/detectar-c2-completo.sh` - TA0011 detección C2 consolidada
 
+### Herramientas de auditoría de infraestructura de red (módulo 65)
+- `/usr/local/bin/auditoria-red-programada.sh` - Orquestador principal (entry point): ejecuta auditoría completa/trimestral/mensual/semanal/diaria en cascada
+- `/usr/local/bin/auditoria-red-descubrimiento.sh` - Discovery de hosts en la red local (arp-scan, nbtscan, nmap)
+- `/usr/local/bin/auditoria-red-puertos.sh` - Escaneo de puertos y servicios
+- `/usr/local/bin/auditoria-red-tls.sh` - Auditoría TLS/SSL con testssl.sh (batch desde tls-endpoints.txt)
+- `/usr/local/bin/auditoria-red-snmp.sh` - Auditoría SNMP (community strings, configuración)
+- `/usr/local/bin/auditoria-red-config.sh` - Auditoría configuración de red (interfaces, rutas, ARP, sysctl, DNS, firewall, conexiones) con scoring 0-100
+- `/usr/local/bin/auditoria-red-inventario.sh` - Inventario de servicios de red con detección de versiones (nmap)
+- `/usr/local/bin/auditoria-red-baseline.sh` - Baseline y detección de drift (--capture / --compare)
+- `/usr/local/bin/auditoria-red-reporte-global.sh` - Reporte consolidado con scoring (herramientas, firewall, sysctl, puertos, baseline)
+- `/usr/local/bin/auditoria-red-analisis.sh` - Análisis de tráfico de red
+- `/usr/local/bin/auditoria-red-anomalias.sh` - Detección de anomalías de red
+- `/usr/local/bin/auditoria-red-captura.sh` - Captura de tráfico (tshark)
+- `/usr/local/bin/auditoria-red-topologia.sh` - Topología de red (lldpctl, ethtool)
+- `/usr/local/bin/auditoria-red-csv.sh` - Exportación CSV de resultados
+- `/usr/local/bin/auditoria-red-limpieza.sh` - Limpieza de datos antiguos
+- `/usr/local/bin/auditoria-red-rotacion.sh` - Rotación de reportes y logs
+- `/usr/local/bin/auditoria-red-listar.sh` - Listar auditorías realizadas
+- `/etc/securizar/auditoria-red/` - Políticas y configuración (puertos-autorizados.conf, tls-endpoints.txt, servicios-aprobados.conf)
+- `/var/lib/securizar/auditoria-red/{baseline,scans,reportes}/` - Datos de auditoría
+
 ### Herramientas de respuesta a incidentes
 - `/usr/local/bin/ir-recolectar-forense.sh` - Recolección forense de 15 categorías de datos volátiles con cadena de custodia
 - `/usr/local/bin/ir-responder.sh` - Dispatcher de playbooks de contención
@@ -305,6 +326,130 @@ El proyecto cubre las 14 tácticas del framework MITRE ATT&CK enterprise:
 - `/etc/audit/rules.d/66-exfiltration.rules` - T1041/T1048/T1567/T1052 exfiltración
 - `/etc/audit/rules.d/67-command-control.rules` - T1105/T1090/T1572 comando y control
 
+### Hardening sysctl de red aplicado (`/etc/sysctl.d/99-securizar.conf`)
+Parámetros persistidos (auditoría de red 2026-02-16, score 100/100):
+- `net.ipv4.conf.all.log_martians = 1` - Log paquetes con IPs imposibles (anti-spoofing)
+- `net.ipv6.conf.all.accept_ra = 0` - Rechazar IPv6 Router Advertisements (anti-MITM)
+- `net.ipv6.conf.default.accept_ra = 0` - Rechazar IPv6 RA en interfaces nuevas (anti-RA spoofing)
+- `net.ipv4.conf.all.arp_ignore = 1` - Solo responder ARP en interfaz correcta (anti-ARP spoofing)
+- `net.ipv4.conf.all.arp_announce = 2` - Usar mejor dirección local para ARP (anti-cache poisoning)
+
+Parámetros ya correctos en el sistema (no requirieron cambio):
+- `net.ipv4.conf.all.accept_redirects = 0`, `net.ipv4.ip_forward = 0`, `net.ipv4.conf.all.rp_filter = 1`
+- `net.ipv4.conf.all.accept_source_route = 0`, `net.ipv4.tcp_syncookies = 1`
+- `net.ipv4.icmp_ignore_bogus_error_responses = 1`, `net.ipv4.icmp_echo_ignore_broadcasts = 1`
+- `net.ipv4.conf.all.send_redirects = 0`, `net.ipv4.conf.all.arp_accept = 0`
+- `net.ipv6.conf.all.accept_source_route = 0`, `net.ipv6.conf.all.accept_redirects = 0`
+
+### Hardening manual aplicado (2026-02-16)
+
+#### Servicios desactivados y enmascarados
+- **Avahi** (mDNS, puerto 5353) — `systemctl mask avahi-daemon.service avahi-daemon.socket` — anti-mDNS poisoning
+- **Samba/NetBIOS** — `systemctl mask smb.service nmb.service winbind.service` — anti-SMB relay, NBNS poisoning
+- **UPnP** — `systemctl mask miniupnpd.service` — anti-port mapping remoto, CallStranger
+
+#### Puertos bloqueados por firewall (firewalld direct rules)
+| Protocolo | Puertos | Dirección | Propósito |
+|-----------|---------|-----------|-----------|
+| mDNS | 5353/udp | INPUT | Anti-mDNS poisoning (avahi) |
+| NetBIOS | 135,137,138,139,445 tcp+udp | INPUT+OUTPUT | Anti-SMB relay, EternalBlue |
+| UPnP/SSDP | 1900/udp, 5000/tcp, 5351/udp | INPUT+OUTPUT | Anti-UPnP exploits |
+| Multicast SSDP | 239.255.255.250 | INPUT+OUTPUT | Anti-SSDP amplificación |
+| HTTP plano | 80/tcp, 8080/tcp | OUTPUT | Forzar HTTPS |
+| LLMNR | 5355/udp | INPUT+OUTPUT (ipv4+ipv6) | Anti-LLMNR poisoning |
+| IGMP/Multicast | igmp + 224.0.0.0/4 | INPUT+OUTPUT | Anti-multicast attacks |
+| ICMPv6 RA | router-advertisement, router-solicitation | INPUT (ipv6) | Anti-rogue router IPv6 |
+| DHCP rogue | 67→68/udp de IPs != gateway | INPUT | Solo aceptar DHCP del router real |
+
+#### HTTPS forzado a nivel de sistema
+- `wget`: `https_only = on` en `/etc/wgetrc`
+- `curl`: alias `curl --proto =https` en `/etc/profile.d/force-https.sh`
+- `git`: `url."https://".insteadOf "http://"` (global)
+- `zypper`: repos convertidos de http a https en `/etc/zypp/repos.d/`
+
+#### DNS cifrado (DNS-over-TLS)
+- Servidor: Quad9 (`9.9.9.9#dns.quad9.net`, `149.112.112.112#dns.quad9.net`)
+- `DNSOverTLS=yes`, `DNSSEC=yes` en `/etc/systemd/resolved.conf.d/force-dot.conf`
+- LLMNR y MulticastDNS desactivados en `/etc/systemd/resolved.conf.d/no-llmnr.conf`
+
+#### ARP estático contra spoofing
+- MAC del gateway fijada permanentemente: `ip neigh replace <gateway> lladdr <mac> nud permanent`
+- Servicio persistente: `/etc/systemd/system/static-arp.service` (oneshot, After=network-online.target)
+
+#### Sysctl adicionales (`/etc/sysctl.d/99-anti-router.conf` y `99-anti-router-extra.conf`)
+**99-anti-router.conf:**
+- `net.ipv4.conf.all.accept_redirects=0` — Anti-ICMP redirect hijacking
+- `net.ipv4.conf.default.accept_redirects=0`
+- `net.ipv6.conf.all.accept_redirects=0`
+- `net.ipv4.conf.all.send_redirects=0`
+- `net.ipv4.conf.all.secure_redirects=0`
+- `net.ipv4.conf.all.accept_source_route=0` — Anti-source routing spoofing
+- `net.ipv6.conf.all.accept_source_route=0`
+- `net.ipv4.conf.all.rp_filter=1` — Validación ruta inversa (anti-spoofing)
+- `net.ipv4.icmp_echo_ignore_broadcasts=1` — Anti-smurf
+- `net.ipv4.tcp_syncookies=1` — Anti-SYN flood
+
+**99-anti-router-extra.conf:**
+- `net.ipv6.conf.all.accept_ra=0` — Rechazar Router Advertisements IPv6
+- `net.ipv6.conf.default.accept_ra=0`
+- `net.ipv6.conf.all.router_solicitations=0`
+- `net.ipv6.conf.all.accept_ra_defrtr=0`
+- `net.ipv6.conf.all.accept_ra_pinfo=0`
+- `net.ipv4.tcp_timestamps=0` — Anti-fingerprinting TCP
+- `net.ipv4.tcp_syn_retries=3` — Limitar reintentos SYN
+- `net.ipv4.tcp_synack_retries=2`
+- `net.ipv4.tcp_fin_timeout=15` — Cerrar conexiones huérfanas rápido
+- `net.ipv4.tcp_keepalive_time=600`
+- `net.ipv4.tcp_keepalive_intvl=30`
+- `net.ipv4.tcp_keepalive_probes=3`
+- `net.ipv4.conf.all.log_martians=1` — Log paquetes spoofing
+
+#### Hardening TLS — Protección contra cifrado débil del router (2026-02-16)
+
+**OpenSSL global** (`/etc/ssl/openssl.cnf`):
+- `MinProtocol = TLSv1.2` — TLS 1.0 y 1.1 rechazados (verificado)
+- `CipherString = ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:!aNULL:!MD5:!DSS:!RC4:!3DES:!DES:!SEED:!CAMELLIA:!IDEA:!eNULL:!EXPORT:!SHA1`
+- `Options = NoSSLv2,NoSSLv3,NoTLSv1,NoTLSv1.1`
+
+**NSS (Firefox/Thunderbird)** (`/etc/crypto-policies/local.d/nss-strong.config`):
+- Solo TLS 1.2+, sin SHA1, MD5, RC4, 3DES, DES, SEED, CAMELLIA, IDEA
+
+**Panel web del router bloqueado por firewall:**
+- OUTPUT → router:80 (HTTP) — DROP
+- OUTPUT → router:443 (TLS vulnerable) — DROP
+- OUTPUT → router:139,445 (SMB) — DROP
+
+**curl** (`/etc/curlrc`): `--tlsv1.2`, cifrados AEAD, `--proto =https`
+
+**wget** (`/etc/wgetrc`): `secure_protocol = TLSv1_2`, `check_certificate = on`
+
+**SSH cliente** (`/etc/ssh/ssh_config.d/strong-crypto.conf`):
+- KexAlgorithms: curve25519-sha256, diffie-hellman-group16/18-sha512
+- Ciphers: chacha20-poly1305, aes256-gcm, aes128-gcm
+- MACs: hmac-sha2-512/256-etm
+- HostKeyAlgorithms: ssh-ed25519, rsa-sha2-512/256
+
+**Auditoría TLS** (`/etc/audit/rules.d/68-tls-protection.rules`):
+- Monitoriza cambios en `/etc/ssl/certs/`, `/etc/pki/tls/`, `/usr/share/ca-certificates/`
+- Monitoriza cambios en `/etc/ssl/openssl.cnf`, `/etc/ssh/ssh_config`
+
+#### Entropía maximizada (2026-02-16)
+- **Kernel CRNG**: pool 256/256 (100%) — Linux 5.18+ fija el pool en 256 bits
+- **haveged**: activo (`systemctl enable --now`), pool 4096, `/etc/default/haveged`
+- **jitterentropy**: built-in en kernel (no módulo)
+- **rng-tools**: enabled, alimenta pool al arranque y sale (no hardware RNG persistente)
+- **sysctl** (`/etc/sysctl.d/99-max-entropy.conf`): `read_wakeup_threshold=2048`, `write_wakeup_threshold=4096`, `urandom_min_reseed_secs=10`
+
+### Estado de auditoría de red (2026-02-16)
+- **Puntuación configuración de red**: 100/100 (0 problemas)
+- **Reporte global**: todos los checks OK excepto suricata (no instalado, opcional)
+- **Superficie de ataque**: 2 puertos TCP en escucha (CUPS en 127.0.0.1:631), 0 binds globales
+- **Firewall**: firewalld activo, zona public, servicios: dhcpv6-client, ssh
+- **Baseline**: configurada, sin drift
+- **Red**: 192.168.1.133/24 vía wlp0s20f3, gateway 192.168.1.1 (Sagemcom)
+- **Router (192.168.1.1)**: 6 puertos abiertos (53/dns, 80/http, 139+445/smb, 443/https, 49153/upnp) — pendiente: desactivar UPnP y SMB, actualizar firmware (dnsmasq 2.78, kernel 3.4.11)
+- **DNS**: ISP sin cifrado (212.230.135.x) — WARN informativo, no penaliza
+
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)
 - `/var/lib/security-monitoring/` - Monitorización (correlaciones, baselines, healthchecks, digests)
@@ -312,6 +457,8 @@ El proyecto cubre las 14 tácticas del framework MITRE ATT&CK enterprise:
 - `/var/lib/threat-hunting/` - Caza de amenazas (baselines UEBA, anomalías, resultados de hunting, persistencia T1098)
 - `/var/lib/soar/` - SOAR (queue de eventos, acciones ejecutadas, IPs bloqueadas, logs de respuesta)
 - `/var/lib/purple-team/` - Purple Team (resultados de validación, evidencia de simulaciones, reportes consolidados)
+- `/var/lib/securizar/auditoria-red/` - Auditoría de red (baselines, scans nmap, reportes config/inventario/global)
+- `/var/log/securizar/auditoria-red.log` - Log del orquestador de auditoría de red
 
 ## Convenciones
 
