@@ -5,7 +5,7 @@
 # ============================================================
 # Protege contra vigilancia a nivel de ISP:
 #   - Kill switch VPN (nftables/iptables/firewalld DROP si cae la VPN)
-#   - Prevención de fugas DNS (modo estricto DoT + DNSSEC)
+#   - Prevención de fugas DNS (DoT/DoH auto-fallback + DNSSEC)
 #   - ECH (Encrypted Client Hello) oculta SNI
 #   - Prevención de fugas WebRTC
 #   - Evasión de DPI (obfs4 / stunnel)
@@ -42,10 +42,29 @@ securizar_setup_traps
 ISP_CONF_DIR="/etc/securizar"
 ISP_BIN_DIR="/usr/local/bin"
 
+# ── Helpers DNS dual-mode ────────────────────────────────────
+_test_dot_port() {
+    # Intenta TLS handshake con Cloudflare y Quad9 en puerto 853
+    local _target
+    for _target in 1.1.1.1 9.9.9.9; do
+        if timeout 5 bash -c "echo | openssl s_client -connect ${_target}:853 2>/dev/null" | grep -q "CONNECTED"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+_detect_dns_resolver() {
+    if systemctl is-active unbound &>/dev/null; then echo "unbound"
+    elif systemctl is-active dnscrypt-proxy &>/dev/null; then echo "dnscrypt-proxy"
+    else echo "none"; fi
+}
+
 # ── Verificación exhaustiva ──────────────────────────────────
 _isp_verificacion_exhaustiva() {
-    local ok=0 total=23
-    local _r
+    local ok=0 total=24
+    local _r _dns_resolver
+    _dns_resolver=$(_detect_dns_resolver)
 
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
@@ -85,28 +104,40 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} Interfaz VPN activa"
     echo ""
 
-    # ── DNS (5 checks) ──
-    echo -e "  ${BOLD}[DNS]${NC}"
+    # ── DNS (6 checks) ──
+    echo -e "  ${BOLD}[DNS]${NC} (modo: ${_dns_resolver})"
 
     _r="!!"
-    if systemctl is-active unbound &>/dev/null; then
+    if [[ "$_dns_resolver" != "none" ]]; then
         _r="OK"; ((ok++)) || true
     fi
-    echo -e "    ${_r} Unbound activo"
+    echo -e "    ${_r} DNS cifrado activo (unbound o dnscrypt-proxy)"
 
     _r="!!"
-    if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
-    elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
+    if [[ "$_dns_resolver" == "unbound" ]]; then
+        if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'forward-tls-upstream' /etc/unbound/unbound.conf 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
+    elif [[ "$_dns_resolver" == "dnscrypt-proxy" ]]; then
+        if [[ -f /etc/dnscrypt-proxy/dnscrypt-proxy.toml ]] && grep -q 'doh_servers.*true' /etc/dnscrypt-proxy/dnscrypt-proxy.toml 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
     fi
-    echo -e "    ${_r} DNS-over-TLS (forward-tls-upstream)"
+    echo -e "    ${_r} DoT o DoH configurado"
 
     _r="!!"
-    if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'val-clean-additional\|auto-trust-anchor-file' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
-    elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'auto-trust-anchor-file' /etc/unbound/unbound.conf 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
+    if [[ "$_dns_resolver" == "unbound" ]]; then
+        if [[ -f /etc/unbound/unbound.conf.d/securizar-dot.conf ]] && grep -q 'val-clean-additional\|auto-trust-anchor-file' /etc/unbound/unbound.conf.d/securizar-dot.conf 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        elif [[ -f /etc/unbound/unbound.conf ]] && grep -q 'auto-trust-anchor-file' /etc/unbound/unbound.conf 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
+    elif [[ "$_dns_resolver" == "dnscrypt-proxy" ]]; then
+        if [[ -f /etc/dnscrypt-proxy/dnscrypt-proxy.toml ]] && grep -q 'require_dnssec.*true' /etc/dnscrypt-proxy/dnscrypt-proxy.toml 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
     fi
     echo -e "    ${_r} DNSSEC habilitado"
 
@@ -121,6 +152,12 @@ _isp_verificacion_exhaustiva() {
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} avahi-daemon inactivo"
+
+    _r="!!"
+    if systemctl is-enabled securizar-dns-fallback-monitor.timer &>/dev/null; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} Monitor fallback DNS activo"
     echo ""
 
     # ── Privacidad (2 checks) ──
@@ -157,14 +194,28 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} Traffic padding activo"
 
     _r="!!"
-    if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
-    elif command -v firewall-cmd &>/dev/null && firewall-cmd --list-ports 2>/dev/null | grep -q '853' 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
-    elif iptables -S 2>/dev/null | grep -q '853' 2>/dev/null; then
-        _r="OK"; ((ok++)) || true
+    if [[ "$_dns_resolver" == "unbound" ]]; then
+        if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        elif command -v firewall-cmd &>/dev/null && firewall-cmd --list-ports 2>/dev/null | grep -q '853' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        elif iptables -S 2>/dev/null | grep -q '853' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
+        echo -e "    ${_r} Puerto 853 (DoT) en firewall"
+    elif [[ "$_dns_resolver" == "dnscrypt-proxy" ]]; then
+        if command -v nft &>/dev/null && nft list tables 2>/dev/null | grep -q 'securizar-doh' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        elif iptables -S 2>/dev/null | grep -q '443.*doh' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
+        echo -e "    ${_r} Firewall DoH (443 a resolvers)"
+    else
+        if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
+        echo -e "    ${_r} Puerto DNS en firewall"
     fi
-    echo -e "    ${_r} Puerto 853 (DoT) en firewall"
     echo ""
 
     # ── Tiempo (2 checks) ──
@@ -227,9 +278,9 @@ _isp_verificacion_exhaustiva() {
     # ── Scoring ──
     echo "  ─────────────────────────────────────────"
     local nivel
-    if [[ $ok -ge 20 ]]; then
+    if [[ $ok -ge 21 ]]; then
         nivel="EXCELENTE"
-    elif [[ $ok -ge 15 ]]; then
+    elif [[ $ok -ge 16 ]]; then
         nivel="BUENO"
     elif [[ $ok -ge 10 ]]; then
         nivel="MEJORABLE"
@@ -250,7 +301,7 @@ fi
 if [[ "$ISP_SECTION" == "all" ]]; then
 _precheck 10
 _pc 'check_file_exists /etc/securizar/vpn-killswitch.sh && check_file_exists /etc/systemd/system/securizar-vpn-killswitch.service && check_file_exists /etc/sysctl.d/99-securizar-ipv6.conf'
-_pc 'check_service_enabled unbound'
+_pc 'check_service_enabled unbound || check_service_enabled dnscrypt-proxy'
 _pc true  # S3 - ECH Firefox (perfiles dinámicos)
 _pc true  # S4 - WebRTC Firefox (perfiles dinámicos)
 _pc true  # S5 - DPI evasion (opción interactiva)
@@ -275,7 +326,7 @@ echo ""
 echo "Capacidades que se instalarán:"
 echo ""
 echo -e "  ${CYAN}S1${NC}  VPN Kill Switch (nftables/firewalld, no tráfico sin VPN)"
-echo -e "  ${CYAN}S2${NC}  Prevención de fugas DNS (DoT estricto, DNSSEC)"
+echo -e "  ${CYAN}S2${NC}  Prevención de fugas DNS (DoT/DoH auto, DNSSEC)"
 echo -e "  ${CYAN}S3${NC}  ECH (Encrypted Client Hello, oculta SNI)"
 echo -e "  ${CYAN}S4${NC}  Prevención de fugas WebRTC"
 echo -e "  ${CYAN}S5${NC}  Evasión de DPI (obfs4 / stunnel)"
@@ -325,6 +376,8 @@ if command -v nft &>/dev/null; then
     nft add rule inet securizar_ks output udp dport 67-68 accept
     # Permitir DNS local (stubby DoT)
     nft add rule inet securizar_ks output tcp dport 853 accept
+    # Permitir DoH a resolvers DNS conocidos (puerto 443)
+    nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 } tcp dport 443 accept
     # Permitir interfaces VPN
     nft add rule inet securizar_ks output oifname "wg0" accept
     nft add rule inet securizar_ks output oifname "tun0" accept
@@ -351,6 +404,10 @@ elif command -v iptables &>/dev/null; then
     iptables -A "$CHAIN" -d 192.168.0.0/16 -j ACCEPT
     iptables -A "$CHAIN" -p udp --dport 67:68 -j ACCEPT
     iptables -A "$CHAIN" -p tcp --dport 853 -j ACCEPT
+    # Permitir DoH a resolvers DNS conocidos (puerto 443)
+    for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
+        iptables -A "$CHAIN" -d "$_doh_ip" -p tcp --dport 443 -j ACCEPT
+    done
     iptables -A "$CHAIN" -o wg0 -j ACCEPT
     iptables -A "$CHAIN" -o tun0 -j ACCEPT
     iptables -A "$CHAIN" -o tun+ -j ACCEPT
@@ -368,6 +425,10 @@ elif command -v firewall-cmd &>/dev/null; then
     firewall-cmd --add-rich-rule='rule family="ipv4" destination address="172.16.0.0/12" accept' --permanent 2>/dev/null || true
     firewall-cmd --add-rich-rule='rule family="ipv4" destination address="192.168.0.0/16" accept' --permanent 2>/dev/null || true
     firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
+    # Permitir DoH a resolvers DNS conocidos (puerto 443)
+    for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
+        firewall-cmd --add-rich-rule="rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept" --permanent 2>/dev/null || true
+    done
     firewall-cmd --reload 2>/dev/null || true
     echo "[+] VPN Kill Switch ACTIVADO via firewalld (zona drop)"
 else
@@ -545,39 +606,55 @@ fi  # S1
 
 if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S2" ]]; then
 # ============================================================
-# S2 — PREVENCIÓN DE FUGAS DNS (DNS-over-TLS con unbound)
+# S2 — PREVENCIÓN DE FUGAS DNS (DoT con unbound / DoH con dnscrypt-proxy)
 # ============================================================
 log_section "S2: PREVENCIÓN DE FUGAS DNS"
 
-echo "Configura unbound como resolvedor DNS local con DNS-over-TLS (DoT, puerto 853)."
-echo "El ISP bloquea puerto 53 hacia DNS externos (1.1.1.1, 9.9.9.9)."
-echo "Unbound cifra las consultas por el puerto 853, que el ISP no puede bloquear."
-echo "Incluye DNSSEC, cache local y desactiva mDNS/LLMNR."
+echo "Configura DNS cifrado local con auto-detección del mejor protocolo:"
+echo "  - DoT (DNS-over-TLS, puerto 853) via unbound: preferido si no bloqueado"
+echo "  - DoH (DNS-over-HTTPS, puerto 443) via dnscrypt-proxy: fallback si ISP bloquea 853"
+echo "Incluye DNSSEC, cache local, monitor de fallback automático y desactiva mDNS/LLMNR."
 echo ""
 
-if check_service_enabled unbound; then
-    log_already "DNS cifrado con unbound (servicio habilitado)"
-elif ask "¿Configurar DNS cifrado con unbound (DNS-over-TLS)?"; then
+DNS_MODE=""
+
+if check_service_enabled unbound || check_service_enabled dnscrypt-proxy; then
+    log_already "DNS cifrado ($(_detect_dns_resolver) activo)"
+elif ask "¿Configurar DNS cifrado (DoT o DoH automático)?"; then
+
+    # ── Detectar si puerto 853 está accesible ──
+    log_info "Probando accesibilidad del puerto 853 (DoT)..."
+    if _test_dot_port; then
+        DNS_MODE="dot"
+        log_info "Puerto 853 accesible → modo DoT (unbound)"
+    else
+        DNS_MODE="doh"
+        log_warn "Puerto 853 BLOQUEADO → modo DoH (dnscrypt-proxy, puerto 443)"
+    fi
+
+    # ════════════════════════════════════════════════════════════
+    # RAMA DoT: unbound (puerto 853)
+    # ════════════════════════════════════════════════════════════
+    if [[ "$DNS_MODE" == "dot" ]]; then
 
     # ── Instalar unbound si no está ──
     if ! command -v unbound &>/dev/null; then
-        if command -v zypper &>/dev/null; then
-            zypper install -y unbound 2>/dev/null || log_warn "No se pudo instalar unbound via zypper"
-        elif command -v apt-get &>/dev/null; then
-            apt-get install -y unbound 2>/dev/null || log_warn "No se pudo instalar unbound via apt"
-        elif command -v dnf &>/dev/null; then
-            dnf install -y unbound 2>/dev/null || log_warn "No se pudo instalar unbound via dnf"
-        elif command -v pacman &>/dev/null; then
-            pacman -S --noconfirm unbound 2>/dev/null || log_warn "No se pudo instalar unbound via pacman"
-        fi
+        pkg_install "unbound" || true
     fi
 
     if ! command -v unbound &>/dev/null; then
-        log_warn "unbound no se pudo instalar. Sección S2 omitida."
+        log_warn "unbound no se pudo instalar. Intentando fallback a DoH..."
+        DNS_MODE="doh"
     else
 
+    # Detener dnscrypt-proxy si estaba corriendo (cambio de modo)
+    if systemctl is-active dnscrypt-proxy &>/dev/null; then
+        systemctl stop dnscrypt-proxy 2>/dev/null || true
+        systemctl disable dnscrypt-proxy 2>/dev/null || true
+        log_change "dnscrypt-proxy" "Detenido (cambiando a modo DoT)"
+    fi
+
     # ── Obtener ancla DNSSEC ──
-    # unbound-anchor genera formato correcto en /var/lib/unbound/root.key
     if command -v unbound-anchor &>/dev/null; then
         mkdir -p /var/lib/unbound
         unbound-anchor -a /var/lib/unbound/root.key 2>/dev/null || true
@@ -586,7 +663,6 @@ elif ask "¿Configurar DNS cifrado con unbound (DNS-over-TLS)?"; then
     fi
 
     # ── Configurar unbound para DoT estricto ──
-    # Backup de configuración original
     cp /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak-securizar 2>/dev/null || true
 
     cat > /etc/unbound/unbound.conf << 'UNBOUND_CONF'
@@ -597,27 +673,22 @@ elif ask "¿Configurar DNS cifrado con unbound (DNS-over-TLS)?"; then
 # ============================================================
 
 server:
-    # Escuchar en localhost (todas las apps del sistema usan esto)
     interface: 127.0.0.1
     interface: ::1
     port: 53
 
-    # Acceso solo desde localhost
     access-control: 127.0.0.0/8 allow
     access-control: ::1/128 allow
     access-control: 0.0.0.0/0 refuse
     access-control: ::/0 refuse
 
-    # No ejecutar como root
     username: "unbound"
     directory: "/etc/unbound"
     chroot: ""
 
-    # DNSSEC: validar firmas criptográficas de respuestas DNS
     auto-trust-anchor-file: "/var/lib/unbound/root.key"
     val-clean-additional: yes
 
-    # Cache para rendimiento (evita consultas repetidas al ISP)
     cache-min-ttl: 300
     cache-max-ttl: 86400
     msg-cache-size: 50m
@@ -627,7 +698,6 @@ server:
     prefetch: yes
     prefetch-key: yes
 
-    # Privacidad: minimizar datos enviados al DNS upstream
     qname-minimisation: yes
     qname-minimisation-strict: no
     minimal-responses: yes
@@ -638,49 +708,38 @@ server:
     harden-below-nxdomain: yes
     harden-referral-path: yes
 
-    # Rendimiento
     num-threads: 2
     so-reuseport: yes
     infra-cache-numhosts: 10000
 
-    # Desactivar IPv6 si no hay conectividad IPv6
     do-ip6: no
 
-    # TLS para conexiones upstream (DoT)
     tls-cert-bundle: "/etc/ssl/ca-bundle.pem"
 
-    # Logs mínimos (privacidad)
     verbosity: 1
     log-queries: no
     log-replies: no
     logfile: "/var/log/unbound/unbound.log"
     use-syslog: no
 
-# ── DNS-over-TLS: servidores upstream cifrados (puerto 853) ──
 forward-zone:
     name: "."
-    # SOLO TLS: si falla TLS, falla la consulta (nunca plaintext)
     forward-tls-upstream: yes
 
-    # Cloudflare (privacidad, sin logs, rápido)
     forward-addr: 1.1.1.1@853#cloudflare-dns.com
     forward-addr: 1.0.0.1@853#cloudflare-dns.com
 
-    # Quad9 (bloqueo de malware + privacidad)
     forward-addr: 9.9.9.9@853#dns.quad9.net
     forward-addr: 149.112.112.112@853#dns.quad9.net
 
-    # Google DNS (respaldo)
     forward-addr: 8.8.8.8@853#dns.google
     forward-addr: 8.8.4.4@853#dns.google
 UNBOUND_CONF
     log_change "Creado" "/etc/unbound/unbound.conf (DoT estricto, DNSSEC, cache)"
 
-    # ── Crear directorio de log ──
     mkdir -p /var/log/unbound
     chown unbound:unbound /var/log/unbound 2>/dev/null || true
 
-    # ── Verificar configuración antes de iniciar ──
     if unbound-checkconf /etc/unbound/unbound.conf &>/dev/null; then
         log_info "Configuración de unbound válida"
     else
@@ -688,85 +747,228 @@ UNBOUND_CONF
         unbound-checkconf /etc/unbound/unbound.conf 2>&1 | sed 's/^/    /' || true
     fi
 
-    # ── Activar servicio unbound ──
     systemctl enable unbound 2>/dev/null || true
     systemctl restart unbound 2>/dev/null || true
     log_change "Servicio" "unbound habilitado e iniciado"
 
-    # ── Configurar DNS del sistema para usar unbound ──
+    fi  # cierre del if ! command -v unbound (DoT)
+    fi  # cierre del if DNS_MODE == dot
+
+    # ════════════════════════════════════════════════════════════
+    # RAMA DoH: dnscrypt-proxy (puerto 443)
+    # ════════════════════════════════════════════════════════════
+    if [[ "$DNS_MODE" == "doh" ]]; then
+
+    # ── Instalar dnscrypt-proxy ──
+    if ! command -v dnscrypt-proxy &>/dev/null; then
+        pkg_install "dnscrypt-proxy" || true
+    fi
+
+    if ! command -v dnscrypt-proxy &>/dev/null; then
+        log_warn "dnscrypt-proxy no se pudo instalar. Sección S2 omitida."
+        DNS_MODE=""
+    else
+
+    # Detener systemd-resolved si ocupa :53
+    if ss -tlnp 2>/dev/null | grep -q ":53.*systemd-resolve"; then
+        systemctl stop systemd-resolved 2>/dev/null || true
+        systemctl disable systemd-resolved 2>/dev/null || true
+        log_change "systemd-resolved" "Detenido (liberando puerto 53 para dnscrypt-proxy)"
+    fi
+
+    # Detener unbound si estaba corriendo (cambio de modo)
+    if systemctl is-active unbound &>/dev/null; then
+        systemctl stop unbound 2>/dev/null || true
+        systemctl disable unbound 2>/dev/null || true
+        log_change "unbound" "Detenido (cambiando a modo DoH)"
+    fi
+
+    # ── Configurar dnscrypt-proxy ──
+    mkdir -p /etc/dnscrypt-proxy
+    cat > /etc/dnscrypt-proxy/dnscrypt-proxy.toml << 'DNSCRYPT_CONF'
+# ============================================================
+# Securizar Módulo 38 - DNS-over-HTTPS con dnscrypt-proxy
+# Tráfico DNS cifrado por puerto 443 (indistinguible de HTTPS)
+# Fallback automático cuando ISP bloquea puerto 853 (DoT)
+# ============================================================
+
+listen_addresses = ['127.0.0.1:53', '[::1]:53']
+max_clients = 250
+
+# Servidores DoH confiables
+server_names = ['cloudflare', 'google', 'quad9-dnscrypt-ip4-filter-pri']
+
+# Protocolos habilitados
+doh_servers = true
+dnscrypt_servers = true
+odoh_servers = false
+
+# Requisitos de seguridad
+require_dnssec = true
+require_nolog = true
+require_nofilter = false
+
+# IPv6
+ipv6_servers = false
+block_ipv6 = true
+
+# Bootstrap: resolvers por IP directa (no necesitan DNS previo)
+bootstrap_resolvers = ['1.1.1.1:53', '9.9.9.9:53']
+netprobe_address = '1.1.1.1:443'
+netprobe_timeout = 30
+
+# Timeouts
+timeout = 5000
+keepalive = 30
+
+# Cache
+cache = true
+cache_size = 4096
+cache_min_ttl = 300
+cache_max_ttl = 86400
+cache_neg_min_ttl = 60
+cache_neg_max_ttl = 600
+
+# Logging mínimo (privacidad)
+log_level = 2
+log_file = '/var/log/dnscrypt-proxy/dnscrypt-proxy.log'
+use_syslog = false
+
+# Listas de resolvers (auto-actualización)
+[sources]
+  [sources.'public-resolvers']
+  urls = ['https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md', 'https://download.dnscrypt.info/resolvers-list/v3/public-resolvers.md']
+  cache_file = '/var/cache/dnscrypt-proxy/public-resolvers.md'
+  minisign_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+  refresh_delay = 72
+  prefix = ''
+
+  [sources.'relays']
+  urls = ['https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/relays.md', 'https://download.dnscrypt.info/resolvers-list/v3/relays.md']
+  cache_file = '/var/cache/dnscrypt-proxy/relays.md'
+  minisign_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+  refresh_delay = 72
+  prefix = ''
+
+# DNS anónimo via relays (oculta IP origen al resolver)
+[anonymized_dns]
+routes = [
+    { server_name='cloudflare', via=['anon-cs-fr', 'anon-cs-de'] },
+    { server_name='quad9-dnscrypt-ip4-filter-pri', via=['anon-scaleway-fr', 'anon-cs-nl'] }
+]
+DNSCRYPT_CONF
+    log_change "Creado" "/etc/dnscrypt-proxy/dnscrypt-proxy.toml (DoH, DNSSEC, cache, relays anónimos)"
+
+    # ── Crear directorios ──
+    mkdir -p /var/log/dnscrypt-proxy
+    mkdir -p /var/cache/dnscrypt-proxy
+
+    # ── Activar servicio ──
+    systemctl enable dnscrypt-proxy 2>/dev/null || true
+    systemctl restart dnscrypt-proxy 2>/dev/null || true
+    log_change "Servicio" "dnscrypt-proxy habilitado e iniciado (DoH puerto 443)"
+
+    fi  # cierre del if ! command -v dnscrypt-proxy
+    fi  # cierre del if DNS_MODE == doh
+
+    # ════════════════════════════════════════════════════════════
+    # BLOQUE COMPARTIDO (ambas ramas, si DNS_MODE fue configurado)
+    # ════════════════════════════════════════════════════════════
+    if [[ -n "$DNS_MODE" ]]; then
+
+    # ── Guardar modo DNS actual ──
+    cat > "${ISP_CONF_DIR}/dns-mode.conf" << EOF_DNS_MODE
+# Securizar M38 S2 - Modo DNS configurado
+DNS_MODE=${DNS_MODE}
+CONFIGURED_AT=$(date -Iseconds)
+EOF_DNS_MODE
+    log_change "Creado" "${ISP_CONF_DIR}/dns-mode.conf (modo: ${DNS_MODE})"
+
+    # ── Configurar DNS del sistema ──
     dns_configured=false
 
     if command -v nmcli &>/dev/null; then
         active_conn=$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)
         if [[ -n "$active_conn" ]]; then
-            # Backup DNS anterior
             current_dns=$(nmcli -t -f ipv4.dns con show "$active_conn" 2>/dev/null || echo "")
             echo "# Backup DNS anterior: $current_dns" > "${ISP_CONF_DIR}/dns-backup.conf"
             echo "# Conexión: $active_conn" >> "${ISP_CONF_DIR}/dns-backup.conf"
             echo "# Fecha: $(date)" >> "${ISP_CONF_DIR}/dns-backup.conf"
             log_change "Backup" "DNS anterior guardado en ${ISP_CONF_DIR}/dns-backup.conf"
 
-            # Apuntar DNS a unbound local
             nmcli con modify "$active_conn" ipv4.dns "127.0.0.1" 2>/dev/null || true
             nmcli con modify "$active_conn" ipv4.dns-priority -1 2>/dev/null || true
             nmcli con modify "$active_conn" ipv4.ignore-auto-dns yes 2>/dev/null || true
 
-            # Si dnsmasq es plugin de NM, configurar reenvío a unbound
             nm_dns=$(grep -r "dns=" /etc/NetworkManager/ 2>/dev/null | grep -o "dns=.*" | head -1 || echo "")
             if [[ "$nm_dns" == *"dnsmasq"* ]]; then
                 mkdir -p /etc/NetworkManager/dnsmasq.d
                 cat > /etc/NetworkManager/dnsmasq.d/securizar-dot.conf << 'DNSMASQ_CONF'
-# Securizar Módulo 38 - Reenviar DNS a unbound (DoT)
+# Securizar Módulo 38 - Reenviar DNS a resolver local
 no-resolv
 server=127.0.0.1#53
 cache-size=0
 DNSMASQ_CONF
-                log_change "dnsmasq" "Configurado para reenviar a unbound"
+                log_change "dnsmasq" "Configurado para reenviar a resolver local"
             fi
 
-            # Aplicar cambios (reconectar)
             nmcli con down "$active_conn" 2>/dev/null || true
             sleep 2
             nmcli con up "$active_conn" 2>/dev/null || true
-            log_change "NetworkManager" "DNS redirigido a unbound (127.0.0.1 → DoT puerto 853)"
+            log_change "NetworkManager" "DNS redirigido a 127.0.0.1 (modo ${DNS_MODE})"
             dns_configured=true
         fi
     fi
 
     if [[ "$dns_configured" != "true" ]]; then
-        # Fallback: modificar resolv.conf
         cp /etc/resolv.conf /etc/resolv.conf.bak-securizar 2>/dev/null || true
         cat > /etc/resolv.conf << 'RESOLV_CONF'
-# Securizar Módulo 38 - DNS via unbound (DoT cifrado)
+# Securizar Módulo 38 - DNS cifrado local (DoT/DoH)
 nameserver 127.0.0.1
 options edns0 trust-ad
 RESOLV_CONF
         chattr +i /etc/resolv.conf 2>/dev/null || true
-        log_change "resolv.conf" "Forzado a usar unbound, archivo inmutable"
+        log_change "resolv.conf" "Forzado a usar resolver local, archivo inmutable"
     fi
 
-    # ── Desactivar mDNS y LLMNR (fugas en red local) ──
+    # ── Desactivar mDNS y LLMNR ──
     if systemctl is-active avahi-daemon &>/dev/null; then
         systemctl stop avahi-daemon 2>/dev/null || true
         systemctl disable avahi-daemon 2>/dev/null || true
         log_change "avahi-daemon" "Desactivado (prevención fuga mDNS)"
     fi
 
-    # ── Permitir puerto 853 saliente en firewall ──
-    if command -v firewall-cmd &>/dev/null; then
-        firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
-        firewall-cmd --add-rich-rule='rule family="ipv6" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
-        firewall-cmd --reload 2>/dev/null || true
-        log_change "Firewall" "Puerto 853 (DoT) saliente permitido"
-    elif command -v nft &>/dev/null; then
-        nft add table inet securizar-dot 2>/dev/null || true
-        nft flush table inet securizar-dot 2>/dev/null || true
-        nft add chain inet securizar-dot output '{ type filter hook output priority 0; policy accept; }' 2>/dev/null || true
-        nft add rule inet securizar-dot output tcp dport 853 accept 2>/dev/null || true
-        log_change "Firewall" "Puerto 853 (DoT) saliente permitido via nftables"
+    # ── Firewall: según modo DNS ──
+    if [[ "$DNS_MODE" == "dot" ]]; then
+        if command -v firewall-cmd &>/dev/null; then
+            firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
+            firewall-cmd --add-rich-rule='rule family="ipv6" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
+            firewall-cmd --reload 2>/dev/null || true
+            log_change "Firewall" "Puerto 853 (DoT) saliente permitido"
+        elif command -v nft &>/dev/null; then
+            nft add table inet securizar-dot 2>/dev/null || true
+            nft flush table inet securizar-dot 2>/dev/null || true
+            nft add chain inet securizar-dot output '{ type filter hook output priority 0; policy accept; }' 2>/dev/null || true
+            nft add rule inet securizar-dot output tcp dport 853 accept 2>/dev/null || true
+            log_change "Firewall" "Puerto 853 (DoT) saliente permitido via nftables"
+        fi
+    elif [[ "$DNS_MODE" == "doh" ]]; then
+        if command -v nft &>/dev/null; then
+            nft delete table inet securizar-doh 2>/dev/null || true
+            nft add table inet securizar-doh
+            nft add chain inet securizar-doh output '{ type filter hook output priority 0; policy accept; }'
+            nft add rule inet securizar-doh output ip daddr '{ 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 }' tcp dport 443 accept
+            log_change "Firewall" "DoH (443) a resolvers DNS permitido via nftables (tabla securizar-doh)"
+        elif command -v firewall-cmd &>/dev/null; then
+            for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
+                firewall-cmd --add-rich-rule="rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept" --permanent 2>/dev/null || true
+            done
+            firewall-cmd --reload 2>/dev/null || true
+            log_change "Firewall" "DoH (443) a resolvers DNS permitido via firewalld"
+        fi
     fi
 
-    # ── Eliminar tabla nftables antigua que bloqueaba puerto 53 ──
+    # ── Eliminar tabla nftables antigua ──
     if command -v nft &>/dev/null; then
         if nft list tables 2>/dev/null | grep -q "securizar-dns"; then
             nft delete table inet securizar-dns 2>/dev/null || true
@@ -774,36 +976,147 @@ RESOLV_CONF
         fi
     fi
 
-    # ── Verificar que unbound funciona (con warm-up DoT) ──
+    # ── Verificar resolución DNS (agnóstico al resolver) ──
     sleep 3
-    if ss -tlnp 2>/dev/null | grep -q "unbound" || ss -ulnp 2>/dev/null | grep -q "unbound"; then
-        log_info "unbound escuchando en 127.0.0.1:53"
+    _resolver_name=$(_detect_dns_resolver)
+    if ss -tlnp 2>/dev/null | grep -q ":53 "; then
+        log_info "${_resolver_name} escuchando en 127.0.0.1:53"
 
-        # Warm-up: forzar handshake TLS con upstream DoT
+        # Warm-up
         nslookup example.com 127.0.0.1 &>/dev/null || true
         sleep 2
 
-        # Verificación con reintentos
-        _unbound_ok=false
+        _dns_ok=false
         for _dns_try in 1 2 3; do
             if nslookup example.com 127.0.0.1 &>/dev/null; then
-                log_info "Resolución DNS via DoT funcionando correctamente"
-                _unbound_ok=true
+                log_info "Resolución DNS via ${DNS_MODE^^} funcionando correctamente"
+                _dns_ok=true
                 break
             fi
             [[ $_dns_try -lt 3 ]] && sleep 2
         done
-        if [[ "$_unbound_ok" != "true" ]]; then
-            log_warn "unbound activo pero resolución lenta (DoT handshake inicial ~5-10s es normal)"
+        if [[ "$_dns_ok" != "true" ]]; then
+            log_warn "${_resolver_name} activo pero resolución lenta (handshake inicial es normal)"
         fi
     else
-        log_warn "unbound no parece estar escuchando. Verifica con: systemctl status unbound"
+        log_warn "${_resolver_name} no parece estar escuchando. Verifica con: systemctl status ${_resolver_name}"
     fi
 
-    # ── Script de verificación de DNS cifrado ──
+    # ── Monitor de fallback DNS (DoT ↔ DoH automático) ──
+    cat > "${ISP_BIN_DIR}/dns-fallback-monitor.sh" << 'DNS_MONITOR'
+#!/bin/bash
+# Monitor de fallback DNS: cambia automáticamente entre DoT (unbound) y DoH (dnscrypt-proxy)
+# Ejecutado cada 5 min por securizar-dns-fallback-monitor.timer
+set -euo pipefail
+
+CONF="/etc/securizar/dns-mode.conf"
+[[ -f "$CONF" ]] || exit 0
+source "$CONF"
+
+CURRENT_MODE="${DNS_MODE:-none}"
+LOG_TAG="securizar-dns-monitor"
+
+# Test de resolución actual
+dns_works() {
+    nslookup example.com 127.0.0.1 &>/dev/null
+}
+
+# Test de puerto 853
+port_853_open() {
+    local _t
+    for _t in 1.1.1.1 9.9.9.9; do
+        if timeout 5 bash -c "echo | openssl s_client -connect ${_t}:853 2>/dev/null" | grep -q "CONNECTED"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+switch_to_dot() {
+    logger -t "$LOG_TAG" "Cambiando a DoT (unbound)..."
+    systemctl stop dnscrypt-proxy 2>/dev/null || true
+    systemctl disable dnscrypt-proxy 2>/dev/null || true
+    systemctl enable unbound 2>/dev/null || true
+    systemctl start unbound 2>/dev/null || true
+    sed -i 's/^DNS_MODE=.*/DNS_MODE=dot/' "$CONF"
+    logger -t "$LOG_TAG" "Modo cambiado a DoT (puerto 853 accesible)"
+}
+
+switch_to_doh() {
+    logger -t "$LOG_TAG" "Cambiando a DoH (dnscrypt-proxy)..."
+    systemctl stop unbound 2>/dev/null || true
+    systemctl disable unbound 2>/dev/null || true
+    systemctl enable dnscrypt-proxy 2>/dev/null || true
+    systemctl start dnscrypt-proxy 2>/dev/null || true
+    sed -i 's/^DNS_MODE=.*/DNS_MODE=doh/' "$CONF"
+    logger -t "$LOG_TAG" "Modo cambiado a DoH (puerto 853 bloqueado)"
+}
+
+# Lógica principal
+if dns_works; then
+    exit 0  # Todo funciona, no hacer nada
+fi
+
+# DNS no funciona - intentar corregir
+logger -t "$LOG_TAG" "DNS no responde (modo actual: ${CURRENT_MODE})"
+
+if port_853_open; then
+    if [[ "$CURRENT_MODE" != "dot" ]]; then
+        switch_to_dot
+    else
+        # Ya está en DoT y 853 abierto pero DNS falla — reiniciar unbound
+        systemctl restart unbound 2>/dev/null || true
+        logger -t "$LOG_TAG" "unbound reiniciado"
+    fi
+else
+    if [[ "$CURRENT_MODE" != "doh" ]]; then
+        switch_to_doh
+    else
+        # Ya está en DoH y DNS falla — reiniciar dnscrypt-proxy
+        systemctl restart dnscrypt-proxy 2>/dev/null || true
+        logger -t "$LOG_TAG" "dnscrypt-proxy reiniciado"
+    fi
+fi
+DNS_MONITOR
+    chmod 755 "${ISP_BIN_DIR}/dns-fallback-monitor.sh"
+    log_change "Creado" "${ISP_BIN_DIR}/dns-fallback-monitor.sh (monitor fallback DoT↔DoH)"
+
+    # ── Timer systemd para el monitor ──
+    cat > /etc/systemd/system/securizar-dns-fallback-monitor.service << 'DNS_MON_SVC'
+[Unit]
+Description=Securizar - Monitor fallback DNS (DoT/DoH)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dns-fallback-monitor.sh
+ProtectHome=yes
+PrivateTmp=yes
+DNS_MON_SVC
+
+    cat > /etc/systemd/system/securizar-dns-fallback-monitor.timer << 'DNS_MON_TIMER'
+[Unit]
+Description=Securizar - Timer monitor fallback DNS (cada 5 min)
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=300
+AccuracySec=30
+
+[Install]
+WantedBy=timers.target
+DNS_MON_TIMER
+
+    systemctl daemon-reload
+    systemctl enable securizar-dns-fallback-monitor.timer 2>/dev/null || true
+    systemctl start securizar-dns-fallback-monitor.timer 2>/dev/null || true
+    log_change "Creado" "securizar-dns-fallback-monitor.timer (check cada 5 min, auto-switch DoT↔DoH)"
+
+    # ── Script de verificación de DNS cifrado (dual-mode) ──
     cat > "${ISP_BIN_DIR}/detectar-dns-leak.sh" << 'DNS_LEAK'
 #!/bin/bash
-# Detectar fugas DNS - verifica que las consultas usan DNS-over-TLS via unbound
+# Detectar fugas DNS - verifica DNS cifrado (DoT via unbound / DoH via dnscrypt-proxy)
 set -euo pipefail
 
 echo "╔═══════════════════════════════════════════════╗"
@@ -811,30 +1124,61 @@ echo "║   DETECCIÓN DE FUGAS DNS                      ║"
 echo "╚═══════════════════════════════════════════════╝"
 echo ""
 
-# Verificar unbound
-echo "=== Estado de unbound (DNS-over-TLS) ==="
+# Detectar resolver activo
+DNS_MODE="none"
+RESOLVER="none"
 if systemctl is-active unbound &>/dev/null; then
-    echo "  [OK] unbound activo"
+    RESOLVER="unbound"; DNS_MODE="dot"
+elif systemctl is-active dnscrypt-proxy &>/dev/null; then
+    RESOLVER="dnscrypt-proxy"; DNS_MODE="doh"
+fi
+
+if [[ -f /etc/securizar/dns-mode.conf ]]; then
+    source /etc/securizar/dns-mode.conf 2>/dev/null || true
+fi
+
+echo "=== Modo DNS: ${DNS_MODE^^} (resolver: ${RESOLVER}) ==="
+echo ""
+
+# Verificar resolver activo
+echo "=== Estado del resolver ==="
+if [[ "$RESOLVER" == "unbound" ]]; then
+    echo "  [OK] unbound activo (DoT, puerto 853)"
     if ss -tlnp 2>/dev/null | grep -q "unbound"; then
         echo "  [OK] Escuchando en 127.0.0.1:53"
     else
         echo "  [!!] unbound activo pero NO escucha en puerto 53"
     fi
-    # Verificar DoT configurado
     if grep -q "forward-tls-upstream: yes" /etc/unbound/unbound.conf 2>/dev/null; then
         echo "  [OK] DNS-over-TLS (DoT) habilitado"
     else
         echo "  [!!] DoT NO configurado en unbound"
     fi
-    # Verificar DNSSEC
     if grep -q "auto-trust-anchor-file" /etc/unbound/unbound.conf 2>/dev/null; then
         echo "  [OK] DNSSEC habilitado"
     else
         echo "  [--] DNSSEC no configurado"
     fi
+elif [[ "$RESOLVER" == "dnscrypt-proxy" ]]; then
+    echo "  [OK] dnscrypt-proxy activo (DoH, puerto 443)"
+    if ss -tlnp 2>/dev/null | grep -q "dnscrypt-proxy"; then
+        echo "  [OK] Escuchando en 127.0.0.1:53"
+    else
+        echo "  [!!] dnscrypt-proxy activo pero NO escucha en puerto 53"
+    fi
+    if grep -q "doh_servers = true" /etc/dnscrypt-proxy/dnscrypt-proxy.toml 2>/dev/null; then
+        echo "  [OK] DNS-over-HTTPS (DoH) habilitado"
+    else
+        echo "  [!!] DoH NO configurado"
+    fi
+    if grep -q "require_dnssec = true" /etc/dnscrypt-proxy/dnscrypt-proxy.toml 2>/dev/null; then
+        echo "  [OK] DNSSEC requerido"
+    else
+        echo "  [--] DNSSEC no requerido"
+    fi
 else
-    echo "  [!!] unbound NO activo - DNS NO cifrado!"
-    echo "       Ejecuta: sudo systemctl start unbound"
+    echo "  [!!] Ningún resolver DNS cifrado activo!"
+    echo "       Ejecuta: sudo bash proteger-contra-isp.sh S2"
 fi
 echo ""
 
@@ -844,7 +1188,7 @@ if [[ -f /etc/resolv.conf ]]; then
     grep "^nameserver" /etc/resolv.conf | while read -r line; do
         ns=$(echo "$line" | awk '{print $2}')
         if [[ "$ns" == "127.0.0.1" || "$ns" == "::1" || "$ns" == "127.0.0.53" ]]; then
-            echo "  [OK] $line (local/unbound)"
+            echo "  [OK] $line (local/${RESOLVER})"
         else
             echo "  [!!] $line (DNS externo sin cifrar - FUGA!)"
         fi
@@ -854,30 +1198,41 @@ else
 fi
 echo ""
 
-# Test de resolución via DoT
-echo "=== Test de resolución DNS (via unbound/DoT) ==="
+# Test de resolución
+echo "=== Test de resolución DNS (via ${RESOLVER}/${DNS_MODE^^}) ==="
 for domain in example.com cloudflare.com opensuse.org; do
     if result=$(nslookup "$domain" 127.0.0.1 2>&1); then
         ip=$(echo "$result" | grep -A1 "Name:" | grep "Address:" | head -1 | awk '{print $2}')
-        echo "  [OK] $domain -> ${ip:-resuelto} (via unbound/DoT)"
+        echo "  [OK] $domain -> ${ip:-resuelto} (via ${RESOLVER}/${DNS_MODE^^})"
     else
         echo "  [!!] $domain -> FALLO"
     fi
 done
 echo ""
 
-# Comprobar conexiones TLS a puerto 853
-echo "=== Conexiones DNS-over-TLS activas (puerto 853) ==="
-dot_conns=$(ss -tnp 2>/dev/null | grep ":853" || true)
-if [[ -n "$dot_conns" ]]; then
-    echo "$dot_conns" | sed 's/^/  /'
-    echo "  [OK] Conexiones DoT detectadas - DNS cifrado"
-else
-    echo "  [--] Sin conexiones DoT activas (se crean bajo demanda)"
+# Verificar conexiones cifradas según modo
+if [[ "$DNS_MODE" == "dot" ]]; then
+    echo "=== Conexiones DoT activas (puerto 853) ==="
+    dot_conns=$(ss -tnp 2>/dev/null | grep ":853" || true)
+    if [[ -n "$dot_conns" ]]; then
+        echo "$dot_conns" | sed 's/^/  /'
+        echo "  [OK] Conexiones DoT detectadas"
+    else
+        echo "  [--] Sin conexiones DoT activas (se crean bajo demanda)"
+    fi
+elif [[ "$DNS_MODE" == "doh" ]]; then
+    echo "=== Conexiones DoH activas (puerto 443 a resolvers) ==="
+    doh_conns=$(ss -tnp 2>/dev/null | grep ":443" | grep -E '1\.1\.1\.1|1\.0\.0\.1|9\.9\.9\.9|149\.112\.112\.112|8\.8\.8\.8|8\.8\.4\.4' || true)
+    if [[ -n "$doh_conns" ]]; then
+        echo "$doh_conns" | sed 's/^/  /'
+        echo "  [OK] Conexiones DoH detectadas"
+    else
+        echo "  [--] Sin conexiones DoH activas a resolvers conocidos"
+    fi
 fi
 echo ""
 
-# Verificar que NO hay fugas al puerto 53 externo
+# Verificar fugas
 echo "=== Verificacion de fugas (puerto 53 plaintext) ==="
 plain_dns=$(ss -tnp 2>/dev/null | grep ":53 " | grep -v "127\." || true)
 if [[ -n "$plain_dns" ]]; then
@@ -888,26 +1243,25 @@ else
 fi
 echo ""
 
-# Cache stats
-echo "=== Cache de unbound ==="
-unbound-control stats_noreset 2>/dev/null | grep -E "total.num|cache.count" | sed 's/^/  /' || echo "  (unbound-control no disponible)"
+# Monitor status
+echo "=== Monitor fallback DNS ==="
+if systemctl is-active securizar-dns-fallback-monitor.timer &>/dev/null; then
+    echo "  [OK] Monitor activo (check cada 5 min, auto-switch DoT↔DoH)"
+else
+    echo "  [--] Monitor no activo"
+fi
 echo ""
 
 echo "Si todo muestra [OK], tu DNS esta cifrado y el ISP NO puede ver tus consultas."
 DNS_LEAK
     chmod 755 "${ISP_BIN_DIR}/detectar-dns-leak.sh"
-    log_change "Creado" "${ISP_BIN_DIR}/detectar-dns-leak.sh"
+    log_change "Creado" "${ISP_BIN_DIR}/detectar-dns-leak.sh (dual-mode DoT/DoH)"
 
-    # ── Override global DNS de NM: forzar unbound sobre VPN comerciales ──
-    # ProtonVPN fuerza DNS 10.2.0.1 via NM con prioridad -1500,
-    # bypaseando unbound. [global-dns] sobreescribe CUALQUIER DNS de
-    # conexión, incluida VPN. NM >= 1.2 (2016+).
-    # Cadena resultante: App → unbound (cache+DNSSEC) → DoT:853 → túnel VPN → Cloudflare/Quad9
+    # ── Override global DNS de NM ──
     if [[ -d /etc/NetworkManager/conf.d ]]; then
         cat > /etc/NetworkManager/conf.d/90-securizar-dns.conf << 'NM_DNS_GLOBAL'
-# Securizar M38 S2: Forzar DNS a unbound (DoT+DNSSEC)
+# Securizar M38 S2: Forzar DNS a resolver local (DoT/DoH + DNSSEC)
 # Sobreescribe DNS de VPN comerciales (ProtonVPN, Mullvad, etc.)
-# App → unbound (cache+DNSSEC) → DoT:853 → túnel VPN → Cloudflare/Quad9
 
 [global-dns]
 searches=
@@ -918,22 +1272,16 @@ servers=127.0.0.1
 NM_DNS_GLOBAL
         log_change "Creado" "/etc/NetworkManager/conf.d/90-securizar-dns.conf (override global DNS)"
 
-        # Recargar NM para aplicar inmediatamente
         nmcli general reload dns 2>/dev/null || \
             systemctl reload NetworkManager 2>/dev/null || true
-        log_info "DNS global forzado a unbound: ProtonVPN/Mullvad ya no pueden sobreescribir"
+        log_info "DNS global forzado a resolver local: VPN comerciales ya no pueden sobreescribir"
     fi
 
-    # ── NM dispatcher: respaldo para forzar unbound tras VPN up ──
-    # Belt-and-suspenders: si global-dns no basta, el dispatcher
-    # reescribe resolv.conf con reintentos tras VPN up.
+    # ── NM dispatcher: respaldo para forzar DNS local tras VPN up ──
     if [[ -d /etc/NetworkManager/dispatcher.d ]]; then
         cat > /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn << 'DNS_HOOK'
 #!/bin/bash
-# Respaldo: forzar DNS via unbound cuando VPN sube (ProtonVPN, Mullvad, etc.)
-# El mecanismo principal es /etc/NetworkManager/conf.d/90-securizar-dns.conf
-# Este dispatcher actúa como respaldo con reintentos por si la VPN
-# sobreescribe resolv.conf después de NM.
+# Respaldo: forzar DNS via resolver local cuando VPN sube
 IFACE="$1"
 ACTION="$2"
 
@@ -945,9 +1293,9 @@ is_vpn_event() {
 
 is_vpn_event || exit 0
 
-force_unbound_dns() {
-    if ss -tlnp 2>/dev/null | grep -q "127.0.0.1:53.*unbound"; then
-        printf '%s\n' "# Securizar - DNS via unbound (DoT+DNSSEC)" \
+force_local_dns() {
+    if ss -tlnp 2>/dev/null | grep -qE "127.0.0.1:53.*(unbound|dnscrypt-proxy)"; then
+        printf '%s\n' "# Securizar - DNS cifrado local (DoT/DoH)" \
                       "nameserver 127.0.0.1" \
                       "options edns0 trust-ad" > /etc/resolv.conf
         return 0
@@ -957,19 +1305,15 @@ force_unbound_dns() {
 
 case "$ACTION" in
     vpn-up|up)
-        # Intento inmediato
-        force_unbound_dns
-
-        # Reintento tras 3s: VPNs comerciales pueden escribir resolv.conf
-        # después del dispatcher (race condition)
+        force_local_dns
         (
             sleep 3
             if ! grep -q "^nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
-                force_unbound_dns && \
-                    logger -t securizar-dns "VPN $IFACE: DNS re-forzado a unbound (reintento)"
+                force_local_dns && \
+                    logger -t securizar-dns "VPN $IFACE: DNS re-forzado a local (reintento)"
             fi
         ) &
-        logger -t securizar-dns "VPN $IFACE up: DNS forzado a unbound (127.0.0.1)"
+        logger -t securizar-dns "VPN $IFACE up: DNS forzado a resolver local (127.0.0.1)"
         ;;
     vpn-down|down)
         logger -t securizar-dns "VPN $IFACE down: NetworkManager restaurará DNS"
@@ -977,14 +1321,14 @@ case "$ACTION" in
 esac
 DNS_HOOK
         chmod 755 /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn
-        log_change "Creado" "/etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn (respaldo con reintentos)"
-        log_info "Hook DNS-VPN instalado: doble protección contra override de VPN comerciales"
+        log_change "Creado" "/etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn (respaldo dual-mode)"
+        log_info "Hook DNS-VPN instalado: protección contra override de VPN comerciales"
     fi
 
     # ── Script para restaurar DNS original ──
     cat > "${ISP_BIN_DIR}/restaurar-dns-isp.sh" << 'DNS_RESTORE'
 #!/bin/bash
-# Restaurar DNS original (deshacer proteccion DoT)
+# Restaurar DNS original (deshacer proteccion DoT/DoH)
 set -euo pipefail
 echo "Restaurando DNS original..."
 if [[ -f /etc/securizar/dns-backup.conf ]]; then
@@ -992,10 +1336,19 @@ if [[ -f /etc/securizar/dns-backup.conf ]]; then
     cat /etc/securizar/dns-backup.conf
 fi
 echo ""
-# Detener unbound
+# Detener ambos resolvers
 systemctl stop unbound 2>/dev/null || true
 systemctl disable unbound 2>/dev/null || true
-echo "[+] unbound detenido"
+systemctl stop dnscrypt-proxy 2>/dev/null || true
+systemctl disable dnscrypt-proxy 2>/dev/null || true
+echo "[+] Resolvers DNS detenidos (unbound + dnscrypt-proxy)"
+# Detener monitor
+systemctl stop securizar-dns-fallback-monitor.timer 2>/dev/null || true
+systemctl disable securizar-dns-fallback-monitor.timer 2>/dev/null || true
+echo "[+] Monitor fallback DNS detenido"
+# Eliminar estado
+rm -f /etc/securizar/dns-mode.conf
+echo "[+] Estado DNS eliminado"
 # Eliminar override global DNS
 rm -f /etc/NetworkManager/conf.d/90-securizar-dns.conf
 rm -f /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn
@@ -1021,9 +1374,9 @@ DNS_RESTORE
     chmod 755 "${ISP_BIN_DIR}/restaurar-dns-isp.sh"
     log_change "Creado" "${ISP_BIN_DIR}/restaurar-dns-isp.sh (restaurar DNS original)"
 
-    log_info "DNS-over-TLS configurado con unbound (puerto 853, cifrado, DNSSEC, ISP no puede interceptar)"
+    log_info "DNS cifrado configurado: modo ${DNS_MODE^^} (puerto $([ "$DNS_MODE" = "dot" ] && echo 853 || echo 443), DNSSEC, ISP no puede interceptar)"
 
-    fi  # cierre del if ! command -v unbound
+    fi  # cierre del if -n DNS_MODE (bloque compartido)
 else
     log_skip "Prevención de fugas DNS"
 fi

@@ -1233,7 +1233,7 @@ submenu_isp() {
     _isp_status() {
         case $1 in
             1) [[ -f /etc/securizar/vpn-killswitch.sh ]] ;;
-            2) systemctl is-enabled unbound &>/dev/null ;;
+            2) systemctl is-enabled unbound &>/dev/null || systemctl is-enabled dnscrypt-proxy &>/dev/null ;;
             3) local _d; for _d in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
                    [[ -f "${_d}/user.js" ]] && grep -q 'network.dns.echconfig.enabled.*true' "${_d}/user.js" 2>/dev/null && return 0
                done; return 1 ;;
