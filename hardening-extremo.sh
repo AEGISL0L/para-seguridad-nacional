@@ -28,7 +28,7 @@ _precheck_result
 
 log_info "1. Deshabilitando servicios de red..."
 
-SERVICES="sshd cups avahi-daemon bluetooth ModemManager"
+SERVICES="sshd cups cups.socket cups-browsed lldpd avahi-daemon bluetooth ModemManager"
 for svc in $SERVICES; do
     if systemctl is-active "$svc" &>/dev/null; then
         systemctl stop "$svc" 2>/dev/null || true

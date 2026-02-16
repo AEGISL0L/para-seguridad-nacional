@@ -217,8 +217,9 @@ elif ask "¿Configurar permisos de captura con grupo wireshark?"; then
                 chmod u+s "$DUMPCAP_PATH" 2>/dev/null || true
             }
             # Verificar capabilities
-            if command -v getcap &>/dev/null; then
-                caps=$(getcap "$DUMPCAP_PATH" 2>/dev/null || echo "ninguna")
+            _getcap=$(command -v getcap 2>/dev/null || echo /usr/sbin/getcap)
+            if [[ -x "$_getcap" ]]; then
+                caps=$("$_getcap" "$DUMPCAP_PATH" 2>/dev/null || echo "ninguna")
                 log_info "Capabilities de dumpcap: $caps"
             fi
             log_change "Capabilities" "$DUMPCAP_PATH (cap_net_raw,cap_net_admin)"

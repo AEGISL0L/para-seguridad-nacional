@@ -350,10 +350,23 @@ elif ask "Instalar herramientas de auditoria de red?"; then
             command -v chronyc &>/dev/null && log_change "Instalado" "chrony"
         fi
 
-        # Activar lldpd si se instaló
+        # LLDP: solo modo recepcion (NO transmitir - filtra OS/kernel/MAC a la red)
         if command -v lldpd &>/dev/null; then
-            systemctl enable --now lldpd 2>/dev/null || true
-            log_info "lldpd activado para descubrimiento LLDP/CDP"
+            # Configurar modo recepcion-only antes de activar
+            mkdir -p /etc/lldpd.d 2>/dev/null || true
+            cat > /etc/lldpd.d/securizar-rx-only.conf << 'EOFLLDP'
+# securizar: lldpd solo en modo recepcion
+# NO transmitir info del sistema (OS, kernel, hostname, MAC) a la red
+configure system description ""
+configure system hostname ""
+configure system platform ""
+configure lldp tx-hold 0
+configure lldp tx-interval 0
+EOFLLDP
+            # Solo activar si el usuario lo necesita para descubrimiento
+            log_warn "lldpd instalado pero NO activado por defecto (filtra info del sistema)"
+            log_info "Para activar en modo RX-only: systemctl enable --now lldpd"
+            log_info "Configuracion securizada en /etc/lldpd.d/securizar-rx-only.conf"
         fi
 
         hash -r 2>/dev/null || true
@@ -4382,8 +4395,11 @@ echo ""
         echo "  $RECO. [ALTA] Endurecer parámetros IPv6 (accept_ra, redirects)"
         ((RECO++)) || true
     fi
-    if ! command -v lldpctl &>/dev/null; then
-        echo "  $RECO. [MEDIA] Instalar lldpd para descubrimiento de topología"
+    if command -v lldpctl &>/dev/null && systemctl is-active lldpd &>/dev/null 2>&1; then
+        echo "  $RECO. [ALTA] lldpd activo - filtra OS/kernel/MAC a la red. Deshabilitar o usar modo RX-only"
+        ((RECO++)) || true
+    elif ! command -v lldpctl &>/dev/null; then
+        echo "  $RECO. [BAJA] Instalar lldpd en modo RX-only para descubrimiento de topología"
         ((RECO++)) || true
     fi
     if ! command -v ethtool &>/dev/null; then

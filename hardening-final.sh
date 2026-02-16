@@ -280,7 +280,7 @@ fi
 log_section "8. DESHABILITAR SERVICIOS INNECESARIOS"
 # ============================================================
 
-SERVICES_TO_CHECK="avahi-daemon cups ModemManager"
+SERVICES_TO_CHECK="avahi-daemon cups cups.socket cups-browsed lldpd ModemManager"
 for svc in $SERVICES_TO_CHECK; do
     if systemctl is-active "$svc" &>/dev/null; then
         echo ""

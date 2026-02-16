@@ -472,13 +472,25 @@ if systemctl is-active cups &>/dev/null; then
     fi
 
     if ask "¿Deshabilitar CUPS completamente (no podrás imprimir)?"; then
-        systemctl stop cups 2>/dev/null || true
-        log_change "Servicio" "cups stop"
-        systemctl disable cups 2>/dev/null || true
-        log_change "Servicio" "cups disable"
-        log_info "CUPS deshabilitado"
+        for _cups_unit in cups.service cups.socket cups-browsed.service; do
+            systemctl stop "$_cups_unit" 2>/dev/null || true
+            systemctl disable "$_cups_unit" 2>/dev/null || true
+            log_change "Servicio" "$_cups_unit stop+disable"
+        done
+        log_info "CUPS deshabilitado completamente (servicio + socket)"
     else
         log_skip "Deshabilitar CUPS completamente"
+    fi
+fi
+
+# ── LLDP: filtra OS/kernel/hostname/MAC a la red ──
+if systemctl is-active lldpd &>/dev/null; then
+    log_warn "lldpd activo - transmite info del sistema (OS, kernel, MAC) a toda la red"
+    if ask "¿Deshabilitar lldpd? (recomendado en estaciones de trabajo)"; then
+        systemctl stop lldpd 2>/dev/null || true
+        systemctl disable lldpd 2>/dev/null || true
+        log_change "Servicio" "lldpd stop+disable"
+        log_info "lldpd deshabilitado (ya no filtra info del sistema)"
     fi
 fi
 

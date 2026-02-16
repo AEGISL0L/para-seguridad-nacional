@@ -9,6 +9,9 @@
 [[ -n "${_SECURIZAR_FIREWALL_LOADED:-}" ]] && return 0
 _SECURIZAR_FIREWALL_LOADED=1
 
+# ── Asegurar que /usr/sbin esta en PATH (nft, getcap, etc.) ─
+[[ ":$PATH:" != *":/usr/sbin:"* ]] && export PATH="/usr/sbin:$PATH"
+
 # ── Deteccion de backend ───────────────────────────────────
 # Permite override via securizar.conf
 if [[ -z "${SECURIZAR_FW_BACKEND:-}" ]]; then
@@ -383,7 +386,10 @@ fw_reload() {
     case "$FW_BACKEND" in
         firewalld) firewall-cmd --reload 2>/dev/null || true ;;
         ufw)       ufw reload 2>/dev/null || true ;;
-        nftables)  systemctl reload nftables 2>/dev/null || nft -f /etc/nftables.conf 2>/dev/null || true ;;
+        nftables)  systemctl reload nftables 2>/dev/null \
+                       || /usr/sbin/nft -f /etc/nftables/rules/main.nft 2>/dev/null \
+                       || /usr/sbin/nft -f /etc/nftables.conf 2>/dev/null \
+                       || true ;;
         iptables)  true ;;  # iptables no tiene reload
     esac
     log_change "Firewall" "reglas recargadas"

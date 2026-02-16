@@ -17,6 +17,9 @@ _SECURIZAR_COMMON_LOADED=1
 # Evita que backups de /etc/shadow, configs SSH, etc. se creen world-readable
 umask 0077
 
+# ── Asegurar /usr/sbin en PATH (nft, getcap, setcap, etc.) ──
+[[ ":$PATH:" != *":/usr/sbin:"* ]] && export PATH="/usr/sbin:$PATH"
+
 # ── Determinar ruta de lib/ ────────────────────────────────
 _SECURIZAR_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
