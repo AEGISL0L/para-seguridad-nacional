@@ -26,6 +26,7 @@
 #   S8  - NTP con NTS (Network Time Security)
 #   S9  - Ofuscación de patrones de tráfico
 #   S10 - Auditoría de metadatos ISP
+#   S11 - Cloudflare WARP + Gateway (perimetro anti-ISP)
 # ============================================================
 
 set -euo pipefail
@@ -62,7 +63,7 @@ _detect_dns_resolver() {
 
 # ── Verificación exhaustiva ──────────────────────────────────
 _isp_verificacion_exhaustiva() {
-    local ok=0 total=24
+    local ok=0 total=27
     local _r _dns_resolver
     _dns_resolver=$(_detect_dns_resolver)
 
@@ -98,7 +99,7 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} Servicio kill switch habilitado"
 
     _r="!!"
-    if ip link show 2>/dev/null | grep -qE '(wg0|tun0|proton0|nordlynx)'; then
+    if ip link show 2>/dev/null | grep -qE '(wg0|tun0|proton0|nordlynx|CloudflareWARP)'; then
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Interfaz VPN activa"
@@ -259,6 +260,26 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} HTTPS-Only mode"
     echo ""
 
+    # ── WARP (3 checks, solo si WARP está instalado) ──
+    if command -v warp-cli &>/dev/null; then
+        echo -e "  ${BOLD}[WARP]${NC}"
+
+        _r="OK"; ((ok++)) || true
+        echo -e "    ${_r} warp-cli instalado"
+
+        _r="!!"
+        if systemctl is-enabled warp-svc &>/dev/null; then _r="OK"; ((ok++)) || true; fi
+        echo -e "    ${_r} warp-svc habilitado"
+
+        _r="!!"
+        if warp-cli status 2>/dev/null | grep -qi 'connected'; then _r="OK"; ((ok++)) || true; fi
+        echo -e "    ${_r} WARP conectado"
+        echo ""
+    else
+        # WARP no instalado: reducir total (no penalizar)
+        ((total -= 3)) || true
+    fi
+
     # ── Herramientas (3 checks) ──
     echo -e "  ${BOLD}[Herramientas]${NC}"
 
@@ -278,9 +299,9 @@ _isp_verificacion_exhaustiva() {
     # ── Scoring ──
     echo "  ─────────────────────────────────────────"
     local nivel
-    if [[ $ok -ge 21 ]]; then
+    if [[ $ok -ge 24 ]]; then
         nivel="EXCELENTE"
-    elif [[ $ok -ge 16 ]]; then
+    elif [[ $ok -ge 18 ]]; then
         nivel="BUENO"
     elif [[ $ok -ge 10 ]]; then
         nivel="MEJORABLE"
@@ -299,7 +320,7 @@ fi
 
 # ── Pre-check: detectar secciones ya aplicadas ──────────────
 if [[ "$ISP_SECTION" == "all" ]]; then
-_precheck 10
+_precheck 11
 _pc 'check_file_exists /etc/securizar/vpn-killswitch.sh && check_file_exists /etc/systemd/system/securizar-vpn-killswitch.service && check_file_exists /etc/sysctl.d/99-securizar-ipv6.conf'
 _pc 'check_service_enabled unbound || check_service_enabled dnscrypt-proxy'
 _pc true  # S3 - ECH Firefox (perfiles dinámicos)
@@ -310,6 +331,7 @@ _pc true  # S7 - HTTPS-only (perfiles dinámicos)
 _pc 'check_file_exists /etc/chrony.d/securizar-nts.conf'
 _pc 'check_service_enabled securizar-traffic-pad.service'
 _pc 'check_executable /usr/local/bin/auditoria-isp.sh'
+_pc 'command -v warp-cli &>/dev/null && systemctl is-enabled warp-svc &>/dev/null'
 _precheck_result
 fi  # all - precheck
 
@@ -335,6 +357,7 @@ echo -e "  ${CYAN}S7${NC}  HTTPS-Only enforcement"
 echo -e "  ${CYAN}S8${NC}  NTP con NTS (Network Time Security)"
 echo -e "  ${CYAN}S9${NC}  Ofuscación de patrones de tráfico"
 echo -e "  ${CYAN}S10${NC} Auditoría de metadatos ISP"
+echo -e "  ${CYAN}S11${NC} Cloudflare WARP + Gateway (perímetro anti-ISP)"
 echo ""
 fi  # all - banner
 
@@ -384,6 +407,8 @@ if command -v nft &>/dev/null; then
     nft add rule inet securizar_ks output oifname "tun*" accept
     # Permitir interfaces WireGuard (ProtonVPN, Mullvad, etc.)
     nft add rule inet securizar_ks output oifname "proton*" accept
+    # Permitir Cloudflare WARP
+    nft add rule inet securizar_ks output oifname "CloudflareWARP" accept
     # Permitir conexiones establecidas
     nft add rule inet securizar_ks output ct state established,related accept
     # DROP todo lo demás
@@ -413,6 +438,8 @@ elif command -v iptables &>/dev/null; then
     iptables -A "$CHAIN" -o tun+ -j ACCEPT
     # WireGuard (ProtonVPN, Mullvad, etc.)
     iptables -A "$CHAIN" -o proton+ -j ACCEPT
+    # Cloudflare WARP
+    iptables -A "$CHAIN" -o CloudflareWARP -j ACCEPT
     iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A "$CHAIN" -j DROP
     iptables -I OUTPUT -j "$CHAIN"
@@ -484,12 +511,12 @@ case "$ACTION" in
         ;;
     up)
         # WireGuard (ProtonVPN, Mullvad, etc.)
-        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*)
+        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|CloudflareWARP*)
             /etc/securizar/vpn-killswitch.sh 2>/dev/null || true
         esac
         ;;
     down)
-        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*)
+        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|CloudflareWARP*)
             /etc/securizar/vpn-killswitch-off.sh 2>/dev/null || true
         esac
         ;;
@@ -519,7 +546,7 @@ if [[ -f "${ISP_CONF_DIR}/vpn-killswitch.sh" ]]; then
     if [[ "$_ks_active" == "true" ]]; then
         log_already "Kill switch activo (reglas firewall presentes)"
     else
-        for _ks_iface in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx; do
+        for _ks_iface in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx CloudflareWARP; do
             if ip link show "$_ks_iface" &>/dev/null 2>&1; then
                 if ask "VPN $_ks_iface detectada pero kill switch NO activo. ¿Activar ahora?"; then
                     bash "${ISP_CONF_DIR}/vpn-killswitch.sh" 2>/dev/null && \
@@ -548,7 +575,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStartPre=/bin/bash -c 'for i in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx; do ip link show "$i" 2>/dev/null && exit 0; done; exit 1'
+ExecStartPre=/bin/bash -c 'for i in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx CloudflareWARP; do ip link show "$i" 2>/dev/null && exit 0; done; exit 1'
 ExecStart=/etc/securizar/vpn-killswitch.sh
 ExecStop=/etc/securizar/vpn-killswitch-off.sh
 ProtectHome=yes
@@ -1051,6 +1078,13 @@ switch_to_doh() {
     sed -i 's/^DNS_MODE=.*/DNS_MODE=doh/' "$CONF"
     logger -t "$LOG_TAG" "Modo cambiado a DoH (puerto 853 bloqueado)"
 }
+
+# Si WARP activo en modo warp+doh o doh, no interferir
+if command -v warp-cli &>/dev/null; then
+    if warp-cli status 2>/dev/null | grep -qi 'connected'; then
+        exit 0
+    fi
+fi
 
 # Lógica principal
 if dns_works; then
@@ -1930,10 +1964,10 @@ elif ask "¿Instalar auditoría de metadatos ISP?"; then
 # Editar para ajustar a tu entorno. Reaplicar módulo no sobreescribe.
 
 # === Interfaces VPN a detectar (separadas por espacio) ===
-VPN_INTERFACES="wg0 tun0 tun1 proton0 mullvad-wg nordlynx"
+VPN_INTERFACES="wg0 tun0 tun1 proton0 mullvad-wg nordlynx CloudflareWARP"
 
 # === Procesos VPN esperados ===
-VPN_PROCESSES="openvpn wireguard wg-quick"
+VPN_PROCESSES="openvpn wireguard wg-quick warp-svc"
 
 # === DNS ===
 DNS_LOCAL_ADDR="127.0.0.1"
@@ -2007,8 +2041,8 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # ── Valores por defecto (sobreescritos por conf) ──
-VPN_INTERFACES="wg0 tun0 tun1 proton0 mullvad-wg nordlynx"
-VPN_PROCESSES="openvpn wireguard wg-quick"
+VPN_INTERFACES="wg0 tun0 tun1 proton0 mullvad-wg nordlynx CloudflareWARP"
+VPN_PROCESSES="openvpn wireguard wg-quick warp-svc"
 DNS_LOCAL_ADDR="127.0.0.1"
 DNS_SERVICE="unbound"
 DNS_CONF="/etc/unbound/unbound.conf"
@@ -2604,6 +2638,440 @@ else
 fi
 fi  # S10
 
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S11" ]]; then
+# ============================================================
+# S11 — CLOUDFLARE WARP + GATEWAY (PERÍMETRO ANTI-ISP)
+# ============================================================
+log_section "S11: CLOUDFLARE WARP + GATEWAY"
+
+echo "Cloudflare WARP cifra TODO el tráfico mediante túnel WireGuard a Cloudflare Edge."
+echo "En modo warp+doh el ISP no puede ver ni DNS ni tráfico. Gratis hasta 50 usuarios."
+echo ""
+echo "NOTA: WARP conecta via WireGuard (UDP 2408) a IPs edge de Cloudflare,"
+echo "NO a 1.1.1.1. Si tu ISP bloquea 1.1.1.1, WARP puede sortear ese bloqueo"
+echo "porque usa endpoints diferentes para el túnel."
+echo ""
+echo "Modos disponibles:"
+echo "  - warp+doh  : túnel completo (ISP no ve nada) ← recomendado"
+echo "  - doh       : solo DNS cifrado (coexiste con VPN externa)"
+echo ""
+
+if command -v warp-cli &>/dev/null && systemctl is-enabled warp-svc &>/dev/null; then
+    log_already "Cloudflare WARP (warp-cli instalado, warp-svc habilitado)"
+elif ask "¿Instalar Cloudflare WARP?"; then
+
+    # ── Pre-flight: detectar bloqueo ISP a Cloudflare 1.1.1.1 ──
+    local _isp_blocks_cf=false
+    if ! timeout 4 bash -c 'echo | openssl s_client -connect 1.1.1.1:443 2>/dev/null' | grep -q 'CONNECTED' 2>/dev/null; then
+        _isp_blocks_cf=true
+        log_warn "ISP BLOQUEA 1.1.1.1:443 — WARP en modo warp+doh evita este bloqueo"
+        log_warn "  El túnel WireGuard usa IPs edge diferentes (no 1.1.1.1)"
+        log_warn "  Además corrige: DNS sin validación DNSSEC del ISP"
+    fi
+
+    # ── Pre-flight: verificar conectividad a endpoints WARP ──
+    local _warp_reachable=false
+    if timeout 5 bash -c 'echo >/dev/tcp/engage.cloudflareclient.com/443' 2>/dev/null; then
+        _warp_reachable=true
+    elif timeout 5 curl -sf --max-time 5 -o /dev/null https://engage.cloudflareclient.com 2>/dev/null; then
+        _warp_reachable=true
+    fi
+
+    if [[ "$_warp_reachable" == "true" ]]; then
+        log_info "Endpoint WARP accesible (engage.cloudflareclient.com)"
+    else
+        log_warn "Endpoint WARP no respondió — la instalación podría fallar"
+        log_warn "  Si el ISP bloquea engage.cloudflareclient.com, WARP no funcionará"
+    fi
+
+    # ── Paso 1: Añadir repositorio oficial ──
+    log_info "Añadiendo repositorio Cloudflare WARP..."
+
+    case "${DISTRO_FAMILY:-unknown}" in
+        debian)
+            # GPG key + apt sources
+            if [[ ! -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg ]]; then
+                curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+                    | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg 2>/dev/null
+                log_change "Añadida" "GPG key Cloudflare WARP"
+            fi
+            local _codename
+            _codename=$(lsb_release -cs 2>/dev/null || echo "bookworm")
+            echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${_codename} main" \
+                > /etc/apt/sources.list.d/cloudflare-client.list
+            apt-get update -qq 2>/dev/null || true
+            log_change "Añadido" "Repo APT Cloudflare WARP (${_codename})"
+            ;;
+        rhel)
+            rpm --import https://pkg.cloudflareclient.com/pubkey.gpg 2>/dev/null || true
+            cat > /etc/yum.repos.d/cloudflare-warp.repo << 'CF_REPO_RPM'
+[cloudflare-warp]
+name=Cloudflare WARP Client
+baseurl=https://pkg.cloudflareclient.com/rpm
+enabled=1
+gpgcheck=1
+gpgkey=https://pkg.cloudflareclient.com/pubkey.gpg
+CF_REPO_RPM
+            log_change "Añadido" "Repo RPM Cloudflare WARP"
+            ;;
+        suse)
+            rpm --import https://pkg.cloudflareclient.com/pubkey.gpg 2>/dev/null || true
+            zypper addrepo --refresh --no-gpgcheck \
+                https://pkg.cloudflareclient.com/rpm cloudflare-warp 2>/dev/null || true
+            log_change "Añadido" "Repo zypper Cloudflare WARP"
+            ;;
+        arch)
+            log_warn "Arch Linux: WARP no tiene repo oficial, intentando AUR..."
+            if command -v yay &>/dev/null; then
+                yay -S --noconfirm cloudflare-warp-bin 2>/dev/null || true
+            elif command -v paru &>/dev/null; then
+                paru -S --noconfirm cloudflare-warp-bin 2>/dev/null || true
+            else
+                log_error "No se encontró yay ni paru. Instala cloudflare-warp-bin desde AUR manualmente."
+            fi
+            ;;
+        *)
+            log_warn "Distribución no reconocida (${DISTRO_FAMILY:-unknown}). Repo no añadido."
+            ;;
+    esac
+
+    # ── Paso 2: Instalar paquete ──
+    if ! command -v warp-cli &>/dev/null; then
+        log_info "Instalando paquete cloudflare-warp..."
+        case "${DISTRO_FAMILY:-unknown}" in
+            debian)   apt-get install -y cloudflare-warp 2>/dev/null || true ;;
+            rhel)     dnf install -y cloudflare-warp 2>/dev/null || yum install -y cloudflare-warp 2>/dev/null || true ;;
+            suse)     zypper install -y cloudflare-warp 2>/dev/null || true ;;
+            # arch ya se manejó en paso 1 via AUR
+        esac
+    fi
+
+    if ! command -v warp-cli &>/dev/null; then
+        log_error "warp-cli no se pudo instalar. Revisa manualmente."
+        log_warn "Visita: https://developers.cloudflare.com/warp-client/get-started/linux/"
+    else
+
+    log_change "Instalado" "cloudflare-warp (warp-cli disponible)"
+
+    # ── Paso 3: Habilitar y arrancar servicio ──
+    systemctl enable warp-svc 2>/dev/null || true
+    systemctl start warp-svc 2>/dev/null || true
+
+    # Esperar a que el daemon esté listo
+    local _warp_wait=0
+    while ! warp-cli status &>/dev/null && [[ $_warp_wait -lt 15 ]]; do
+        sleep 1
+        ((_warp_wait++)) || true
+    done
+
+    if warp-cli status &>/dev/null; then
+        log_info "warp-svc activo y respondiendo"
+    else
+        log_warn "warp-svc iniciado pero daemon puede tardar en responder"
+    fi
+
+    # ── Paso 4: Registrar dispositivo ──
+    if ! warp-cli registration show &>/dev/null 2>&1; then
+        log_info "Registrando dispositivo en Cloudflare WARP..."
+        warp-cli registration new 2>/dev/null || true
+        log_change "Registrado" "Dispositivo en Cloudflare WARP (free tier)"
+    else
+        log_already "Dispositivo ya registrado en WARP"
+    fi
+
+    # ── Paso 5: Elegir modo ──
+    echo ""
+    echo "  Elige el modo de operación de WARP:"
+    echo ""
+    echo "    1) warp+doh  — Túnel completo (ISP no ve NADA) [recomendado]"
+    echo "    2) doh       — Solo DNS cifrado (coexiste con VPN externa)"
+    echo ""
+    if [[ "$_isp_blocks_cf" == "true" ]]; then
+        echo -e "  ${YELLOW}⚠${NC}  Tu ISP bloquea 1.1.1.1 → modo warp+doh FUERTEMENTE recomendado:"
+        echo "       - Sortea el bloqueo DNS del ISP completamente"
+        echo "       - Añade validación DNSSEC real (tu ISP no valida)"
+        echo "       - El ISP no puede ver ni manipular ninguna consulta DNS"
+        echo ""
+    fi
+    local _warp_mode_choice
+    read -rp "$(echo -e "  ${CYAN}❯${NC} Modo [1]: ")" _warp_mode_choice
+    _warp_mode_choice="${_warp_mode_choice:-1}"
+
+    local _warp_mode="warp+doh"
+    case "$_warp_mode_choice" in
+        2) _warp_mode="doh"
+           warp-cli mode doh 2>/dev/null || true
+           log_change "Modo WARP" "doh (solo DNS, coexiste con VPN)"
+           ;;
+        *) _warp_mode="warp+doh"
+           warp-cli mode warp+doh 2>/dev/null || true
+           log_change "Modo WARP" "warp+doh (túnel completo)"
+           ;;
+    esac
+
+    # ── Paso 6: Opcional Zero Trust ──
+    local _warp_team="" _warp_gw_endpoint=""
+    if ask "¿Configurar Cloudflare Zero Trust (Teams)?"; then
+        echo ""
+        read -rp "$(echo -e "  ${CYAN}❯${NC} Nombre del equipo (team name): ")" _warp_team
+        if [[ -n "$_warp_team" ]]; then
+            warp-cli teams-enroll "$_warp_team" 2>/dev/null || \
+                log_warn "teams-enroll falló — completa el enrollment vía navegador"
+            log_change "Zero Trust" "Enrollment iniciado (team: ${_warp_team})"
+        fi
+
+        if ask "¿Configurar Gateway DNS endpoint personalizado?"; then
+            read -rp "$(echo -e "  ${CYAN}❯${NC} DNS endpoint (ej: abc123.cloudflare-gateway.com): ")" _warp_gw_endpoint
+            if [[ -n "$_warp_gw_endpoint" ]]; then
+                warp-cli dns endpoint "$_warp_gw_endpoint" 2>/dev/null || \
+                    log_warn "dns endpoint falló — configúralo vía dashboard.cloudflare.com"
+                log_change "Gateway DNS" "Endpoint: ${_warp_gw_endpoint}"
+            fi
+        fi
+    else
+        log_info "Zero Trust omitido. Puedes configurarlo después:"
+        log_info "  warp-cli teams-enroll <team-name>"
+        log_info "  warp-cli dns endpoint <endpoint>"
+    fi
+
+    # ── Paso 7: Conectar y verificar ──
+    log_info "Conectando WARP..."
+    warp-cli connect 2>/dev/null || true
+    sleep 3
+
+    if warp-cli status 2>/dev/null | grep -qi 'connected'; then
+        log_info "WARP conectado correctamente"
+
+        # Verificar que el túnel funciona via trace
+        local _post_trace
+        _post_trace=$(curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)
+        if echo "$_post_trace" | grep -q 'warp=on\|warp=plus'; then
+            log_info "Cloudflare trace confirma: tráfico pasa por WARP"
+            echo "$_post_trace" | grep -E '^(warp|colo|ip)=' 2>/dev/null | while read -r _line; do
+                log_info "  $_line"
+            done
+        fi
+
+        # Si ISP bloqueaba 1.1.1.1, verificar que WARP lo sortea
+        if [[ "$_isp_blocks_cf" == "true" ]]; then
+            if timeout 5 bash -c 'echo | openssl s_client -connect 1.1.1.1:443 2>/dev/null' | grep -q 'CONNECTED' 2>/dev/null; then
+                log_info "WARP sortea bloqueo ISP: 1.1.1.1:443 ahora accesible via túnel"
+            else
+                log_warn "1.1.1.1:443 sigue bloqueado — pero DNS va cifrado por WARP"
+            fi
+        fi
+    else
+        log_warn "WARP no confirmó conexión — verifica con: warp-cli status"
+    fi
+
+    # ── Paso 8: Guardar configuración ──
+    cat > "${ISP_CONF_DIR}/warp-mode.conf" << WARP_CONF
+# Cloudflare WARP - Configuración Securizar M38 S11
+# Generado: $(date -Iseconds)
+WARP_MODE="${_warp_mode}"
+WARP_TEAM="${_warp_team}"
+WARP_GW_ENDPOINT="${_warp_gw_endpoint}"
+ISP_BLOCKS_CF="${_isp_blocks_cf}"
+WARP_CONF
+    chmod 640 "${ISP_CONF_DIR}/warp-mode.conf"
+    log_change "Creado" "${ISP_CONF_DIR}/warp-mode.conf"
+
+    # ── Paso 9: Script de diagnóstico ──
+    cat > "${ISP_BIN_DIR}/diagnostico-warp.sh" << 'DIAG_WARP'
+#!/bin/bash
+# ============================================================
+# Diagnóstico Cloudflare WARP - Securizar M38 S11
+# ============================================================
+set -euo pipefail
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+echo ""
+echo -e "${CYAN}━━ Diagnóstico Cloudflare WARP ━━${NC}"
+echo ""
+
+# 1. Servicio
+echo -e "${BOLD}[Servicio]${NC}"
+if systemctl is-active warp-svc &>/dev/null; then
+    echo -e "  ${GREEN}OK${NC} warp-svc activo"
+else
+    echo -e "  ${RED}!!${NC} warp-svc NO activo"
+    systemctl status warp-svc --no-pager 2>/dev/null | head -5 || true
+fi
+echo ""
+
+# 2. Estado WARP
+echo -e "${BOLD}[Estado WARP]${NC}"
+if command -v warp-cli &>/dev/null; then
+    warp-cli status 2>/dev/null || echo -e "  ${RED}!!${NC} warp-cli status falló"
+    echo ""
+    echo -e "${BOLD}[Settings]${NC}"
+    warp-cli settings 2>/dev/null || echo -e "  ${DIM}(settings no disponible)${NC}"
+else
+    echo -e "  ${RED}!!${NC} warp-cli no instalado"
+fi
+echo ""
+
+# 3. Interfaz de red
+echo -e "${BOLD}[Interfaz]${NC}"
+if ip addr show CloudflareWARP &>/dev/null 2>&1; then
+    ip addr show CloudflareWARP 2>/dev/null
+else
+    echo -e "  ${YELLOW}!!${NC} Interfaz CloudflareWARP no encontrada"
+fi
+echo ""
+
+# 4. Test Cloudflare trace
+echo -e "${BOLD}[Cloudflare Trace]${NC}"
+_trace=$(curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "ERROR")
+if echo "$_trace" | grep -q 'warp=on'; then
+    echo -e "  ${GREEN}OK${NC} warp=on detectado"
+elif echo "$_trace" | grep -q 'warp=plus'; then
+    echo -e "  ${GREEN}OK${NC} warp=plus (WARP+) detectado"
+elif echo "$_trace" | grep -q 'warp=off'; then
+    echo -e "  ${YELLOW}!!${NC} warp=off — WARP no está enrutando tráfico"
+else
+    echo -e "  ${RED}!!${NC} No se pudo obtener trace de Cloudflare"
+fi
+echo "$_trace" | grep -E '^(ip|warp|gateway|colo)=' 2>/dev/null || true
+echo ""
+
+# 5. Test DNS
+echo -e "${BOLD}[Test DNS]${NC}"
+if nslookup example.com &>/dev/null; then
+    echo -e "  ${GREEN}OK${NC} DNS funcional"
+    nslookup example.com 2>/dev/null | grep -E 'Server|Address|Name' | head -5
+else
+    echo -e "  ${RED}!!${NC} DNS no responde"
+fi
+echo ""
+
+# 6. Bloqueo ISP a Cloudflare 1.1.1.1
+echo -e "${BOLD}[Bloqueo ISP]${NC}"
+_cf_blocked=false
+for _tgt in 1.1.1.1 1.0.0.1; do
+    if timeout 4 bash -c "echo | openssl s_client -connect ${_tgt}:443 2>/dev/null" | grep -q 'CONNECTED' 2>/dev/null; then
+        echo -e "  ${GREEN}OK${NC} ${_tgt}:443 accesible"
+    else
+        echo -e "  ${RED}!!${NC} ${_tgt}:443 BLOQUEADO por ISP"
+        _cf_blocked=true
+    fi
+done
+if [[ "$_cf_blocked" == "true" ]]; then
+    echo -e "  ${YELLOW}→${NC}  ISP bloquea acceso directo a Cloudflare DNS"
+    echo -e "  ${YELLOW}→${NC}  WARP en modo warp+doh sortea este bloqueo via túnel WireGuard"
+fi
+echo ""
+
+# 7. DNSSEC validation
+echo -e "${BOLD}[DNSSEC]${NC}"
+if command -v dig &>/dev/null; then
+    _dig_out=$(dig +dnssec +short example.com A 2>/dev/null || true)
+    _dig_flags=$(dig +dnssec example.com A 2>/dev/null | grep 'flags:' || true)
+    if echo "$_dig_flags" | grep -q ' ad'; then
+        echo -e "  ${GREEN}OK${NC} DNSSEC validación activa (flag ad presente)"
+    else
+        echo -e "  ${YELLOW}!!${NC} DNSSEC NO validado (flag ad ausente)"
+        if warp-cli status 2>/dev/null | grep -qi 'connected'; then
+            echo -e "  ${YELLOW}→${NC}  Con WARP en warp+doh, Cloudflare valida DNSSEC por ti"
+        else
+            echo -e "  ${RED}→${NC}  Sin WARP activo, tu ISP NO valida DNSSEC"
+        fi
+    fi
+else
+    echo -e "  ${DIM}(dig no disponible, instala bind-utils/dnsutils)${NC}"
+fi
+echo ""
+
+# 8. Configuración guardada
+echo -e "${BOLD}[Config]${NC}"
+if [[ -f /etc/securizar/warp-mode.conf ]]; then
+    cat /etc/securizar/warp-mode.conf | grep -v '^#'
+else
+    echo -e "  ${DIM}(sin configuración guardada)${NC}"
+fi
+echo ""
+DIAG_WARP
+    chmod 755 "${ISP_BIN_DIR}/diagnostico-warp.sh"
+    log_change "Creado" "${ISP_BIN_DIR}/diagnostico-warp.sh"
+
+    # ── Paso 10: Script de restauración ──
+    cat > "${ISP_BIN_DIR}/restaurar-warp.sh" << 'REST_WARP'
+#!/bin/bash
+# ============================================================
+# Restaurar / Desinstalar Cloudflare WARP - Securizar M38 S11
+# ============================================================
+set -euo pipefail
+
+echo "[*] Desconectando WARP..."
+warp-cli disconnect 2>/dev/null || true
+
+echo "[*] Eliminando registro..."
+warp-cli registration delete 2>/dev/null || true
+
+echo "[*] Deteniendo servicio..."
+systemctl stop warp-svc 2>/dev/null || true
+systemctl disable warp-svc 2>/dev/null || true
+
+echo "[*] Eliminando repositorio según distro..."
+# Detectar familia
+if [[ -f /etc/os-release ]]; then
+    source /etc/os-release
+    case "${ID_LIKE:-$ID}" in
+        *debian*|*ubuntu*)
+            rm -f /etc/apt/sources.list.d/cloudflare-client.list
+            rm -f /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+            apt-get remove -y cloudflare-warp 2>/dev/null || true
+            ;;
+        *rhel*|*fedora*|*centos*)
+            rm -f /etc/yum.repos.d/cloudflare-warp.repo
+            dnf remove -y cloudflare-warp 2>/dev/null || yum remove -y cloudflare-warp 2>/dev/null || true
+            ;;
+        *suse*)
+            zypper removerepo cloudflare-warp 2>/dev/null || true
+            zypper remove -y cloudflare-warp 2>/dev/null || true
+            ;;
+        *arch*)
+            pacman -Rns --noconfirm cloudflare-warp-bin 2>/dev/null || true
+            ;;
+    esac
+fi
+
+echo "[*] Limpiando configuración..."
+rm -f /etc/securizar/warp-mode.conf
+
+echo "[+] Cloudflare WARP desinstalado completamente"
+REST_WARP
+    chmod 755 "${ISP_BIN_DIR}/restaurar-warp.sh"
+    log_change "Creado" "${ISP_BIN_DIR}/restaurar-warp.sh"
+
+    # ── Paso 11: Coexistencia S2 + DNSSEC ──
+    if [[ "$_warp_mode" == "warp+doh" ]]; then
+        log_warn "WARP en modo warp+doh: bypasea el resolver DNS local (unbound/dnscrypt-proxy)"
+        log_warn "  Si necesitas DNS local activo, usa modo 'doh': warp-cli mode doh"
+        if [[ "$_isp_blocks_cf" == "true" ]]; then
+            log_info "WARP corrige 2 problemas de tu ISP:"
+            log_info "  1. Bloqueo de 1.1.1.1 (tráfico va por túnel WireGuard)"
+            log_info "  2. DNS sin DNSSEC (Cloudflare valida DNSSEC en su edge)"
+        fi
+    fi
+
+    log_info "Cloudflare WARP S11 completado"
+    log_info "Diagnóstico: diagnostico-warp.sh"
+    log_info "Desinstalar: restaurar-warp.sh"
+
+    fi  # warp-cli installed successfully
+else
+    log_skip "Cloudflare WARP"
+fi
+fi  # S11
+
 if [[ "$ISP_SECTION" == "all" ]]; then
 # ============================================================
 # RESUMEN FINAL
@@ -2620,6 +3088,8 @@ echo "║     • /usr/local/bin/detectar-http-inseguro.sh (HTTP)        ║"
 echo "║     • /usr/local/bin/securizar-traffic-pad.sh  (padding)     ║"
 echo "║     • /usr/local/bin/auditoria-isp.sh         (20 checks)   ║"
 echo "║     • /etc/securizar/auditoria-isp.conf      (configuración)║"
+echo "║     • /usr/local/bin/diagnostico-warp.sh     (WARP diag)   ║"
+echo "║     • /usr/local/bin/restaurar-warp.sh       (WARP remove) ║"
 echo "║                                                              ║"
 echo "║   Auditoría: auditoria-isp.sh [--report] [--quiet]          ║"
 echo "║   Secciones: --section vpn|dns|net|browser|traffic           ║"

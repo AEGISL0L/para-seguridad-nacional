@@ -440,15 +440,47 @@ Parámetros ya correctos en el sistema (no requirieron cambio):
 - **rng-tools**: enabled, alimenta pool al arranque y sale (no hardware RNG persistente)
 - **sysctl** (`/etc/sysctl.d/99-max-entropy.conf`): `read_wakeup_threshold=2048`, `write_wakeup_threshold=4096`, `urandom_min_reseed_secs=10`
 
-### Estado de auditoría de red (2026-02-16)
+### Estado de auditoría de red (2026-02-16, actualizado)
 - **Puntuación configuración de red**: 100/100 (0 problemas)
 - **Reporte global**: todos los checks OK excepto suricata (no instalado, opcional)
-- **Superficie de ataque**: 2 puertos TCP en escucha (CUPS en 127.0.0.1:631), 0 binds globales
-- **Firewall**: firewalld activo, zona public, servicios: dhcpv6-client, ssh
+- **Superficie de ataque**: 0 puertos TCP en escucha, 1 UDP (chrony 323/udp localhost)
+- **Firewall**: nftables activo (migrado de firewalld), política DROP input, ACCEPT output
 - **Baseline**: configurada, sin drift
-- **Red**: 192.168.1.133/24 vía wlp0s20f3, gateway 192.168.1.1 (Sagemcom)
-- **Router (192.168.1.1)**: 6 puertos abiertos (53/dns, 80/http, 139+445/smb, 443/https, 49153/upnp) — pendiente: desactivar UPnP y SMB, actualizar firmware (dnsmasq 2.78, kernel 3.4.11)
-- **DNS**: ISP sin cifrado (212.230.135.x) — WARN informativo, no penaliza
+- **Red**: 192.168.1.133/24 vía wlp0s20f3, gateway 192.168.1.1 (Sagemcom d0:6e:de:13:21:04)
+- **Router (192.168.1.1)**: SMB/NetBIOS (139+445) abierto en router pero BLOQUEADO por nftables local. Pendiente: desactivar desde panel del router, actualizar firmware
+- **DNS**: migrado de ISP (212.230.135.x) a Quad9 (9.9.9.9) + Google (8.8.8.8). Quad9 filtra dominios malware
+- **ISP bloquea Cloudflare**: 1.1.1.1 bloqueado completamente (ICMP, UDP 53, TCP 443). Usar 9.9.9.9 o 8.8.8.8
+
+#### Servicios deshabilitados en auditoría (2026-02-16)
+- **CUPS** (cups.service + cups.socket + cups-browsed) — sin impresora, cerraba puerto 631
+- **LLDP** (lldpd.service) — filtraba OS (openSUSE Leap 16.0), kernel (6.12.0-160000.9), hostname y MAC a toda la red via broadcast cada 30s
+
+#### Firewall nftables (tabla inet filter)
+Reglas activas:
+- **Input policy DROP** — todo bloqueado por defecto
+- Loopback accept, established/related accept
+- ICMP básico accept, DHCP client accept
+- **SMB/NetBIOS bloqueado** entrada (137-139 udp/tcp, 445 tcp)
+- **SMB/NetBIOS bloqueado** salida (137-139 udp/tcp, 445 tcp)
+- **LLMNR bloqueado** (5355 udp) entrada+salida
+- **mDNS bloqueado** (5353 udp) entrada+salida
+- TCP reject with RST, UDP reject with icmp port-unreachable
+
+Ruta config openSUSE: `/etc/nftables/rules/main.nft` (NO `/etc/nftables.conf`)
+
+#### Hallazgos de auditoría tshark (2026-02-16)
+Auditoría de 25+ vectores con capturas de 15s, 30s, 60s y 90s (total >10000 paquetes):
+- **0 intrusos** detectados en la red
+- **0 ARP poisoning**, 0 DNS poisoning, 0 DHCP rogue, 0 LLMNR/mDNS poisoning
+- **0 protocolos inseguros** (FTP, Telnet, HTTP, POP3, IMAP, SMTP)
+- **0 credenciales en claro**, 0 paquetes malformados
+- **0 puertos C2/TOR/backdoor**, 0 ICMP tunneling, 0 DNS tunneling
+- **0 procesos ocultos**, 0 SUID/SGID no-stock, 0 LD_PRELOAD hijack
+- **0 módulos kernel no-stock**, 0 payloads en /tmp o /dev/shm
+- **Router hace NBNS broadcast** (nombre "HOME", SMBv1) — bloqueado por firewall
+- **2 MACs en red**: tu WiFi (e8:b0:c5) + router (d0:6e:de) — solo tú
+- **Todo tráfico cifrado** TLS 1.2/1.3, solo destinos legítimos (Anthropic, Google, ProtonMail, GitHub)
+- **NTP** sincronizado contra servidores europeos legítimos (tick.espanix.net, time3.sebhosting.de)
 
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)

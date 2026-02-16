@@ -1228,6 +1228,7 @@ submenu_isp() {
         [8]="NTP con NTS"
         [9]="Ofuscación tráfico"
         [10]="Auditoría metadatos ISP"
+        [11]="Cloudflare WARP + Gateway"
     )
 
     _isp_status() {
@@ -1250,6 +1251,7 @@ submenu_isp() {
             8) [[ -f /etc/chrony.d/securizar-nts.conf ]] ;;
             9) systemctl is-enabled securizar-traffic-pad.service &>/dev/null ;;
             10) [[ -x /usr/local/bin/auditoria-isp.sh ]] ;;
+            11) command -v warp-cli &>/dev/null && systemctl is-enabled warp-svc &>/dev/null ;;
         esac
     }
 
@@ -1261,7 +1263,7 @@ submenu_isp() {
         echo ""
 
         local s
-        for s in 1 2 3 4 5 6 7 8 9 10; do
+        for s in 1 2 3 4 5 6 7 8 9 10 11; do
             local icon
             if _isp_status "$s"; then
                 icon="${GREEN}✓${NC}"
@@ -1279,7 +1281,7 @@ submenu_isp() {
         read -r opt
 
         case "$opt" in
-            [1-9]|10)
+            [1-9]|1[01])
                 local sn="S${opt}"
                 echo ""
                 echo -e "  ${CYAN}━━${NC} ${BOLD}Módulo 36 / ${SEC_NAMES[$opt]}${NC} ${CYAN}━━${NC}"
@@ -1296,7 +1298,7 @@ submenu_isp() {
             t|T)
                 echo ""
                 echo -e "  ${BG_CYAN} Protección contra ISP ${NC}"
-                echo -e "  ${DIM}Se ejecutarán las 10 secciones secuencialmente${NC}"
+                echo -e "  ${DIM}Se ejecutarán las 11 secciones secuencialmente${NC}"
                 if ask "¿Continuar con todas las secciones?"; then
                     reset_changes
                     local rc=0
@@ -4356,7 +4358,16 @@ verificacion_proactiva() {
     _vp_xcheck /usr/local/bin/auditoria-isp.sh \
         "Auditoría ISP instalada" "Auditoría ISP NO instalada"
 
-    # ── 46. Hardening criptográfico 
+    # Cloudflare WARP
+    if command -v warp-cli &>/dev/null && systemctl is-enabled warp-svc &>/dev/null; then
+        echo -e "  ${GREEN}OK${NC}  Cloudflare WARP instalado"
+        _vp_ok
+    else
+        echo -e "  ${YELLOW}!!${NC}  Cloudflare WARP NO instalado"
+        _vp_fail
+    fi
+
+    # ── 46. Hardening criptográfico
     echo ""
     _mark_section 46
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[46/87] HARDENING CRIPTOGRÁFICO${NC}"
