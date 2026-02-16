@@ -440,47 +440,88 @@ Parámetros ya correctos en el sistema (no requirieron cambio):
 - **rng-tools**: enabled, alimenta pool al arranque y sale (no hardware RNG persistente)
 - **sysctl** (`/etc/sysctl.d/99-max-entropy.conf`): `read_wakeup_threshold=2048`, `write_wakeup_threshold=4096`, `urandom_min_reseed_secs=10`
 
-### Estado de auditoría de red (2026-02-16, actualizado)
+### Estado de auditoría de red (2026-02-16, auditoría exhaustiva)
 - **Puntuación configuración de red**: 100/100 (0 problemas)
 - **Reporte global**: todos los checks OK excepto suricata (no instalado, opcional)
 - **Superficie de ataque**: 0 puertos TCP en escucha, 1 UDP (chrony 323/udp localhost)
-- **Firewall**: nftables activo (migrado de firewalld), política DROP input, ACCEPT output
+- **Firewall**: nftables activo, firewalld masked. Política DROP input, DROP forward, ACCEPT output
 - **Baseline**: configurada, sin drift
-- **Red**: 192.168.1.133/24 vía wlp0s20f3, gateway 192.168.1.1 (Sagemcom d0:6e:de:13:21:04)
-- **Router (192.168.1.1)**: SMB/NetBIOS (139+445) abierto en router pero BLOQUEADO por nftables local. Pendiente: desactivar desde panel del router, actualizar firmware
-- **DNS**: migrado de ISP (212.230.135.x) a Quad9 (9.9.9.9) + Google (8.8.8.8). Quad9 filtra dominios malware
-- **ISP bloquea Cloudflare**: 1.1.1.1 bloqueado completamente (ICMP, UDP 53, TCP 443). Usar 9.9.9.9 o 8.8.8.8
+- **Red**: 192.168.1.149/24 vía wlp0s20f3 (MAC randomizada 92:e7:21:4a:9b:91), gateway 192.168.1.1
+- **Router (192.168.1.1)**: Sagemcom (d0:6e:de:13:21:04). SMB/NetBIOS abierto pero BLOQUEADO. Panel HTTP/HTTPS bloqueado por nftables
+- **DNS**: Quad9 (9.9.9.9) + Google (8.8.8.8) via NetworkManager. 0 DNS leaks a ISP
+- **ISP bloquea Cloudflare**: 1.1.1.1 bloqueado completamente (ICMP, UDP 53, TCP 443)
+- **NTP**: chrony con pool 2.opensuse.pool.ntp.org → tick.espanix.net (stratum 1), time.cloudflare.com, ntp1.adora.codes, IONOS
+
+#### Dispositivos en la red (descubrimiento nmap 2026-02-16)
+| IP | MAC | Dispositivo | Estado |
+|---|---|---|---|
+| 192.168.1.1 | d0:6e:de:13:21:04 | Router Sagemcom | Permitido (solo DNS/DHCP) |
+| 192.168.1.130 | 98:0d:51:df:28:c0 | Huawei Y6s (JAT-L41HW, Android 9, EMUI 9.1.0) | **AISLADO** triple bloqueo. EOL sin parches, NetBIOS/SNMP/mDNS expuestos |
+| 192.168.1.137 | b8:c6:aa:ff:5c:62 | Xiaomi Mi TV Stick (Earda WiFi module, Google Cast) | **AISLADO** triple bloqueo. API eureka_info sin auth |
+| 192.168.1.142 | 06:f4:a8:07:02:34 | Samsung Galaxy Tab A (T509K, Android 14) | **AISLADO** triple bloqueo. 0 puertos TCP abiertos |
+| 192.168.1.143 | 28:40:dd:fd:28:3d | Sony PlayStation 5 (FreeBSD 11/Orbis OS) | **AISLADO** triple bloqueo. 0 puertos TCP abiertos |
+| 192.168.1.149 | 92:e7:21:4a:9b:91 | Este equipo (MAC randomizada) | 0 puertos expuestos |
 
 #### Servicios deshabilitados en auditoría (2026-02-16)
 - **CUPS** (cups.service + cups.socket + cups-browsed) — sin impresora, cerraba puerto 631
-- **LLDP** (lldpd.service) — filtraba OS (openSUSE Leap 16.0), kernel (6.12.0-160000.9), hostname y MAC a toda la red via broadcast cada 30s
+- **LLDP** (lldpd.service) — filtraba OS, kernel, hostname y MAC cada 30s
+- **firewalld** — masked (conflicto con nftables impedía arranque al boot)
 
-#### Firewall nftables (tabla inet filter)
-Reglas activas:
-- **Input policy DROP** — todo bloqueado por defecto
-- Loopback accept, established/related accept
-- ICMP básico accept, DHCP client accept
-- **SMB/NetBIOS bloqueado** entrada (137-139 udp/tcp, 445 tcp)
-- **SMB/NetBIOS bloqueado** salida (137-139 udp/tcp, 445 tcp)
-- **LLMNR bloqueado** (5355 udp) entrada+salida
-- **mDNS bloqueado** (5353 udp) entrada+salida
-- TCP reject with RST, UDP reject with icmp port-unreachable
+#### Firewall nftables — Triple aislamiento (tabla inet filter)
+Migrado de firewalld con TODAS las reglas originales + aislamiento LAN completo.
+Ruta config openSUSE: `/etc/nftables/rules/main.nft` (copia en `/etc/nftables.conf`)
 
-Ruta config openSUSE: `/etc/nftables/rules/main.nft` (NO `/etc/nftables.conf`)
+**INPUT (policy DROP):**
+- Loopback, established/related, ICMP básico → accept
+- DHCP solo desde router (192.168.1.1) → accept. Rogue DHCP → drop
+- **Capa 1 MAC**: drop 4 MACs conocidas (Huawei, Mi TV, Samsung, PS5)
+- **Capa 2 IP**: drop 4 IPs conocidas (.130, .137, .142, .143)
+- **Capa 3 Subnet**: router accept, resto 192.168.1.0/24 → drop
+- SMB/NetBIOS/RPC (135,137,138,139,445) tcp+udp → drop
+- UPnP/SSDP (1900/udp, 5000/tcp, 239.255.255.250) → drop
+- mDNS (5353), LLMNR (5355) → drop
+- IoT: MQTT (1883,8883), CoAP (5683,5684) → drop
+- TCP reject RST, UDP reject icmp-port-unreachable
 
-#### Hallazgos de auditoría tshark (2026-02-16)
-Auditoría de 25+ vectores con capturas de 15s, 30s, 60s y 90s (total >10000 paquetes):
-- **0 intrusos** detectados en la red
-- **0 ARP poisoning**, 0 DNS poisoning, 0 DHCP rogue, 0 LLMNR/mDNS poisoning
-- **0 protocolos inseguros** (FTP, Telnet, HTTP, POP3, IMAP, SMTP)
-- **0 credenciales en claro**, 0 paquetes malformados
-- **0 puertos C2/TOR/backdoor**, 0 ICMP tunneling, 0 DNS tunneling
-- **0 procesos ocultos**, 0 SUID/SGID no-stock, 0 LD_PRELOAD hijack
-- **0 módulos kernel no-stock**, 0 payloads en /tmp o /dev/shm
-- **Router hace NBNS broadcast** (nombre "HOME", SMBv1) — bloqueado por firewall
-- **2 MACs en red**: tu WiFi (e8:b0:c5) + router (d0:6e:de) — solo tú
-- **Todo tráfico cifrado** TLS 1.2/1.3, solo destinos legítimos (Anthropic, Google, ProtonMail, GitHub)
-- **NTP** sincronizado contra servidores europeos legítimos (tick.espanix.net, time3.sebhosting.de)
+**OUTPUT (policy ACCEPT):**
+- **Capa 1 MAC**: drop 4 MACs destino
+- **Capa 2 IP**: drop 4 IPs destino
+- **Capa 3 Subnet**: router DNS(53)/DHCP(67) accept, resto LAN → drop
+- Multicast (224.0.0.0/4), broadcast (255.255.255.255) → drop
+- SMB/NetBIOS/RPC, UPnP/SSDP/NAT-PMP, mDNS/LLMNR → drop
+- HTTP plano (80, 8080) → drop (fuerza HTTPS)
+
+**FORWARD (policy DROP)**
+
+#### Auditoría exhaustiva de sistema (2026-02-16)
+**RPM integrity**: sudo, openssh, coreutils, nftables, pam, shadow, glibc — **todos limpios**
+**SUID binarios**: 16 estándar (chfn, chsh, mount, sudo, pkexec, etc.) — 0 anómalos
+**Capabilities**: 6 normales (dumpcap, clockdiff, kwin, newuidmap, newgidmap, mtr)
+**Kernel modules**: todos estándar Tiger Lake (i915, xe, iwlwifi, snd, nf_tables, etc.)
+**SELinux**: enforcing, política targeted
+**Kernel security**: ASLR=2, ptrace_scope=1, kptr_restrict=1, dmesg_restrict=1, perf_paranoid=2, unprivileged_bpf=2
+**LD_PRELOAD/ld.so.preload**: limpio. /dev/shm vacío. /tmp sin ejecutables
+**Crontabs**: 0 user, 0 system. 20 timers systemd legítimos
+**Login failures**: 0. SSH inactivo. Sin authorized_keys
+**IP forwarding**: deshabilitado. Modo promiscuo: ninguno
+**Secure Boot**: deshabilitado (WARN). GRUB sin contraseña (WARN)
+**Filesystem**: /tmp como tmpfs con nosuid,nodev. btrfs con subvolumes
+**Containers**: 0 (docker/podman/lxc no instalados)
+**Env variables**: limpio (0 proxy/LD_/DYLD_ sospechosas)
+
+#### Hallazgos de auditoría tshark (2026-02-16, capturas múltiples >15000 paquetes)
+Auditoría de 40+ vectores con capturas de 15s, 30s, 60s, 90s y 120s:
+- **0 intrusos** — todos los dispositivos identificados
+- **0 ARP/DNS/DHCP/LLMNR/mDNS/SSDP poisoning**
+- **0 protocolos inseguros** (HTTP, FTP, Telnet, POP3, IMAP, SMTP)
+- **0 credenciales en claro**, 0 paquetes malformados, 0 TCP anomalías
+- **0 puertos C2/TOR/backdoor**, 0 ICMP/DNS tunneling, 0 IPv6 RA spoofing
+- **0 procesos ocultos**, 0 SUID no-stock, 0 LD_PRELOAD, 0 kernel modules no-stock
+- **0 HTTP saliente** (nftables fuerza HTTPS)
+- **100% tráfico cifrado** TLS 1.2/1.3
+- **Destinos legítimos**: Anthropic, Google, ProtonMail, GitHub, openSUSE, Datadog
+- **Huawei Y6s**: NetBIOS 137/138, SNMP 161, mDNS 5353, Spotify 57621/udp expuestos — AISLADO
+- **Mi TV Stick**: API Google Cast (8008,8009,8443) sin autenticación — AISLADO
 
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)
