@@ -487,29 +487,65 @@ else
     echo -e "${YELLOW}[4/8] nbtscan no disponible o sin hosts${NC}"
 fi
 
-# Fase 5: Google Cast / Chromecast device identification
-echo -e "${CYAN}[5/8] Detectando dispositivos Google Cast (eureka_info)...${NC}"
-CAST_FILE="${OUTFILE}-cast.txt"
+# Fase 5: Deteccion de APIs IoT expuestas sin autenticacion
+echo -e "${CYAN}[5/8] Detectando APIs IoT expuestas (Cast, UPnP, impresoras, NAS)...${NC}"
+CAST_FILE="${OUTFILE}-iot-exposed.txt"
 > "$CAST_FILE"
 if [[ $TOTAL_HOSTS -gt 0 ]] && command -v curl &>/dev/null; then
     while IFS= read -r ip; do
-        # Google Cast expone API sin auth en puerto 8008
+        # Google Cast: API eureka_info sin auth en puerto 8008
         cast_info=$(curl -s --connect-timeout 2 --max-time 3 "http://${ip}:8008/setup/eureka_info" 2>/dev/null || true)
         if [[ -n "$cast_info" ]] && echo "$cast_info" | grep -q "cast_build_revision" 2>/dev/null; then
             cast_name=$(echo "$cast_info" | grep -oP '"name"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"name"\s*:\s*"\([^"]*\)".*/\1/')
             cast_build=$(echo "$cast_info" | grep -oP '"cast_build_revision"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
             echo -e "  ${RED}[!]${NC} Google Cast: $ip - ${cast_name:-unknown} (build: ${cast_build:-?})"
-            echo -e "      ${YELLOW}API eureka_info expuesta sin autenticación${NC}"
-            echo "$ip | ${cast_name:-unknown} | ${cast_build:-?}" >> "$CAST_FILE"
+            echo -e "      ${YELLOW}API eureka_info expuesta sin autenticacion${NC}"
+            echo "$ip | Google Cast | ${cast_name:-unknown} | ${cast_build:-?}" >> "$CAST_FILE"
+        fi
+
+        # Roku: API REST sin auth en puerto 8060
+        roku_info=$(curl -s --connect-timeout 2 --max-time 3 "http://${ip}:8060/query/device-info" 2>/dev/null || true)
+        if [[ -n "$roku_info" ]] && echo "$roku_info" | grep -q "roku" 2>/dev/null; then
+            roku_name=$(echo "$roku_info" | grep -oP '<user-device-name>[^<]*' | sed 's/<user-device-name>//')
+            echo -e "  ${RED}[!]${NC} Roku ECP: $ip - ${roku_name:-unknown}"
+            echo -e "      ${YELLOW}API ECP expuesta sin autenticacion (puerto 8060)${NC}"
+            echo "$ip | Roku ECP | ${roku_name:-unknown}" >> "$CAST_FILE"
+        fi
+
+        # UPnP/SSDP: descripcion del dispositivo en puerto 49152 o rootDesc.xml
+        for upnp_port in 49152 1900 5000 8080; do
+            upnp_info=$(curl -s --connect-timeout 1 --max-time 2 "http://${ip}:${upnp_port}/rootDesc.xml" 2>/dev/null || true)
+            if [[ -n "$upnp_info" ]] && echo "$upnp_info" | grep -qi "UPnP\|deviceType" 2>/dev/null; then
+                upnp_name=$(echo "$upnp_info" | grep -oP '<friendlyName>[^<]*' | head -1 | sed 's/<friendlyName>//')
+                upnp_model=$(echo "$upnp_info" | grep -oP '<modelName>[^<]*' | head -1 | sed 's/<modelName>//')
+                echo -e "  ${RED}[!]${NC} UPnP: $ip:${upnp_port} - ${upnp_name:-unknown} (${upnp_model:-?})"
+                echo "$ip | UPnP:${upnp_port} | ${upnp_name:-unknown} | ${upnp_model:-?}" >> "$CAST_FILE"
+                break
+            fi
+        done
+
+        # Impresoras: IPP/JetDirect (puerto 631, 9100)
+        ipp_info=$(curl -s --connect-timeout 1 --max-time 2 "http://${ip}:631/" 2>/dev/null || true)
+        if [[ -n "$ipp_info" ]] && echo "$ipp_info" | grep -qi "CUPS\|printer\|IPP" 2>/dev/null; then
+            echo -e "  ${RED}[!]${NC} Impresora IPP: $ip:631 (interfaz web expuesta)"
+            echo "$ip | Impresora IPP | puerto 631" >> "$CAST_FILE"
+        fi
+
+        # Panel web router (puerto 80/443 del gateway)
+        if [[ "$ip" == "$(ip route | grep default | awk '{print $3}' | head -1)" ]]; then
+            http_info=$(curl -s --connect-timeout 1 --max-time 2 -o /dev/null -w "%{http_code}" "http://${ip}/" 2>/dev/null || true)
+            if [[ "$http_info" == "200" || "$http_info" == "301" || "$http_info" == "302" ]]; then
+                echo -e "  ${YELLOW}[i]${NC} Router panel: $ip:80 accesible (considerar bloqueo desde estacion)"
+            fi
         fi
     done < "$LIVE_HOSTS"
-    [[ ! -s "$CAST_FILE" ]] && echo -e "  ${GREEN}[+]${NC} Sin dispositivos Google Cast detectados"
+    [[ ! -s "$CAST_FILE" ]] && echo -e "  ${GREEN}[+]${NC} Sin APIs IoT expuestas detectadas"
 else
     echo -e "  ${YELLOW}[-]${NC} curl no disponible o sin hosts"
 fi
 echo ""
 
-# Fase 6: Deteccion de dispositivos EOL (End of Life)
+# Fase 6: Deteccion de dispositivos EOL (End of Life) y vulnerables
 echo -e "${CYAN}[6/8] Detectando dispositivos EOL/vulnerables...${NC}"
 EOL_FILE="${OUTFILE}-eol.txt"
 > "$EOL_FILE"
@@ -519,48 +555,180 @@ if [[ -f "${OUTFILE}-hosts.xml" ]]; then
         os_guess=""
         [[ -f "${OUTFILE}-os.xml" ]] && os_guess=$(grep -A20 "addr=\"$ip\"" "${OUTFILE}-os.xml" 2>/dev/null | grep 'osmatch name' | head -1 | sed 's/.*name="\([^"]*\)".*/\1/')
         eol_reason=""
-        # Detectar Android <= 12 como posible EOL
+
+        # ── Sistemas operativos EOL ──
+
+        # Android: versiones <= 12 ya no reciben parches regulares
         if echo "$os_guess" | grep -qi "android" 2>/dev/null; then
             android_ver=$(echo "$os_guess" | grep -oP 'Android \K[0-9]+' | head -1)
-            if [[ -n "$android_ver" && "$android_ver" -le 11 ]]; then
+            if [[ -n "$android_ver" && "$android_ver" -le 12 ]]; then
                 eol_reason="Android $android_ver (EOL, sin parches de seguridad)"
             fi
         fi
-        # FreeBSD 11 = PS5 con Orbis OS (generalmente aislado)
-        if echo "$os_guess" | grep -qi "FreeBSD 11" 2>/dev/null; then
-            if echo "$vendor" | grep -qi "sony\|playstation" 2>/dev/null || echo "$vendor" | grep -qi "^$" 2>/dev/null; then
-                eol_reason="Sony PS5 (Orbis OS / FreeBSD 11) - verificar aislamiento"
+
+        # Windows EOL: XP, Vista, 7, 8, 8.1, Server 2003/2008
+        if echo "$os_guess" | grep -qi "Windows" 2>/dev/null; then
+            if echo "$os_guess" | grep -qiP "Windows (XP|2000|ME|98|Vista)" 2>/dev/null; then
+                eol_reason="$(echo "$os_guess" | grep -oP 'Windows \S+') (EOL critico, sin soporte)"
+            elif echo "$os_guess" | grep -qiP "Windows (7|8|8\.1)" 2>/dev/null; then
+                eol_reason="$(echo "$os_guess" | grep -oP 'Windows [0-9.]+') (EOL, sin parches de seguridad)"
+            elif echo "$os_guess" | grep -qiP "Windows Server 200[038]" 2>/dev/null; then
+                eol_reason="$(echo "$os_guess" | grep -oP 'Windows Server \d+') (EOL, sin soporte)"
             fi
         fi
-        # Huawei EMUI antiguo
+
+        # macOS/OS X antiguo
+        if echo "$os_guess" | grep -qi "Mac OS X\|macOS" 2>/dev/null; then
+            if echo "$os_guess" | grep -qiP "OS X 10\.[0-9](\s|\.|\b)" 2>/dev/null; then
+                eol_reason="$(echo "$os_guess" | grep -oP 'OS X [0-9.]+') (EOL, sin parches)"
+            elif echo "$os_guess" | grep -qiP "OS X 10\.1[0-3]" 2>/dev/null; then
+                eol_reason="$(echo "$os_guess" | grep -oP 'OS X [0-9.]+') (EOL, sin parches)"
+            fi
+        fi
+
+        # Linux con kernel muy antiguo
+        if echo "$os_guess" | grep -qiP "Linux [23]\." 2>/dev/null; then
+            local _kver
+            _kver=$(echo "$os_guess" | grep -oP 'Linux [0-9.]+' | head -1)
+            eol_reason="${eol_reason:+$eol_reason | }$_kver (kernel EOL, posibles CVEs criticos)"
+        fi
+
+        # FreeBSD EOL (< 13)
+        if echo "$os_guess" | grep -qiP "FreeBSD ([0-9]|1[0-2])\b" 2>/dev/null; then
+            local _fbsd_ver
+            _fbsd_ver=$(echo "$os_guess" | grep -oP 'FreeBSD [0-9]+' | head -1)
+            # FreeBSD 11 con vendor Sony = consola PlayStation
+            if echo "$vendor" | grep -qi "sony\|playstation\|hon hai\|foxconn" 2>/dev/null; then
+                eol_reason="${eol_reason:+$eol_reason | }Consola (${_fbsd_ver}/Orbis OS) - verificar aislamiento"
+            else
+                eol_reason="${eol_reason:+$eol_reason | }${_fbsd_ver} (EOL, sin parches)"
+            fi
+        fi
+
+        # ── Vendors que requieren atencion especial ──
+
+        # Huawei: modelos antiguos pueden tener EMUI EOL
         if echo "$vendor" | grep -qi "huawei" 2>/dev/null; then
-            eol_reason="${eol_reason:+$eol_reason | }Huawei - verificar version EMUI (EOL si < 12)"
+            eol_reason="${eol_reason:+$eol_reason | }Huawei - verificar version EMUI/HarmonyOS (EOL si EMUI < 12)"
         fi
-        # Earda Technologies = módulo WiFi en dispositivos IoT (Mi TV Stick etc)
-        if echo "$vendor" | grep -qi "earda" 2>/dev/null; then
-            eol_reason="${eol_reason:+$eol_reason | }Earda Technologies (módulo WiFi IoT) - verificar dispositivo contenedor"
+
+        # Fabricantes de modulos WiFi/BT embebidos (IoT)
+        if echo "$vendor" | grep -qiP "(earda|espressif|tuya|realtek semi|ralink|mediatek|quectel|telink|nordic semi)" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }Modulo WiFi/BT IoT ($vendor) - verificar firmware del dispositivo contenedor"
         fi
+
+        # Routers/APs con firmware potencialmente desactualizado
+        if echo "$vendor" | grep -qiP "(tp-link|d-link|netgear|linksys|asus.*tek|zyxel|mikrotik|ubiquiti|tenda|mercusys)" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }Router/AP ($vendor) - verificar actualizacion de firmware"
+        fi
+
+        # Impresoras (superficie de ataque comun)
+        if echo "$vendor" | grep -qiP "(hewlett.packard|hp inc|brother|canon|epson|xerox|lexmark|ricoh|kyocera|samsung elec)" 2>/dev/null; then
+            if echo "$os_guess" | grep -qiP "printer|jetdirect" 2>/dev/null || echo "$vendor" | grep -qiP "hewlett|brother|canon|epson" 2>/dev/null; then
+                eol_reason="${eol_reason:+$eol_reason | }Impresora ($vendor) - verificar firmware y acceso de red"
+            fi
+        fi
+
+        # NAS y almacenamiento en red
+        if echo "$vendor" | grep -qiP "(synology|qnap|western digital|buffalo|asustor|drobo)" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }NAS ($vendor) - verificar actualizaciones de firmware (objetivo frecuente de ransomware)"
+        fi
+
+        # Camaras IP / DVR / NVR
+        if echo "$vendor" | grep -qiP "(hikvision|dahua|axis|hanwha|reolink|amcrest|foscam|vivotek)" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }Camara IP/DVR ($vendor) - superficie de ataque critica, verificar firmware"
+        fi
+
+        # Smart TV / streaming
+        if echo "$vendor" | grep -qiP "(roku|amazon tech|lg electron|samsung elec|vizio|tcl|hisense)" 2>/dev/null; then
+            eol_reason="${eol_reason:+$eol_reason | }Smart TV/Streaming ($vendor) - verificar aislamiento de red"
+        fi
+
         if [[ -n "$eol_reason" ]]; then
             echo -e "  ${RED}[!]${NC} $ip: $eol_reason"
             echo "$ip | $eol_reason" >> "$EOL_FILE"
         fi
     done < "$LIVE_HOSTS"
-    [[ ! -s "$EOL_FILE" ]] && echo -e "  ${GREEN}[+]${NC} Sin dispositivos EOL detectados"
+    [[ ! -s "$EOL_FILE" ]] && echo -e "  ${GREEN}[+]${NC} Sin dispositivos EOL/vulnerables detectados"
 fi
 echo ""
 
-# Fase 7: Recomendaciones de aislamiento LAN
+# Fase 7: Recomendaciones de aislamiento LAN + generacion de script
 echo -e "${CYAN}[7/8] Evaluando necesidad de aislamiento LAN...${NC}"
 VULN_COUNT=0
 [[ -s "$CAST_FILE" ]] && VULN_COUNT=$((VULN_COUNT + $(wc -l < "$CAST_FILE")))
 [[ -s "$EOL_FILE" ]] && VULN_COUNT=$((VULN_COUNT + $(wc -l < "$EOL_FILE")))
+
+# Detectar gateway y subred automaticamente
+_disc_gw=$(ip route | grep default | awk '{print $3}' | head -1)
+_disc_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+_disc_subnet=$(ip -o -4 addr show "${_disc_iface:-eth0}" 2>/dev/null | awk '{print $4}' | head -1)
+_disc_subnet_cidr="${_disc_subnet%.*}.0/24"
+
 if [[ $VULN_COUNT -gt 0 ]]; then
     echo -e "  ${RED}[!]${NC} $VULN_COUNT dispositivos vulnerables/expuestos detectados"
-    echo -e "  ${YELLOW}RECOMENDACIÓN: Aplicar triple aislamiento LAN (MAC + IP + Subnet)${NC}"
+    echo -e "  ${YELLOW}RECOMENDACION: Aplicar triple aislamiento LAN (MAC + IP + Subnet)${NC}"
     echo -e "  ${YELLOW}  Capa 1: Bloqueo por MAC (inmutable, no evitable)${NC}"
     echo -e "  ${YELLOW}  Capa 2: Bloqueo por IP (defensa en profundidad)${NC}"
     echo -e "  ${YELLOW}  Capa 3: Bloqueo de subred completa (atrapa nuevos dispositivos)${NC}"
-    echo -e "  ${YELLOW}  Usar: nftables con reglas en input + output${NC}"
+    echo ""
+
+    # Generar script de aislamiento ejecutable
+    ISOLATION_SCRIPT="${OUTFILE}-aislar-lan.sh"
+    {
+        echo "#!/usr/bin/env bash"
+        echo "# Script de aislamiento LAN generado automaticamente"
+        echo "# Generado: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "# Gateway: ${_disc_gw:-detectar}"
+        echo "# Subred: ${_disc_subnet_cidr:-detectar}"
+        echo "# Revisar y ejecutar como root: sudo bash $ISOLATION_SCRIPT"
+        echo "set -euo pipefail"
+        echo ""
+        echo "NFT=/usr/sbin/nft"
+        echo "GW=\"${_disc_gw:-\$(ip route | grep default | awk '{print \$3}' | head -1)}\""
+        echo "SUBNET=\"${_disc_subnet_cidr:-\$(ip -o -4 addr show \$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if(\$i==\"dev\") print \$(i+1)}' | head -1) | awk '{print \$4}' | head -1)}\""
+        echo "SUBNET_CIDR=\"\${SUBNET%.*}.0/24\""
+        echo ""
+        echo "echo \"=== AISLAMIENTO LAN ===\""
+        echo "echo \"Gateway: \$GW\""
+        echo "echo \"Subred: \$SUBNET_CIDR\""
+        echo ""
+
+        # Capa 1+2: Reglas por MAC+IP para cada dispositivo detectado
+        echo "# --- Capa 1+2: Bloqueo por MAC e IP de dispositivos conocidos ---"
+        if [[ -f "${OUTFILE}-hosts.xml" ]]; then
+            while IFS= read -r ip; do
+                [[ "$ip" == "$_disc_gw" ]] && continue  # No bloquear gateway
+                _own_ip=$(ip -o -4 addr show "${_disc_iface:-eth0}" 2>/dev/null | awk '{print $4}' | head -1)
+                [[ "$ip" == "${_own_ip%/*}" ]] && continue  # No bloquearse a si mismo
+                mac=$(grep -A5 "addr=\"$ip\"" "${OUTFILE}-hosts.xml" 2>/dev/null | grep 'addrtype="mac"' | sed 's/.*addr="\([^"]*\)".*/\1/' | head -1)
+                [[ -z "$mac" ]] && continue
+                echo "\$NFT add rule inet filter input ether saddr $mac drop comment \"MAC-block-$ip\""
+                echo "\$NFT add rule inet filter output ether daddr $mac drop comment \"MAC-block-out-$ip\""
+                echo "\$NFT add rule inet filter input ip saddr $ip drop comment \"IP-block-$ip\""
+                echo "\$NFT add rule inet filter output ip daddr $ip drop comment \"IP-block-out-$ip\""
+            done < "$LIVE_HOSTS"
+        fi
+        echo ""
+
+        # Capa 3: Bloqueo de subred completa
+        echo "# --- Capa 3: Bloqueo de subred (atrapa dispositivos nuevos) ---"
+        echo "\$NFT add rule inet filter input ip saddr \"\$GW\" accept comment \"router-permitido\""
+        echo "\$NFT add rule inet filter input ip saddr \"\$SUBNET_CIDR\" drop comment \"bloqueo-LAN-completo\""
+        echo "\$NFT add rule inet filter output ip daddr \"\$GW\" tcp dport 53 accept comment \"router-DNS-tcp\""
+        echo "\$NFT add rule inet filter output ip daddr \"\$GW\" udp dport 53 accept comment \"router-DNS-udp\""
+        echo "\$NFT add rule inet filter output ip daddr \"\$GW\" udp dport 67 accept comment \"router-DHCP\""
+        echo "\$NFT add rule inet filter output ip daddr \"\$SUBNET_CIDR\" drop comment \"bloqueo-LAN-salida\""
+        echo "\$NFT add rule inet filter output ip daddr 224.0.0.0/4 drop comment \"multicast\""
+        echo "\$NFT add rule inet filter output ip daddr 255.255.255.255 drop comment \"broadcast\""
+        echo ""
+        echo "echo \"=== AISLAMIENTO APLICADO ===\""
+        echo "\$NFT list ruleset | grep -c 'drop\\|reject'"
+    } > "$ISOLATION_SCRIPT"
+    chmod +x "$ISOLATION_SCRIPT"
+
+    echo -e "  ${GREEN}Script de aislamiento generado: ${BOLD}$ISOLATION_SCRIPT${NC}"
+    echo -e "  ${YELLOW}Revisar y ejecutar: sudo bash $ISOLATION_SCRIPT${NC}"
 else
     echo -e "  ${GREEN}[+]${NC} Red limpia, aislamiento opcional"
 fi

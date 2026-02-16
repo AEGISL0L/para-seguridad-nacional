@@ -1125,10 +1125,25 @@ if [[ -n "$DHCP_DEVICES" ]]; then
         [[ -z "$hostname" && -z "$vendor" ]] && continue
         local eol_warn=""
         # Detectar dispositivos EOL por vendor class
-        if echo "$vendor" | grep -qi "android.*[0-8]\." 2>/dev/null; then
-            eol_warn=" [EOL - SIN PARCHES]"
-        elif echo "$vendor" | grep -qi "EMUI.*9\.\|EMUI.*8\.\|EMUI.*[0-7]\." 2>/dev/null; then
-            eol_warn=" [EOL - SIN PARCHES]"
+        # Android: versiones <= 12 ya no reciben parches de seguridad regulares
+        if echo "$vendor" | grep -qiP "android.*([0-9]|1[0-2])\." 2>/dev/null; then
+            local _av
+            _av=$(echo "$vendor" | grep -oP '[Aa]ndroid.*?(\d+)' | grep -oP '\d+$')
+            [[ -n "$_av" && "$_av" -le 12 ]] && eol_warn=" [EOL - Android $_av sin parches]"
+        fi
+        # Huawei EMUI: versiones < 12 son EOL
+        if echo "$vendor" | grep -qiP "EMUI.*(9|8|[0-7])\." 2>/dev/null; then
+            eol_warn=" [EOL - EMUI antiguo sin parches]"
+        fi
+        # Windows: detectar versiones antiguas via DHCP vendor class
+        if echo "$vendor" | grep -qi "MSFT 5\.0" 2>/dev/null; then
+            eol_warn=" [EOL - Windows 2000/XP]"
+        elif echo "$vendor" | grep -qi "MSFT 5\.0\|win.*xp\|win.*2003" 2>/dev/null; then
+            eol_warn=" [EOL - Windows XP/2003]"
+        fi
+        # Dispositivos IoT genéricos (firmware antiguo)
+        if echo "$hostname" | grep -qiP "^(ESP|Tasmota|Tuya|Sonoff|Shelly)" 2>/dev/null; then
+            eol_warn="${eol_warn:+$eol_warn }[IoT - verificar firmware]"
         fi
         echo -e "      MAC=$mac Hostname=${hostname:--} Vendor=${vendor:--}${eol_warn}"
     done <<< "$DHCP_DEVICES"

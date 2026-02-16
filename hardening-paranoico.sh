@@ -536,60 +536,82 @@ echo ""
 
 if [[ "$FW_BACKEND" == "nftables" ]]; then
     if nft list ruleset 2>/dev/null | grep -q "bloqueo-LAN-completo"; then
-        log_already "Aislamiento LAN activo (triple protección)"
-    elif ask "¿Aislar de TODOS los dispositivos LAN (triple protección)?"; then
-        # Detectar gateway
+        log_already "Aislamiento LAN activo (triple proteccion)"
+    elif ask "¿Aislar de TODOS los dispositivos LAN (triple proteccion)?"; then
+        # Auto-detectar gateway, interfaz y subred
+        local_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
         local_gw=$(ip route | grep default | awk '{print $3}' | head -1)
-        local_subnet=$(ip -o -4 addr show "$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)" 2>/dev/null | awk '{print $4}' | head -1)
-        local_gw="${local_gw:-192.168.1.1}"
-        local_subnet="${local_subnet%/*}"
-        local_subnet_cidr="${local_subnet%.*}.0/24"
+        local_ip_cidr=$(ip -o -4 addr show "${local_iface:-eth0}" 2>/dev/null | awk '{print $4}' | head -1)
+        local_ip="${local_ip_cidr%/*}"
+        local_subnet_cidr="${local_ip%.*}.0/24"
 
-        echo ""
-        echo "Gateway detectado: $local_gw"
-        echo "Subred: $local_subnet_cidr"
-        echo ""
+        if [[ -z "$local_gw" ]]; then
+            log_error "No se pudo detectar el gateway. Verifica la conexion de red."
+            log_skip "Aislamiento LAN"
+        else
+            echo ""
+            echo "  Interfaz: ${local_iface:-desconocida}"
+            echo "  IP local: ${local_ip:-desconocida}"
+            echo "  Gateway:  $local_gw"
+            echo "  Subred:   $local_subnet_cidr"
+            echo ""
 
-        # Obtener MACs de dispositivos conocidos via ARP
-        echo "Dispositivos en tabla ARP:"
-        arp -n 2>/dev/null | grep -v "incomplete" | grep -v "^Address" | while read -r line; do
-            echo "  $line"
-        done
-        echo ""
+            # Descubrir dispositivos en la LAN via tabla ARP
+            echo "Dispositivos en tabla ARP (se bloquearan por MAC e IP):"
+            _dev_count=0
+            while IFS=' ' read -r _d_ip _d_type _d_mac _rest; do
+                # Saltar gateway, nuestra IP, e incompletos
+                [[ "$_d_ip" == "$local_gw" ]] && continue
+                [[ "$_d_ip" == "$local_ip" ]] && continue
+                [[ "$_d_mac" == "(incomplete)" || -z "$_d_mac" ]] && continue
+                echo "  $_d_ip ($_d_mac)"
 
-        # INPUT: Capa 3 - solo router permitido, resto LAN bloqueado
-        nft add rule inet filter input ip saddr "$local_gw" accept comment "router-permitido" 2>/dev/null || true
-        nft add rule inet filter input ip saddr "$local_subnet_cidr" drop comment "bloqueo-LAN-completo" 2>/dev/null || true
-        log_change "nftables" "INPUT: LAN bloqueada, solo router $local_gw permitido"
+                # Capa 1: Bloqueo por MAC (INPUT + OUTPUT)
+                nft insert rule inet filter input ether saddr "$_d_mac" drop comment "MAC-block-${_d_ip}" 2>/dev/null || true
+                nft insert rule inet filter output ether daddr "$_d_mac" drop comment "MAC-block-out-${_d_ip}" 2>/dev/null || true
 
-        # OUTPUT: solo router DNS/DHCP, resto LAN bloqueado
-        nft add rule inet filter output ip daddr "$local_gw" tcp dport 53 accept comment "router-DNS-tcp" 2>/dev/null || true
-        nft add rule inet filter output ip daddr "$local_gw" udp dport 53 accept comment "router-DNS-udp" 2>/dev/null || true
-        nft add rule inet filter output ip daddr "$local_gw" udp dport 67 accept comment "router-DHCP" 2>/dev/null || true
-        nft add rule inet filter output ip daddr "$local_subnet_cidr" drop comment "bloqueo-LAN-salida" 2>/dev/null || true
-        log_change "nftables" "OUTPUT: LAN bloqueada, solo router DNS/DHCP"
+                # Capa 2: Bloqueo por IP (INPUT + OUTPUT)
+                nft insert rule inet filter input ip saddr "$_d_ip" drop comment "IP-block-${_d_ip}" 2>/dev/null || true
+                nft insert rule inet filter output ip daddr "$_d_ip" drop comment "IP-block-out-${_d_ip}" 2>/dev/null || true
 
-        # Bloquear multicast/broadcast
-        nft add rule inet filter output ip daddr 224.0.0.0/4 drop comment "multicast" 2>/dev/null || true
-        nft add rule inet filter output ip daddr 255.255.255.255 drop comment "broadcast" 2>/dev/null || true
-        log_change "nftables" "OUTPUT: multicast/broadcast bloqueado"
+                ((_dev_count++)) || true
+            done < <(arp -n 2>/dev/null | tail -n +2)
+            echo ""
+            log_change "nftables" "Capa 1+2: $_dev_count dispositivos bloqueados por MAC+IP"
 
-        # Persistir
-        nft list ruleset > /etc/nftables/rules/main.nft 2>/dev/null \
-            || nft list ruleset > /etc/nftables.conf 2>/dev/null || true
-        log_change "nftables" "Reglas persistidas"
+            # Capa 3: Bloqueo de subred completa (atrapa nuevos dispositivos)
+            nft add rule inet filter input ip saddr "$local_gw" accept comment "router-permitido" 2>/dev/null || true
+            nft add rule inet filter input ip saddr "$local_subnet_cidr" drop comment "bloqueo-LAN-completo" 2>/dev/null || true
+            log_change "nftables" "Capa 3 INPUT: LAN $local_subnet_cidr bloqueada, solo router $local_gw permitido"
 
-        log_info "Aislamiento LAN triple activo"
-        log_info "  Permitido: router ($local_gw) + internet"
-        log_info "  Bloqueado: toda la LAN + multicast + broadcast"
-        log_warn "Para añadir bloqueo por MAC (Capa 1+2) de dispositivos específicos:"
-        log_warn "  nft insert rule inet filter input ether saddr XX:XX:XX:XX:XX:XX drop"
-        log_warn "  nft insert rule inet filter input ip saddr X.X.X.X drop"
+            nft add rule inet filter output ip daddr "$local_gw" tcp dport 53 accept comment "router-DNS-tcp" 2>/dev/null || true
+            nft add rule inet filter output ip daddr "$local_gw" udp dport 53 accept comment "router-DNS-udp" 2>/dev/null || true
+            nft add rule inet filter output ip daddr "$local_gw" udp dport 67 accept comment "router-DHCP" 2>/dev/null || true
+            nft add rule inet filter output ip daddr "$local_subnet_cidr" drop comment "bloqueo-LAN-salida" 2>/dev/null || true
+            log_change "nftables" "Capa 3 OUTPUT: LAN bloqueada, solo router DNS/DHCP"
+
+            # Bloquear multicast/broadcast
+            nft add rule inet filter output ip daddr 224.0.0.0/4 drop comment "multicast" 2>/dev/null || true
+            nft add rule inet filter output ip daddr 255.255.255.255 drop comment "broadcast" 2>/dev/null || true
+            log_change "nftables" "OUTPUT: multicast/broadcast bloqueado"
+
+            # Persistir reglas (openSUSE y Debian paths)
+            nft list ruleset > /etc/nftables/rules/main.nft 2>/dev/null \
+                || nft list ruleset > /etc/nftables.conf 2>/dev/null || true
+            log_change "nftables" "Reglas persistidas"
+
+            _total_rules=$(nft list ruleset 2>/dev/null | grep -c "drop\|reject" || echo "?")
+            log_info "Triple aislamiento LAN activo ($_total_rules reglas)"
+            log_info "  Capa 1: $_dev_count dispositivos bloqueados por MAC"
+            log_info "  Capa 2: $_dev_count dispositivos bloqueados por IP"
+            log_info "  Capa 3: Subred $local_subnet_cidr completa bloqueada"
+            log_info "  Permitido: router ($local_gw) DNS/DHCP + internet"
+        fi
     else
         log_skip "Aislamiento LAN"
     fi
 else
-    log_info "Aislamiento LAN solo disponible con backend nftables"
+    log_info "Aislamiento LAN requiere backend nftables (actual: $FW_BACKEND)"
 fi
 
 # ============================================================
