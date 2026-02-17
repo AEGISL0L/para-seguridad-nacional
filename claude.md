@@ -34,21 +34,21 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 - `securizar-menu.sh` (~5500 líneas) - Menú interactivo con navegación por sub-menús que orquesta los 75 módulos con protecciones de seguridad. Reimplementa inline los scripts peligrosos (extremo y paranoico) eliminando secciones que causan lockout o violan restricciones. Incluye verificación proactiva de 84 checks ponderados. Navegación jerárquica: menú principal con 10 categorías + acciones globales + acceso directo por número (1-75).
 
 ### Scripts de hardening base (9) — categoría `b`
-1. `hardening-opensuse.sh` - Hardening base del sistema (kernel, FTP, servicios, firewall, SSH, contraseñas, permisos, fail2ban, actualizaciones, auditd, MFA SSH, ClamAV, OpenSCAP)
+1. `hardening-opensuse.sh` - Hardening base del sistema (kernel, FTP, servicios, firewall, SSH, contraseñas, permisos, fail2ban, actualizaciones, auditd, MFA SSH, ClamAV, OpenSCAP, TCP SACK/DSACK=0, keepalive=600/30/5, IPv6 use_tempaddr=2)
 2. `hardening-seguro.sh` - Nivel seguro de hardening (archivos, procesos, AIDE, SSH keys)
-3. `hardening-final.sh` - Hardening final consolidado (auditd, sysctl, firewall, updates)
-4. `hardening-externo.sh` - Hardening de servicios externos (banners, honeypot, DNS, VPN)
+3. `hardening-final.sh` - Hardening final consolidado (auditd, sysctl, firewall, updates, bluetooth config idempotente, sudoers atómicos)
+4. `hardening-externo.sh` - Hardening de servicios externos (banners, honeypot, DNS, VPN, guard nmcli)
 5. `hardening-extremo.sh` - Nivel extremo SEGURO (USB, kernel, red — sin lockout, inline en menú)
-6. `hardening-paranoico.sh` - Nivel paranoico SEGURO, 23 secciones (core dumps, GRUB, audit, sysctl, per-interface hardening, faillock, user namespaces, crypto FUTURE, OBEX/Geoclue/captive portal, mount options — sin PAM, inline en menú)
-7. `contramedidas-mesh.sh` - Contramedidas de red mesh (WiFi, Bluetooth, IoT)
-8. `proteger-privacidad.sh` - Protección de privacidad (VNC, cámara, DNS leaks, Tor)
+6. `hardening-paranoico.sh` - Nivel paranoico SEGURO, 23 secciones (core dumps, GRUB, audit, sysctl, per-interface hardening rp_filter=2 strict, faillock, user namespaces, crypto FUTURE, OBEX/Geoclue/captive portal, mount options — sin PAM, inline en menú)
+7. `contramedidas-mesh.sh` - Contramedidas de red mesh (WiFi, Bluetooth, IoT, bt_coex_active=N, WoWLAN disable + NM dispatcher, 12 pre-checks)
+8. `proteger-privacidad.sh` - Protección de privacidad (VNC, cámara, DNS leaks, Tor, NM connectivity check, Firefox HTTPS-Only, Polkit WiFi, 14 pre-checks)
 9. `aplicar-banner-total.sh` - Aplicación de banners (MOTD, issue, SSH, GDM, Firefox)
 
 ### Scripts de securización proactiva (8) — categoría `p`
 10. `hardening-kernel-boot.sh` - Parámetros de arranque del kernel (cmdline GRUB), verificación Secure Boot, módulos firmados, protección GRUB
 11. `hardening-servicios-systemd.sh` - Sandboxing de servicios systemd con drop-ins (sshd, fail2ban, firewalld, NetworkManager, security-monitor)
 12. `hardening-cuentas.sh` - Seguridad de cuentas: políticas de contraseñas (login.defs), faillock, cuentas sin contraseña, UID=0 extra, shells de sistema, cuentas inactivas
-13. `proteger-red-avanzado.sh` - Red avanzada: Suricata IDS, DNS over TLS (systemd-resolved), WireGuard VPN (plantilla), arpwatch + protección ARP, sinkhole, baseline
+13. `proteger-red-avanzado.sh` - Red avanzada: Suricata IDS, DNS over TLS (systemd-resolved), WireGuard VPN (plantilla), arpwatch + protección ARP, sinkhole, baseline, S5b per-interface sysctl enforcement (11 pre-checks)
 14. `automatizar-seguridad.sh` - Automatización: cron jobs (AIDE, parches de seguridad, lynis, rkhunter, logrotate, digest diario), timer systemd de notificaciones
 15. `sandbox-aplicaciones.sh` - Sandboxing de aplicaciones: Firejail (perfiles Firefox, Thunderbird, LibreOffice, Dolphin, firecfg), bubblewrap
 16. `auditoria-externa.sh` - Auditoría de reconocimiento (MITRE TA0043): puertos expuestos, banners, fingerprinting OS, DNS, cabeceras HTTP, SNMP, consulta Shodan/Censys, metadatos web, defensas anti-escaneo, certificados SSL/TLS, script periódico
@@ -73,7 +73,7 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 31. `reportar-seguridad.sh` - Reporte MITRE ATT&CK, Navigator JSON, cumplimiento, inventario, resumen ejecutivo
 32. `cazar-amenazas.sh` - UEBA baseline/anomalías, hunting playbooks, detección T1098, anomalías de red
 33. `automatizar-respuesta.sh` - SOAR ligero: motor respuesta automática, gestión bloqueos, notificaciones
-34. `validar-controles.sh` - Purple Team: validadores auth/red/endpoint, simulador ATT&CK (12 técnicas), scoring
+34. `validar-controles.sh` - Purple Team: validadores auth/red/endpoint (21 tests), simulador ATT&CK (20 técnicas), SELinux/AppArmor detection, scoring, +5 validaciones (TCP SACK, keepalive, per-interface sysctl, NM connectivity)
 
 ### Scripts de inteligencia (2) — categoría `i`
 35. `ciberinteligencia.sh` - Ciberinteligencia proactiva: IoC enriquecimiento, red, DNS, superficie, integración SOAR
@@ -84,10 +84,10 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 43. `segmentacion-red-zt.sh` - Zonas, microsegmentación, Zero Trust
 50. `seguridad-cloud.sh` - AWS, Azure, GCP, IAM, postura
 51. `seguridad-ldap-ad.sh` - LDAP TLS, FreeIPA, sssd, Kerberos
-54. `seguridad-wireless.sh` - WPA3, RADIUS, rogue AP, 802.1X
+54. `seguridad-wireless.sh` - WPA3, RADIUS, rogue AP, 802.1X, PSK-flags credential protection, Polkit WiFi toggle restriction
 55. `seguridad-virtualizacion.sh` - KVM, QEMU, libvirt, VM aislamiento
 57. `zero-trust-identity.sh` - IAP, device trust, autenticación continua
-63. `seguridad-dns-avanzada.sh` - DNSSEC, DoH/DoT, sinkhole, RPZ
+63. `seguridad-dns-avanzada.sh` - DNSSEC, DoH/DoT, sinkhole, RPZ (tcp_timestamps=0 corregido)
 73. `integridad-arranque.sh` - Secure Boot, UEFI, GRUB2, dm-verity, IMA/EVM, TPM2
 
 ### Scripts de aplicaciones y servicios (8) — categoría `s`
@@ -116,8 +116,8 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 ### Scripts de detección y respuesta (9) — categoría `d`
 41. `logging-centralizado.sh` - rsyslog TLS, SIEM, correlación, forense
 44. `forense-avanzado.sh` - Memoria, disco, timeline, custodia
-64. `auditoria-red-wireshark.sh` - Wireshark, tshark, capturas, 20 checks de anomalías (ARP/DNS/DHCP/LLMNR/mDNS/SSDP poisoning, protocolos inseguros, C2/backdoor, tunneling, captive portal, SNI plaintext)
-65. `auditoria-red-infraestructura.sh` - Provisionador: instala 22 scripts de auditoría de red en `/usr/local/bin/auditoria-red-*.sh` (discovery, puertos, TLS/SSL, SNMP, config, inventario, baseline/drift, reporte global con scoring 0-100, verificación LUKS, mount options, crypto policy, systemd sandboxing — 12 fases)
+64. `auditoria-red-wireshark.sh` - Wireshark, tshark, capturas, 20 checks de anomalías (ARP/DNS/DHCP/LLMNR/mDNS/SSDP poisoning, protocolos inseguros, C2/backdoor, tunneling, captive portal, SNI plaintext, detección dinámica de interfaz)
+65. `auditoria-red-infraestructura.sh` - Provisionador: instala 22 scripts de auditoría de red en `/usr/local/bin/auditoria-red-*.sh` (discovery, puertos, TLS/SSL, SNMP, config, inventario, baseline/drift, reporte global con scoring 0-100, verificación LUKS, mount options, crypto policy, systemd sandboxing — 12 fases, +checks TCP SACK/DSACK/keepalive/tempaddr, auditoría sysctl per-interface, auditoría ARP per-interface L2)
 68. `respuesta-incidentes.sh` - Forense, custodia, IOCs, escalación, hunting, métricas
 69. `edr-osquery.sh` - Osquery, Wazuh, threat queries, fleet, baseline
 70. `gestion-vulnerabilidades.sh` - Trivy, grype, SCAP, CVSS/EPSS, drift, madurez
@@ -129,7 +129,9 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 52. `cumplimiento-normativo.sh` - PCI-DSS, HIPAA, GDPR, SOC2, ISO27001
 
 ### Otros scripts
-- `deploy-dns-fix.sh` - Script de despliegue DNS: override global con NetworkManager, fuerza DNS a unbound (DoT + DNSSEC), override DNS de VPNs comerciales (ProtonVPN, Mullvad, etc.)
+- `deploy-dns-fix.sh` - Script de despliegue DNS: override global con NetworkManager, fuerza DNS a unbound (DoT + DNSSEC), override DNS de VPNs comerciales (ProtonVPN, Mullvad, etc.), guard nmcli
+- `verificar-segmentacion-final.sh` - Verificación exhaustiva de segmentación de red nftables (7 secciones, 50+ checks)
+- `corregir-adaptador-red.sh` - **(REDUNDANTE)** Parche puntual de 10 hallazgos de auditoría de red, ahora integrados en scripts canónicos
 
 ### Panel web (`panel/`)
 - Panel Django para monitorización de tecnología de engaño (honeypots/decoys)
@@ -316,15 +318,9 @@ El proyecto cubre las 14 tácticas del framework MITRE ATT&CK enterprise:
 - `/usr/local/bin/reporte-validacion.sh` - Reporte consolidado con scoring global
 - `/etc/cron.weekly/purple-team-validation` - Validación semanal automática
 
-### Reglas auditd creadas por módulos MITRE
-- `/etc/audit/rules.d/60-log-protection.rules` - T1070 protección de logs
-- `/etc/audit/rules.d/61-defense-evasion.rules` - T1562/T1218 herramientas de seguridad y LOLBins
-- `/etc/audit/rules.d/62-credential-access.rules` - T1003/T1040 credenciales y sniffing
-- `/etc/audit/rules.d/63-discovery.rules` - T1046/T1057/T1082/T1016/T1087/T1518 descubrimiento
-- `/etc/audit/rules.d/64-lateral-movement.rules` - T1021/T1563/T1072 movimiento lateral
-- `/etc/audit/rules.d/65-collection.rules` - T1005/T1039/T1025/T1074/T1113/T1560 recolección
-- `/etc/audit/rules.d/66-exfiltration.rules` - T1041/T1048/T1567/T1052 exfiltración
-- `/etc/audit/rules.d/67-command-control.rules` - T1105/T1090/T1572 comando y control
+### Reglas auditd consolidadas
+- `/etc/audit/rules.d/90-hardening.rules` - Archivo único con `-D` y `-b 8192` headers (evita conflictos "Rule exists"). 40+ reglas mapeadas a MITRE ATT&CK: identity (T1078), logins, time-change (T1070.006), execve (T1059), network (T1071), kernel modules (T1547.006), priv-escalation (T1548), ptrace (T1055), boot/sysctl/SSH/PAM/ld.so, persistence cron/systemd (T1053), defense evasion audit+SELinux (T1562), credential access (T1003), mount/namespace (container escape)
+- Reglas MITRE legacy (6X) respaldadas como `.bak` al aplicar 90-hardening.rules
 
 ### Hardening sysctl de red aplicado (`/etc/sysctl.d/99-securizar.conf`)
 Parámetros persistidos (auditoría de red 2026-02-16, score 100/100):
@@ -501,13 +497,15 @@ Ruta config openSUSE: `/etc/nftables/rules/main.nft` (copia en `/etc/nftables.co
 **Capabilities**: 6 normales (dumpcap, clockdiff, kwin, newuidmap, newgidmap, mtr)
 **Kernel modules**: todos estándar Tiger Lake (i915, xe, iwlwifi, snd, nf_tables, etc.)
 **SELinux**: enforcing, política targeted
-**Kernel security**: ASLR=2, ptrace_scope=1, kptr_restrict=2, dmesg_restrict=1, perf_paranoid=3, unprivileged_bpf=1, core_pattern=|/bin/false, protected_hardlinks=1, protected_symlinks=1
+**Kernel security**: ASLR=2, ptrace_scope=3, kptr_restrict=2, dmesg_restrict=1, perf_paranoid=3, unprivileged_bpf=1, kexec_disabled=1, tcp_sack=0, rp_filter=1, core_pattern=|/bin/false, protected_hardlinks=1, protected_symlinks=1
 **LD_PRELOAD/ld.so.preload**: limpio. /dev/shm vacío. /tmp sin ejecutables
 **Crontabs**: 0 user, 0 system. 20 timers systemd legítimos
-**Login failures**: 0. SSH inactivo. Sin authorized_keys
+**Login failures**: 0. SSH hardened (curve25519, ed25519, MaxAuthTries=3). Sin authorized_keys
 **IP forwarding**: deshabilitado. Modo promiscuo: ninguno
 **Secure Boot**: deshabilitado (WARN). GRUB sin contraseña (WARN)
-**Filesystem**: /tmp como tmpfs con nosuid,nodev. btrfs con subvolumes
+**Filesystem**: /tmp como tmpfs con noexec,nosuid,nodev (systemd override). /dev/shm noexec. btrfs con subvolumes
+**auditd**: activo, enabled, audit=1 en GRUB. 40+ reglas MITRE ATT&CK en 90-hardening.rules
+**Passwords**: pwquality minlen=12, minclass=3, enforcing=1
 **Containers**: 0 (docker/podman/lxc no instalados)
 **Env variables**: limpio (0 proxy/LD_/DYLD_ sospechosas)
 
@@ -565,6 +563,36 @@ Auditoría de 40+ vectores con capturas de 15s, 30s, 60s, 90s y 120s:
 - **Fase 9**: Verificación cifrado disco (LUKS en particiones + swap)
 - **Fase 10**: Auditoría mount options (/home, /tmp, /var, /boot/efi, /dev/shm)
 - **Fase 11**: Crypto policy + systemd sandboxing (UNSAFE/EXPOSED/OK scoring)
+
+### Auditoría de seguridad consolidada (2026-02-17)
+
+#### Progresión de score
+| Fase | PASS | FAIL | Score | Grado |
+|------|------|------|-------|-------|
+| Inicial (pre-sysctl) | 12 | 20 | 35% | D |
+| Post-sysctl --system | 34 | 7 | 83% | B |
+| Post-auditd + SELinux detection | 35 | 6 | 85% | B |
+| Post-3fixes (SSH, /tmp, pwquality) | 37 | 4 | 92% | A |
+
+#### Fixes aplicados (2026-02-17)
+- **Kernel sysctl**: `sysctl --system` cargó parámetros de 50-hardening-base.conf y 99-paranoid.conf
+- **auditd**: `audit-rules.service` fallaba por reglas duplicadas → consolidado en 90-hardening.rules con `-D`/`-b 8192`. `audit=1` añadido a GRUB cmdline
+- **SELinux**: Sistema usa SELinux enforcing (targeted), no AppArmor. Scripts actualizados para detectar SELinux
+- **SSH hardening**: `/etc/ssh/sshd_config.d/50-hardening-base.conf` con curve25519, chacha20-poly1305, ed25519. Host keys generadas (RSA, ECDSA, ED25519)
+- **/tmp noexec**: Override systemd `/etc/systemd/system/tmp.mount.d/noexec.conf`
+- **pwquality**: minlen=12, minclass=3, maxrepeat=3, enforcing=1
+
+#### FAILs no corregibles
+- `net.core.bpf_jit_harden`: No soportado por kernel 6.12.0-160000.9
+- CVE-2025-39866: Requiere kernel >= 6.12.16 (esperar parche openSUSE)
+- CVE-2025-21756: Mitigado (vsock blacklisted), requiere kernel >= 6.13.4
+- SSH MFA: Requiere configuración FIDO2/TOTP adicional
+
+#### Compatibilidad OpenSSH 10.0p2
+Directivas eliminadas (causan `sshd -t` failure):
+- `ChallengeResponseAuthentication` → usar `KbdInteractiveAuthentication`
+- `PrintMotd`, `PrintLastLog` → eliminados completamente
+- `Protocol 2` → redundante desde OpenSSH 7.4
 
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)
@@ -639,6 +667,6 @@ init_backup "nombre-modulo"
 - Los scripts de detección se instalan en `/usr/local/bin/` con permisos 700
 - Los cron jobs se crean en `/etc/cron.daily/` o `/etc/cron.weekly/` con permisos 700
 - Los timers systemd se usan para frecuencias menores a 1 día (5min, 10min, 1h)
-- Las reglas auditd se crean en `/etc/audit/rules.d/` con numeración 6X para evitar conflictos
+- Las reglas auditd de hardening base van en `/etc/audit/rules.d/90-hardening.rules` (archivo único con `-D` header). Las reglas MITRE-específicas usan numeración 6X
 - Cada módulo MITRE incluye sección de RESUMEN al final con estado OK/-- por técnica
 - Las herramientas operativas (IR, monitorización, reportes) guardan datos en `/var/lib/`
