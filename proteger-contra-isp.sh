@@ -1312,22 +1312,41 @@ UNBOUND_CONF
     mkdir -p /etc/systemd/system/unbound.service.d
     cat > /etc/systemd/system/unbound.service.d/hardening.conf << 'UNBOUND_HARDENING'
 [Service]
-# Sandboxing equivalente a chroot pero más robusto
-ProtectSystem=full
+# Filesystem
+ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
+ReadWritePaths=/var/lib/unbound /var/log/unbound /run/unbound
+UMask=0077
+
+# Kernel
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+
+# Process isolation
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 MemoryDenyWriteExecute=yes
-LockPersonality=yes
 RestrictNamespaces=yes
-ReadWritePaths=/var/lib/unbound /var/log/unbound /run/unbound
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_SYS_CHROOT CAP_DAC_OVERRIDE
+
+# Network: unbound needs AF_INET for DNS, AF_UNIX for control socket, AF_NETLINK for routing
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+
+# Capabilities: only what unbound actually needs (no chroot, no DAC override)
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
+
+# Syscalls: block dangerous groups unbound never needs
 SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @reboot @swap @raw-io
+
 # NoNewPrivileges incompatible con SELinux named_cache_t transition en ExecStartPre
 UNBOUND_HARDENING
     log_change "Creado" "unbound hardening (systemd sandbox + chroot)"
