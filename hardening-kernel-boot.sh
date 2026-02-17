@@ -212,8 +212,8 @@ log_section "S4: VERIFICAR PROTECCIÓN DE GRUB"
 log_info "Verificando protección de GRUB..."
 
 # Verificar contraseña de GRUB
-if [[ -f $GRUB_USER_CFG ]]; then
-    if grep -q "GRUB2_PASSWORD" $GRUB_USER_CFG 2>/dev/null; then
+if [[ -f "$GRUB_USER_CFG" ]]; then
+    if grep -q "GRUB2_PASSWORD" "$GRUB_USER_CFG" 2>/dev/null; then
         log_info "GRUB tiene contraseña configurada"
     else
         log_warn "GRUB user.cfg existe pero sin contraseña"
@@ -224,7 +224,7 @@ else
         echo ""
         echo "Introduce una contraseña para GRUB:"
         grub_set_password 2>/dev/null || true
-        if [[ -f $GRUB_USER_CFG ]]; then
+        if [[ -f "$GRUB_USER_CFG" ]]; then
             log_change "Aplicado" "grub_set_password"
             log_info "Contraseña de GRUB establecida"
         else

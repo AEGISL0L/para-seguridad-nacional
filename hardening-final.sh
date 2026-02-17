@@ -242,6 +242,7 @@ if [[ -f /etc/sudoers ]]; then
             cp /etc/sudoers "$BACKUP_DIR/"
             log_change "Backup" "/etc/sudoers"
 
+            install -m 440 /dev/null /etc/sudoers.d/99-hardening
             cat > /etc/sudoers.d/99-hardening << 'EOF'
 # Timeout de sudo: 5 minutos
 Defaults timestamp_timeout=5
@@ -261,9 +262,7 @@ Defaults requiretty
 # Limitar PATH en sudo
 Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 EOF
-            log_change "Creado" "/etc/sudoers.d/99-hardening"
-            chmod 440 /etc/sudoers.d/99-hardening
-            log_change "Permisos" "/etc/sudoers.d/99-hardening -> 440"
+            log_change "Creado" "/etc/sudoers.d/99-hardening (modo 440)"
 
             # Verificar sintaxis
             if visudo -c &>/dev/null; then

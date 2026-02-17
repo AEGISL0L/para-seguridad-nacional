@@ -56,8 +56,6 @@ elif ask "¿Aplicar hardening del kernel?"; then
 
     cat > /etc/sysctl.d/50-hardening-base.conf << 'EOF'
 # Hardening de red
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 net.ipv4.conf.all.accept_redirects = 0
@@ -455,7 +453,8 @@ MaxStartups 10:30:60
 PubkeyAuthentication yes
 PasswordAuthentication yes
 PermitEmptyPasswords no
-ChallengeResponseAuthentication no
+# KbdInteractiveAuthentication reemplaza ChallengeResponseAuthentication en OpenSSH 9+
+KbdInteractiveAuthentication no
 UsePAM yes
 
 # Agent Forwarding habilitado (necesario para GitHub con ssh-agent)

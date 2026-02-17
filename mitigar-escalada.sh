@@ -199,6 +199,7 @@ if check_file_exists /etc/sudoers.d/99-hardening; then
     log_already "Hardening de sudo (99-hardening)"
 elif ask "¿Crear configuración de sudo segura en sudoers.d/?"; then
     mkdir -p /etc/sudoers.d
+    install -m 440 /dev/null /etc/sudoers.d/99-hardening
     cat > /etc/sudoers.d/99-hardening << 'EOF'
 # ============================================================
 # HARDENING SUDO - T1078 (TA0004)

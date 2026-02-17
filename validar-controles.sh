@@ -535,7 +535,7 @@ log_section "3. VALIDADOR DE CONTROLES DE ENDPOINT"
 
 echo "Pruebas seguras de los controles de endpoint:"
 echo "  - Kernel hardening (sysctl)"
-echo "  - Protección de ejecución (noexec, AppArmor)"
+echo "  - Protección de ejecución (noexec, SELinux/AppArmor)"
 echo "  - Integridad de archivos (AIDE)"
 echo "  - Auditoría (auditd reglas activas)"
 echo "  - Antimalware (ClamAV)"
@@ -642,6 +642,36 @@ else
     test_result "END-07 ICMP redirects" "FAIL" "Habilitado (debería ser 0)"
 fi
 
+# T1.8: TCP SACK deshabilitado (CVE-2019-11477)
+TCP_SACK=$(sysctl -n net.ipv4.tcp_sack 2>/dev/null || echo "1")
+if [[ "$TCP_SACK" -eq 0 ]]; then
+    test_result "END-07b TCP SACK" "PASS" "Deshabilitado (CVE-2019-11477)"
+else
+    test_result "END-07b TCP SACK" "FAIL" "Habilitado (debería ser 0)"
+fi
+
+# T1.9: TCP keepalive razonable
+TCP_KA=$(sysctl -n net.ipv4.tcp_keepalive_time 2>/dev/null || echo "7200")
+if [[ "$TCP_KA" -le 600 ]]; then
+    test_result "END-07c TCP keepalive" "PASS" "Valor=$TCP_KA (<=600)"
+else
+    test_result "END-07c TCP keepalive" "FAIL" "Valor=$TCP_KA (debería ser <=600)"
+fi
+
+# T1.10: Per-interface sysctl hardening
+if [[ -f /etc/sysctl.d/99-per-interface-hardening.conf ]]; then
+    test_result "END-07d Per-interface sysctl" "PASS" "Fichero de hardening per-interface existe"
+else
+    test_result "END-07d Per-interface sysctl" "FAIL" "Falta /etc/sysctl.d/99-per-interface-hardening.conf"
+fi
+
+# T1.11: NM connectivity check deshabilitado
+if [[ -f /etc/NetworkManager/conf.d/99-no-connectivity-check.conf ]]; then
+    test_result "END-07e NM connectivity" "PASS" "Connectivity check deshabilitado"
+else
+    test_result "END-07e NM connectivity" "FAIL" "NM connectivity check no deshabilitado"
+fi
+
 # --- T2: Ejecución ---
 echo "" | tee -a "$RESULT_FILE"
 echo "--- Control de ejecución ---" | tee -a "$RESULT_FILE"
@@ -660,14 +690,16 @@ else
     test_result "END-09 noexec /dev/shm" "FAIL" "/dev/shm sin noexec"
 fi
 
-# T2.3: AppArmor activo
-if systemctl is-active --quiet apparmor 2>/dev/null; then
-    PROFILES=$(aa-status 2>/dev/null | grep "profiles are in" | head -3 || echo "")
-    test_result "END-10 AppArmor activo" "PASS" "AppArmor activo: $PROFILES"
-elif aa-enabled 2>/dev/null | grep -q "Yes"; then
-    test_result "END-10 AppArmor activo" "PASS" "AppArmor habilitado"
+# T2.3: MAC (SELinux o AppArmor) activo
+if command -v getenforce &>/dev/null && getenforce 2>/dev/null | grep -q "Enforcing"; then
+    POLICY=$(sestatus 2>/dev/null | grep "Loaded policy" | awk '{print $NF}' || echo "unknown")
+    test_result "END-10 SELinux enforcing" "PASS" "SELinux enforcing (policy: $POLICY)"
+elif command -v getenforce &>/dev/null && getenforce 2>/dev/null | grep -q "Permissive"; then
+    test_result "END-10 SELinux enforcing" "FAIL" "SELinux en modo permissive (no protege)"
+elif systemctl is-active --quiet apparmor 2>/dev/null || aa-enabled 2>/dev/null | grep -q "Yes"; then
+    test_result "END-10 MAC activo" "PASS" "AppArmor activo"
 else
-    test_result "END-10 AppArmor activo" "FAIL" "AppArmor no activo"
+    test_result "END-10 MAC activo" "FAIL" "Ningún MAC activo (SELinux/AppArmor)"
 fi
 
 # T2.4: Bash restringido
@@ -713,17 +745,16 @@ else
     test_result "END-15 auditd activo" "FAIL" "auditd no activo"
 fi
 
-# T4.2: Reglas auditd MITRE
-MITRE_RULES=0
-for RULE_FILE in /etc/audit/rules.d/6*.rules; do
-    if [[ -f "$RULE_FILE" ]]; then
-        MITRE_RULES=$((MITRE_RULES+1))
+# T4.2: Reglas auditd MITRE en 90-hardening.rules
+if [[ -f /etc/audit/rules.d/90-hardening.rules ]]; then
+    MITRE_KEYS=$(grep -c '\-k ' /etc/audit/rules.d/90-hardening.rules 2>/dev/null || echo 0)
+    if [[ "$MITRE_KEYS" -ge 20 ]]; then
+        test_result "END-16 Reglas MITRE auditd" "PASS" "$MITRE_KEYS reglas MITRE en 90-hardening.rules"
+    else
+        test_result "END-16 Reglas MITRE auditd" "FAIL" "Solo $MITRE_KEYS reglas (esperadas >=20)"
     fi
-done
-if [[ "$MITRE_RULES" -ge 5 ]]; then
-    test_result "END-16 Reglas MITRE auditd" "PASS" "$MITRE_RULES archivos de reglas MITRE"
 else
-    test_result "END-16 Reglas MITRE auditd" "FAIL" "Solo $MITRE_RULES archivos (esperados >=5)"
+    test_result "END-16 Reglas MITRE auditd" "FAIL" "/etc/audit/rules.d/90-hardening.rules no existe"
 fi
 
 # T4.3: Reglas auditd activas totales
