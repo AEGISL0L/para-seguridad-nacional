@@ -435,7 +435,7 @@ fi
 _dbg "Endpoints detectados: ${#_vpn_endpoints[@]} → ${_vpn_endpoints[*]:-ninguno}"
 _dbg "Fuentes: wg_activo=$(command -v wg &>/dev/null && wg show interfaces 2>/dev/null | wc -w || echo 0) wg_conf=$(ls /etc/wireguard/*.conf 2>/dev/null | wc -l) ovpn_conf=$(ls /etc/openvpn/*.conf /etc/openvpn/client/*.conf 2>/dev/null | wc -l) pvpn_conf=$(ls /etc/protonvpn/*.conf /usr/share/protonvpn/wireguard/*.conf 2>/dev/null | wc -l) manual=$(test -f /etc/securizar/vpn-endpoints.conf && grep -cv '^#\|^$' /etc/securizar/vpn-endpoints.conf 2>/dev/null || echo 0)"
 _dbg "Backends: nft=$(command -v nft &>/dev/null && echo si || echo no) iptables=$(command -v iptables &>/dev/null && echo si || echo no) firewalld=$(command -v firewall-cmd &>/dev/null && echo si || echo no)"
-_dbg "Interfaces VPN actuales: $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E 'wg|tun|tap|proton|mullvad|nordlynx|WARP' | tr '\n' ' ')"
+_dbg "Interfaces VPN actuales: $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E 'wg|tun|tap|proton|mullvad|nordlynx|WARP' | tr '\n' ' ' || true)"
 
 if command -v nft &>/dev/null; then
     # ── nftables (openSUSE, sistemas modernos) ──
@@ -684,7 +684,7 @@ if [[ -f "${ISP_CONF_DIR}/vpn-killswitch.sh" ]]; then
         fi
         # Detección dinámica: interfaces punto-a-punto (usuario decide)
         if [[ "$_ks_found" != "true" ]]; then
-            _ks_iface=$(ip -o link show 2>/dev/null | grep -i 'POINTOPOINT' | awk -F': ' '{print $2}' | grep -v '^lo$' | head -1)
+            _ks_iface=$(ip -o link show 2>/dev/null | grep -i 'POINTOPOINT' | awk -F': ' '{print $2}' | grep -v '^lo$' | head -1) || true
             [[ -n "$_ks_iface" ]] && _ks_found=true
         fi
         if [[ "$_ks_found" == "true" ]]; then
