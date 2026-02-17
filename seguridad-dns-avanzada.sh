@@ -1546,8 +1546,8 @@ net.ipv6.conf.default.accept_redirects = 0
 net.ipv4.ipfrag_high_thresh = 262144
 net.ipv4.ipfrag_low_thresh = 196608
 
-# Randomizacion de secuencia TCP
-net.ipv4.tcp_timestamps = 1
+# Deshabilitar TCP timestamps (evita filtrar uptime del sistema)
+net.ipv4.tcp_timestamps = 0
 EOF
     chmod 644 "$SYSCTL_DNS"
     sysctl -p "$SYSCTL_DNS" 2>/dev/null || true

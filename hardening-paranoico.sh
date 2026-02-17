@@ -17,7 +17,7 @@ init_backup "hardening-paranoico"
 securizar_setup_traps
 
 # ── Pre-check: salida temprana si todo aplicado ──
-_precheck 17
+_precheck 23
 _pc check_file_exists /etc/sysctl.d/99-paranoid.conf
 _pc check_file_exists /etc/modprobe.d/paranoid-blacklist.conf
 _pc check_file_exists /etc/systemd/coredump.conf.d/disable.conf
@@ -35,6 +35,12 @@ _pc check_file_contains /etc/login.defs "UMASK 027"
 _pc true  # S14: USB storage (opcional con ask)
 _pc check_file_exists /etc/audit/rules.d/99-paranoid.rules
 _pc check_file_contains /etc/fail2ban/jail.local "bantime = 48h"
+_pc check_file_exists /etc/sysctl.d/99-paranoid-interfaces.conf
+_pc true  # S18: faillock (condicional)
+_pc true  # S19: user namespaces limit (condicional)
+_pc true  # S20: crypto policy FUTURE (condicional)
+_pc true  # S21: OBEX/geoclue/captive portal (condicional)
+_pc true  # S22: mount options hardening (condicional)
 _precheck_result
 
 echo ""
@@ -99,17 +105,22 @@ net.ipv4.tcp_timestamps = 0
 net.ipv4.tcp_max_syn_backlog = 2048
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_syn_retries = 5
+net.ipv4.tcp_sack = 0
+net.ipv4.tcp_rfc1337 = 1
 
-# --- Red IPv6 (restringir) ---
+# --- ARP hardening ---
+net.ipv4.conf.all.arp_ignore = 1
+net.ipv4.conf.all.arp_announce = 2
+
+# --- Red IPv6 (deshabilitar completamente) ---
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.default.accept_redirects = 0
 net.ipv6.conf.all.accept_source_route = 0
 net.ipv6.conf.default.accept_source_route = 0
 net.ipv6.conf.all.accept_ra = 0
 net.ipv6.conf.default.accept_ra = 0
-
-# --- User namespaces (comentado - puede romper algunas apps) ---
-# kernel.unprivileged_userns_clone = 0
 EOF
     log_change "Creado" "/etc/sysctl.d/99-paranoid.conf"
 
@@ -791,6 +802,210 @@ EOF
     fi
 else
     log_warn "fail2ban no instalado. Instálalo primero."
+fi
+
+# ============================================================
+log_section "17. HARDENING POR INTERFAZ (IPv6 + rp_filter)"
+# ============================================================
+
+if check_file_exists /etc/sysctl.d/99-paranoid-interfaces.conf; then
+    log_already "Hardening per-interface (IPv6 disable + rp_filter strict)"
+elif ask "¿Deshabilitar IPv6 y forzar rp_filter strict en todas las interfaces?"; then
+    _iface_conf="/etc/sysctl.d/99-paranoid-interfaces.conf"
+    cat > "$_iface_conf" << 'EOFHDR'
+# Per-interface hardening: IPv6 disable + rp_filter strict
+# Generado por hardening-paranoico.sh
+# IPv6 link-local permite RA spoofing / NDP attacks
+# rp_filter loose permite IP spoofing
+EOFHDR
+    for _iface in $(ls /sys/class/net/ 2>/dev/null | grep -v lo); do
+        cat >> "$_iface_conf" << EOF
+net.ipv6.conf.${_iface}.disable_ipv6 = 1
+net.ipv4.conf.${_iface}.rp_filter = 2
+EOF
+    done
+    chmod 600 "$_iface_conf"
+    /usr/sbin/sysctl --system > /dev/null 2>&1 || true
+    log_change "Creado" "$_iface_conf"
+    log_info "IPv6 deshabilitado y rp_filter strict en todas las interfaces"
+else
+    log_skip "Hardening per-interface"
+fi
+
+# ============================================================
+log_section "18. FAILLOCK - PROTECCION CONTRA FUERZA BRUTA"
+# ============================================================
+
+echo "Bloquea cuentas tras intentos fallidos de login local."
+echo "  - 5 intentos fallidos -> bloqueo 15 minutos"
+echo ""
+
+if grep -rq "pam_faillock" /etc/pam.d/ 2>/dev/null; then
+    log_already "Faillock configurado en PAM"
+elif ask "¿Configurar faillock contra fuerza bruta en login local?"; then
+    cat > /etc/security/faillock.conf << 'EOF'
+# Faillock - proteccion contra fuerza bruta
+deny = 5
+unlock_time = 900
+fail_interval = 900
+even_deny_root
+root_unlock_time = 900
+EOF
+    log_change "Creado" "/etc/security/faillock.conf"
+    # Insertar en PAM auth (antes de pam_unix)
+    for _pam_file in /etc/pam.d/common-auth /etc/pam.d/system-auth; do
+        if [[ -f "$_pam_file" ]] && ! grep -q "pam_faillock" "$_pam_file"; then
+            cp "$_pam_file" "$BACKUP_DIR/" 2>/dev/null || true
+            sed -i '/pam_unix.so/i auth    required    pam_faillock.so preauth' "$_pam_file"
+            sed -i '/pam_unix.so/a auth    [default=die] pam_faillock.so authfail' "$_pam_file"
+            log_change "Modificado" "$_pam_file (faillock)"
+        fi
+    done
+    for _pam_file in /etc/pam.d/common-account /etc/pam.d/system-account; do
+        if [[ -f "$_pam_file" ]] && ! grep -q "pam_faillock" "$_pam_file"; then
+            echo "account required pam_faillock.so" >> "$_pam_file"
+            log_change "Modificado" "$_pam_file (faillock account)"
+        fi
+    done
+    log_info "Faillock: 5 intentos -> bloqueo 15min (incluye root)"
+else
+    log_skip "Faillock proteccion fuerza bruta"
+fi
+
+# ============================================================
+log_section "19. LIMITAR USER NAMESPACES"
+# ============================================================
+
+echo "User namespaces permiten escalada de privilegios"
+echo "(CVE-2022-0185, CVE-2023-2163, CVE-2024-1086)."
+echo "Reducir max_user_namespaces limita este vector de ataque."
+echo ""
+
+_current_userns=$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo "0")
+if [[ "$_current_userns" -le 256 ]]; then
+    log_already "User namespaces limitados ($_current_userns)"
+elif ask "¿Limitar user namespaces a 0? (puede afectar Flatpak/containers)"; then
+    echo "user.max_user_namespaces = 0" > /etc/sysctl.d/99-userns-limit.conf
+    chmod 600 /etc/sysctl.d/99-userns-limit.conf
+    /usr/sbin/sysctl -w user.max_user_namespaces=0 > /dev/null 2>&1 || true
+    log_change "Creado" "/etc/sysctl.d/99-userns-limit.conf"
+    log_info "User namespaces limitados a 0 (proteccion contra escalada)"
+    log_warn "Si usas Flatpak/Podman, cambia a 256 en vez de 0"
+else
+    log_skip "Limitar user namespaces"
+fi
+
+# ============================================================
+log_section "20. CRYPTO POLICY FUTURE"
+# ============================================================
+
+echo "La política FUTURE fuerza:"
+echo "  - TLS mínimo 1.3 (DEFAULT permite 1.2)"
+echo "  - RSA mínimo 3072 bits"
+echo "  - SHA-1 deshabilitado completamente"
+echo ""
+
+if command -v update-crypto-policies &>/dev/null; then
+    _current_policy=$(update-crypto-policies --show 2>/dev/null || echo "UNKNOWN")
+    if [[ "$_current_policy" == "FUTURE" ]]; then
+        log_already "Crypto policy FUTURE"
+    elif ask "¿Aplicar política criptográfica FUTURE (TLS 1.3 mínimo)?"; then
+        update-crypto-policies --set FUTURE 2>/dev/null
+        log_change "Aplicado" "crypto-policies FUTURE"
+        log_info "Política FUTURE activa. TLS 1.3+ obligatorio."
+        log_warn "Algunos sitios antiguos (solo TLS 1.2) pueden fallar"
+        log_warn "Revertir: update-crypto-policies --set DEFAULT"
+    else
+        log_skip "Crypto policy FUTURE"
+    fi
+else
+    log_info "update-crypto-policies no disponible en esta distro"
+fi
+
+# ============================================================
+log_section "21. DESHABILITAR SERVICIOS DE TRACKING"
+# ============================================================
+
+echo "Servicios que filtran información innecesariamente:"
+echo "  - OBEX (Bluetooth file transfer en user-space)"
+echo "  - Geoclue (geolocalización WiFi/IP)"
+echo "  - Captive portal checks (revelan actividad al ISP)"
+echo ""
+
+if ask "¿Deshabilitar OBEX, Geoclue y captive portal checks?"; then
+    # OBEX: Mask en user-space para todos los usuarios
+    for _user_home in /home/*; do
+        _user=$(basename "$_user_home")
+        _uid=$(id -u "$_user" 2>/dev/null || continue)
+        if [[ -d "/run/user/$_uid" ]]; then
+            su - "$_user" -c "XDG_RUNTIME_DIR=/run/user/$_uid systemctl --user mask obex.service" 2>/dev/null || true
+            su - "$_user" -c "XDG_RUNTIME_DIR=/run/user/$_uid systemctl --user stop obex.service" 2>/dev/null || true
+        fi
+    done
+    killall obexd 2>/dev/null || true
+    log_change "Servicio" "obex.service masked (user-space)"
+
+    # Geoclue: Deshabilitar autostart
+    if [[ -f /etc/xdg/autostart/geoclue-demo-agent.desktop ]]; then
+        if ! grep -q "Hidden=true" /etc/xdg/autostart/geoclue-demo-agent.desktop; then
+            echo "Hidden=true" >> /etc/xdg/autostart/geoclue-demo-agent.desktop
+        fi
+    fi
+    killall -f "geoclue-2.0/demos/agent" 2>/dev/null || true
+    log_change "Servicio" "geoclue-demo-agent deshabilitado"
+
+    # Captive portal: NetworkManager
+    mkdir -p /etc/NetworkManager/conf.d
+    cat > /etc/NetworkManager/conf.d/99-no-captive-portal.conf << 'EOF'
+[connectivity]
+enabled=false
+EOF
+    log_change "Creado" "/etc/NetworkManager/conf.d/99-no-captive-portal.conf"
+
+    log_info "OBEX, Geoclue y captive portal deshabilitados"
+    log_info "Para Firefox captive portal: about:config -> network.captive-portal-service.enabled = false"
+else
+    log_skip "Deshabilitar servicios de tracking"
+fi
+
+# ============================================================
+log_section "22. HARDENING DE MOUNT OPTIONS"
+# ============================================================
+
+echo "Añade restricciones a /home y /boot/efi:"
+echo "  /home:     nosuid,nodev (previene SUID/device files)"
+echo "  /boot/efi: nosuid,nodev,noexec (solo firmware)"
+echo ""
+
+_fstab_modified=0
+if grep -q "nosuid" /etc/fstab 2>/dev/null && grep -q "/home.*nosuid" /etc/fstab 2>/dev/null; then
+    log_already "Mount options endurecidos en fstab"
+elif ask "¿Endurecer mount options en fstab (/home, /boot/efi)?"; then
+    cp /etc/fstab "$BACKUP_DIR/" 2>/dev/null || true
+    log_change "Backup" "/etc/fstab"
+
+    # /home: añadir nosuid,nodev
+    if grep -q "/home.*btrfs" /etc/fstab && ! grep -q "/home.*nosuid" /etc/fstab; then
+        sed -i '/\/home.*btrfs/ s/subvol=\(.*\)/subvol=\1,nosuid,nodev/' /etc/fstab
+        _fstab_modified=1
+        log_change "Modificado" "/etc/fstab (/home +nosuid,nodev)"
+    fi
+
+    # /boot/efi: añadir nosuid,nodev,noexec
+    if grep -q "/boot/efi" /etc/fstab && ! grep -q "/boot/efi.*nosuid" /etc/fstab; then
+        sed -i '/\/boot\/efi/ s/utf8/utf8,nosuid,nodev,noexec/' /etc/fstab
+        _fstab_modified=1
+        log_change "Modificado" "/etc/fstab (/boot/efi +nosuid,nodev,noexec)"
+    fi
+
+    if [[ $_fstab_modified -eq 1 ]]; then
+        log_info "Mount options endurecidos. Aplicar con: mount -o remount /home"
+        log_warn "Cambios se aplican completamente tras reboot"
+    else
+        log_info "fstab no requiere cambios (layout no estándar o ya endurecido)"
+    fi
+else
+    log_skip "Hardening de mount options"
 fi
 
 # ============================================================

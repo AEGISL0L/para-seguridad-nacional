@@ -485,9 +485,8 @@ ClientAliveCountMax 2
 Banner /etc/issue.net
 
 # Logs detallados (MITRE T1078 - detectar uso indebido)
+# PrintMotd y PrintLastLog eliminados en OpenSSH 10.0
 LogLevel VERBOSE
-PrintMotd no
-PrintLastLog yes
 
 # Restringir environment variables (anti-injection)
 PermitUserEnvironment no

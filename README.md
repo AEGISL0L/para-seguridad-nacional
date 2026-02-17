@@ -581,8 +581,8 @@ Herramientas para un SOC (Security Operations Center) funcional.
 |---|--------|--------|-------------|
 | 41 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog TLS, CEF/JSON, hash chain SHA-256, correlacion 8 patrones, SIEM, forense |
 | 44 | **Forense avanzado** | `forense-avanzado.sh` | RAM (LiME), disco forense, volatiles RFC 3227, YARA, custodia digital, timeline |
-| 64 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, 18 checks de anomalias (ARP spoofing/flooding, port scan, DNS tunneling, DHCP starvation, rogue DHCP, LLMNR/mDNS poisoning, Spotify Connect, Google Cast, SSDP/UPnP, DHCP device ID con EOL multi-OS/IoT, MAC randomization, SNMP exposure), filtros BPF/display, correlacion IDS |
-| 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap (8 fases), TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes, deteccion de APIs IoT expuestas (Cast, Roku ECP, UPnP, IPP, router panel), deteccion EOL 12+ categorias (Windows XP-8, macOS, Android, Linux kernel, FreeBSD, routers, NAS, camaras IP, impresoras, Smart TV, IoT modules), generacion automatica de script de aislamiento LAN triple (MAC+IP+subnet), auditoria sysctl ARP/IPv6 |
+| 64 | **Auditoria de red** | `auditoria-red-wireshark.sh` | Wireshark/tshark, capturas automatizadas, 20 checks de anomalias (ARP spoofing/flooding, port scan, DNS tunneling, DHCP starvation, rogue DHCP, LLMNR/mDNS poisoning, Spotify Connect, Google Cast, SSDP/UPnP, DHCP device ID con EOL multi-OS/IoT, MAC randomization, SNMP exposure, captive portal detection, SNI plaintext analysis), filtros BPF/display, correlacion IDS |
+| 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap (12 fases), TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes, deteccion de APIs IoT expuestas (Cast, Roku ECP, UPnP, IPP, router panel), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN triple (MAC+IP+subnet), auditoria sysctl ARP/IPv6, verificacion cifrado disco LUKS, auditoria mount options, crypto policy check, systemd sandboxing audit |
 | 68 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Recoleccion forense, playbooks contencion MITRE, timeline, aislamiento de red, recuperacion, cadena de custodia digital, extraccion de IOCs, comunicacion/escalacion, hunting de IOCs en flota, metricas IR (MTTD/MTTR/MTTC) |
 | 69 | **EDR con Osquery** | `edr-osquery.sh` | Osquery multi-distro, packs de seguridad (10 queries), deteccion de amenazas (10 queries), guia Wazuh, decorators custom, alertas syslog/JSON, baseline y drift, FleetDM prep, queries diferenciales, auditoria EDR |
 | 70 | **Gestion de vulnerabilidades** | `gestion-vulnerabilidades.sh` | Trivy, grype, OpenSCAP, escaneo sistema/contenedores, priorizacion CVSS+EPSS+KEV+Reachability (formula mejorada 4 factores), analisis dependencias, reporting HTML/JSON, verificacion parches, escaneo programado semanal, auditoria madurez (L1-L5), deteccion directa de 9 CVEs kernel criticos (2024-2026) con opcion --fix, verificacion supply chain (integridad paquetes, firmas GPG, SUID no estandar), output JSON |
@@ -1121,7 +1121,7 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `auditoria-red-captura.sh` | Captura automatizada con 6 perfiles (general, inseguros, dns, escaneos, lateral, exfiltracion) |
 | `auditoria-red-analisis.sh` | Analisis de seguridad de capturas (protocolos, DNS, credenciales, TLS, ARP) |
 | `auditoria-red-listar.sh` | Listado de capturas de red disponibles |
-| `auditoria-red-anomalias.sh` | Deteccion de anomalias de red (18 checks: ARP spoofing/flooding, port scan, DNS tunneling, DHCP starvation, rogue DHCP, LLMNR/mDNS poisoning, Spotify Connect, Google Cast, SSDP/UPnP, DHCP device ID con EOL multi-OS/IoT, MAC randomization, SNMP, protocolos inseguros) |
+| `auditoria-red-anomalias.sh` | Deteccion de anomalias de red (20 checks: ARP spoofing/flooding, port scan, DNS tunneling, DHCP starvation, rogue DHCP, LLMNR/mDNS poisoning, Spotify Connect, Google Cast, SSDP/UPnP, DHCP device ID con EOL multi-OS/IoT, MAC randomization, SNMP, protocolos inseguros, captive portal detection, SNI plaintext analysis) |
 | `auditoria-red-reporte.sh` | Generacion de reportes consolidados de auditoria de red |
 | `auditoria-red-csv.sh` | Exportacion de capturas a CSV para analisis externo |
 | `auditoria-red-correlacion.sh` | Correlacion de capturas con alertas Suricata IDS |
@@ -1131,7 +1131,7 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 
 | Herramienta | Funcion |
 |-------------|---------|
-| `auditoria-red-descubrimiento.sh` | Descubrimiento y mapeado de red (8 fases: ARP, nmap, OS fingerprint, NetBIOS, APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN, inventario consolidado) |
+| `auditoria-red-descubrimiento.sh` | Descubrimiento y mapeado de red (12 fases: ARP, nmap, OS fingerprint, NetBIOS, APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN, verificacion cifrado disco LUKS, auditoria mount options, crypto policy + systemd sandboxing, inventario consolidado) |
 | `auditoria-red-puertos.sh` | Auditoria de puertos TCP/UDP con politica de puertos autorizados/prohibidos |
 | `auditoria-red-tls.sh` | Auditoria TLS/SSL (certificados, protocolos, cipher suites, testssl.sh, scoring A-F, batch) |
 | `auditoria-red-snmp.sh` | Auditoria SNMP (community strings por defecto, SNMPv1/v2c vs v3, OIDs expuestos) |

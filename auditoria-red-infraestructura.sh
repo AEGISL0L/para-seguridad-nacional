@@ -440,14 +440,14 @@ echo ""
 OUTFILE="${SCAN_DIR}/discovery-${TIMESTAMP}"
 
 # Fase 1: Descubrimiento ARP (L2 - solo red local)
-echo -e "${CYAN}[1/8] Descubrimiento ARP (capa 2)...${NC}"
+echo -e "${CYAN}[1/12] Descubrimiento ARP (capa 2)...${NC}"
 if command -v arp-scan &>/dev/null; then
     arp-scan --localnet --interface="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)" 2>/dev/null | tee "${OUTFILE}-arp.txt" || true
     echo ""
 fi
 
 # Fase 2: Descubrimiento nmap (multi-tecnica)
-echo -e "${CYAN}[2/8] Descubrimiento de hosts activos (nmap)...${NC}"
+echo -e "${CYAN}[2/12] Descubrimiento de hosts activos (nmap)...${NC}"
 if ! command -v nmap &>/dev/null; then
     echo -e "${RED}nmap no instalado. Ejecute primero S1 del modulo.${NC}"
     exit 1
@@ -474,24 +474,24 @@ echo ""
 
 # Fase 3: Fingerprinting de OS (solo en modo full)
 if [[ "$MODE" == "--full" ]] && [[ $TOTAL_HOSTS -gt 0 ]] && [[ $TOTAL_HOSTS -le 256 ]]; then
-    echo -e "${CYAN}[3/8] Fingerprinting de sistemas operativos...${NC}"
+    echo -e "${CYAN}[3/12] Fingerprinting de sistemas operativos...${NC}"
     nmap -O --osscan-guess -T3 -iL "$LIVE_HOSTS" -oA "${OUTFILE}-os" 2>/dev/null || true
     echo ""
 else
-    echo -e "${YELLOW}[3/8] Fingerprinting de OS omitido (modo: $MODE, hosts: $TOTAL_HOSTS)${NC}"
+    echo -e "${YELLOW}[3/12] Fingerprinting de OS omitido (modo: $MODE, hosts: $TOTAL_HOSTS)${NC}"
 fi
 
 # Fase 4: NetBIOS/SMB
-echo -e "${CYAN}[4/8] Escaneo NetBIOS/SMB...${NC}"
+echo -e "${CYAN}[4/12] Escaneo NetBIOS/SMB...${NC}"
 if command -v nbtscan &>/dev/null && [[ $TOTAL_HOSTS -gt 0 ]]; then
     nbtscan -r "$SUBNET" 2>/dev/null | tee "${OUTFILE}-netbios.txt" || true
     echo ""
 else
-    echo -e "${YELLOW}[4/8] nbtscan no disponible o sin hosts${NC}"
+    echo -e "${YELLOW}[4/12] nbtscan no disponible o sin hosts${NC}"
 fi
 
 # Fase 5: Deteccion de APIs IoT expuestas sin autenticacion
-echo -e "${CYAN}[5/8] Detectando APIs IoT expuestas (Cast, UPnP, impresoras, NAS)...${NC}"
+echo -e "${CYAN}[5/12] Detectando APIs IoT expuestas (Cast, UPnP, impresoras, NAS)...${NC}"
 CAST_FILE="${OUTFILE}-iot-exposed.txt"
 > "$CAST_FILE"
 if [[ $TOTAL_HOSTS -gt 0 ]] && command -v curl &>/dev/null; then
@@ -549,7 +549,7 @@ fi
 echo ""
 
 # Fase 6: Deteccion de dispositivos EOL (End of Life) y vulnerables
-echo -e "${CYAN}[6/8] Detectando dispositivos EOL/vulnerables...${NC}"
+echo -e "${CYAN}[6/12] Detectando dispositivos EOL/vulnerables...${NC}"
 EOL_FILE="${OUTFILE}-eol.txt"
 > "$EOL_FILE"
 if [[ -f "${OUTFILE}-hosts.xml" ]]; then
@@ -657,7 +657,7 @@ fi
 echo ""
 
 # Fase 7: Recomendaciones de aislamiento LAN + generacion de script
-echo -e "${CYAN}[7/8] Evaluando necesidad de aislamiento LAN...${NC}"
+echo -e "${CYAN}[7/12] Evaluando necesidad de aislamiento LAN...${NC}"
 VULN_COUNT=0
 [[ -s "$CAST_FILE" ]] && VULN_COUNT=$((VULN_COUNT + $(wc -l < "$CAST_FILE")))
 [[ -s "$EOL_FILE" ]] && VULN_COUNT=$((VULN_COUNT + $(wc -l < "$EOL_FILE")))
@@ -737,8 +737,85 @@ else
 fi
 echo ""
 
-# Fase 8: Inventario consolidado con MAC vendor
-echo -e "${CYAN}[8/8] Generando inventario consolidado...${NC}"
+# Fase 9: Cifrado de disco (LUKS)
+echo -e "${CYAN}[9/12] Verificando cifrado de disco...${NC}"
+_has_luks=0
+for _disk in $(lsblk -rno NAME,TYPE 2>/dev/null | awk '$2=="part"{print $1}'); do
+    _fstype=$(lsblk -rno FSTYPE "/dev/$_disk" 2>/dev/null || true)
+    if [[ "$_fstype" == "crypto_LUKS" ]]; then
+        echo -e "  ${GREEN}[+]${NC} /dev/$_disk: LUKS cifrado"
+        _has_luks=1
+    fi
+done
+if [[ $_has_luks -eq 0 ]]; then
+    echo -e "  ${RED}[CRITICAL]${NC} Ninguna particion cifrada con LUKS"
+    echo -e "  ${YELLOW}    Acceso fisico = acceso total a datos (SSH keys, tokens, WiFi PSK)${NC}"
+fi
+# Swap
+_swap_dev=$(swapon --show=NAME --noheadings 2>/dev/null | head -1)
+if [[ -n "$_swap_dev" ]]; then
+    _swap_type=$(lsblk -rno FSTYPE "$_swap_dev" 2>/dev/null || true)
+    if [[ "$_swap_type" != "crypto_LUKS" ]]; then
+        echo -e "  ${YELLOW}[WARN]${NC} Swap $_swap_dev sin cifrar (datos RAM en disco plano)"
+    fi
+fi
+echo ""
+
+# Fase 10: Mount options
+echo -e "${CYAN}[10/12] Auditando mount options...${NC}"
+for _mp in /home /tmp /var /boot/efi /dev/shm; do
+    _opts=$(findmnt -n -o OPTIONS "$_mp" 2>/dev/null || continue)
+    _issues=""
+    case "$_mp" in
+        /home)
+            echo "$_opts" | grep -q "nosuid" || _issues+="nosuid "
+            echo "$_opts" | grep -q "nodev"  || _issues+="nodev "
+            ;;
+        /tmp|/dev/shm)
+            echo "$_opts" | grep -q "nosuid" || _issues+="nosuid "
+            echo "$_opts" | grep -q "nodev"  || _issues+="nodev "
+            echo "$_opts" | grep -q "noexec" || _issues+="noexec "
+            ;;
+        /boot/efi)
+            echo "$_opts" | grep -q "nosuid" || _issues+="nosuid "
+            echo "$_opts" | grep -q "nodev"  || _issues+="nodev "
+            echo "$_opts" | grep -q "noexec" || _issues+="noexec "
+            ;;
+    esac
+    if [[ -n "$_issues" ]]; then
+        echo -e "  ${YELLOW}[WARN]${NC} $_mp: faltan opciones: $_issues"
+    else
+        echo -e "  ${GREEN}[+]${NC} $_mp: OK"
+    fi
+done
+echo ""
+
+# Fase 11: Crypto policy y sandboxing de servicios
+echo -e "${CYAN}[11/12] Auditando crypto policy y sandboxing...${NC}"
+if command -v update-crypto-policies &>/dev/null; then
+    _cpol=$(update-crypto-policies --show 2>/dev/null || echo "DESCONOCIDA")
+    if [[ "$_cpol" == "FUTURE" ]]; then
+        echo -e "  ${GREEN}[+]${NC} Crypto policy: FUTURE (TLS 1.3+)"
+    elif [[ "$_cpol" == "DEFAULT" ]]; then
+        echo -e "  ${YELLOW}[WARN]${NC} Crypto policy: DEFAULT (TLS 1.2 permitido)"
+    else
+        echo -e "  ${CYAN}[i]${NC} Crypto policy: $_cpol"
+    fi
+fi
+# systemd sandboxing: contar servicios UNSAFE
+if command -v systemd-analyze &>/dev/null; then
+    _unsafe=$(systemd-analyze security 2>/dev/null | grep -c "UNSAFE" || echo "0")
+    _exposed=$(systemd-analyze security 2>/dev/null | grep -c "EXPOSED" || echo "0")
+    _ok=$(systemd-analyze security 2>/dev/null | grep -c " OK " || echo "0")
+    echo -e "  Sandboxing systemd: ${GREEN}$_ok OK${NC}, ${YELLOW}$_exposed EXPOSED${NC}, ${RED}$_unsafe UNSAFE${NC}"
+    if [[ $_unsafe -gt 10 ]]; then
+        echo -e "  ${YELLOW}[WARN]${NC} $_unsafe servicios sin sandboxing (9.5+ score)"
+    fi
+fi
+echo ""
+
+# Fase 12: Inventario consolidado con MAC vendor
+echo -e "${CYAN}[12/12] Generando inventario consolidado...${NC}"
 {
     echo "# Inventario de Red - $SUBNET - $(date '+%Y-%m-%d %H:%M:%S')"
     echo "# Modo: $MODE | Hosts activos: $TOTAL_HOSTS"

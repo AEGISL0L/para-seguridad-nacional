@@ -1180,6 +1180,32 @@ else
     log_ok "Sin trafico SNMP"
 fi
 
+# Check 19: Captive portal checks (revelan actividad de red al ISP)
+CAPTIVE_COUNT=$(tshark -r "$TEMP_PCAP" -Y "dns.qry.name contains \"captive\" or dns.qry.name contains \"conncheck\" or dns.qry.name contains \"detectportal\" or dns.qry.name contains \"connectivity-check\" or dns.qry.name contains \"nmcheck\"" 2>/dev/null | wc -l || echo "0")
+if [[ "$CAPTIVE_COUNT" -gt 0 ]]; then
+    CAPTIVE_DOMAINS=$(tshark -r "$TEMP_PCAP" -Y "dns.qry.name contains \"captive\" or dns.qry.name contains \"conncheck\" or dns.qry.name contains \"detectportal\" or dns.qry.name contains \"connectivity-check\"" -T fields -e dns.qry.name 2>/dev/null | sort -u | tr '\n' ' ')
+    log_alert "Captive portal checks detectados ($CAPTIVE_COUNT paquetes): $CAPTIVE_DOMAINS"
+    echo "    -> Deshabilitar en NM: /etc/NetworkManager/conf.d/99-no-captive-portal.conf"
+    echo "    -> Firefox: about:config -> network.captive-portal-service.enabled = false"
+else
+    log_ok "Sin captive portal checks"
+fi
+
+# Check 20: SNI plaintext (dominios visibles para el ISP en handshake TLS)
+SNI_DOMAINS=$(tshark -r "$TEMP_PCAP" -Y "tls.handshake.type == 1" -T fields -e tls.handshake.extensions_server_name 2>/dev/null | sort | uniq -c | sort -rn | head -10)
+if [[ -n "$SNI_DOMAINS" ]]; then
+    SNI_COUNT=$(echo "$SNI_DOMAINS" | wc -l)
+    echo -e "  ${YELLOW}[!] SNI plaintext: $SNI_COUNT dominios visibles para el ISP:${NC}"
+    echo "$SNI_DOMAINS" | while read -r _cnt _domain; do
+        [[ -z "$_domain" ]] && continue
+        echo "      $_cnt conexiones -> $_domain"
+    done
+    echo "    -> Mitigar con ECH (Encrypted Client Hello) o VPN/Tor"
+    ALERTS=$((ALERTS + 1))
+else
+    log_ok "Sin SNI plaintext detectado (o sin handshakes TLS en captura)"
+fi
+
 # Resumen
 echo ""
 echo -e "${CYAN}━━ Resumen ━━${NC}"
