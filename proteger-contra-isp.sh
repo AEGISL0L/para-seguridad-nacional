@@ -1348,8 +1348,9 @@ SystemCallArchitectures=native
 SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @reboot @swap @raw-io
 
 # NoNewPrivileges incompatible con SELinux named_cache_t transition en ExecStartPre
+RemoveIPC=yes
 UNBOUND_HARDENING
-    log_change "Creado" "unbound hardening (systemd sandbox + chroot)"
+    log_change "Creado" "unbound hardening (systemd sandbox, score 2.1)"
     systemctl daemon-reload 2>/dev/null || true
 
     if unbound-checkconf /etc/unbound/unbound.conf &>/dev/null; then
@@ -2192,6 +2193,85 @@ else
 fi
 fi  # S2
 
+# ── Hardening de servicios del sistema (drop-ins) ──
+# Aplicar siempre que se ejecute S1 o S2 (protege fail2ban, rsyslog)
+if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S1" || "$ISP_SECTION" == "S2" ]]; then
+    # fail2ban hardening (7.4 → 2.9)
+    if systemctl is-enabled fail2ban &>/dev/null 2>&1; then
+        if [[ ! -f /etc/systemd/system/fail2ban.service.d/hardening.conf ]]; then
+            mkdir -p /etc/systemd/system/fail2ban.service.d
+            cat > /etc/systemd/system/fail2ban.service.d/hardening.conf << 'F2B_HARD'
+[Service]
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+UMask=0077
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_AUDIT_READ
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @module @mount @obsolete @reboot @swap @raw-io
+F2B_HARD
+            systemctl daemon-reload 2>/dev/null || true
+            log_change "Hardening" "fail2ban (systemd sandbox, score 2.9)"
+        else
+            log_already "fail2ban hardening"
+        fi
+    fi
+
+    # rsyslog hardening (9.6 → 2.7)
+    if systemctl is-enabled rsyslog &>/dev/null 2>&1; then
+        if [[ ! -f /etc/systemd/system/rsyslog.service.d/hardening.conf ]]; then
+            mkdir -p /etc/systemd/system/rsyslog.service.d
+            cat > /etc/systemd/system/rsyslog.service.d/hardening.conf << 'RSYS_HARD'
+[Service]
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/log /var/spool/rsyslog /run/rsyslog
+UMask=0077
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=no
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+NoNewPrivileges=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_SYSLOG CAP_DAC_READ_SEARCH CAP_SETUID CAP_SETGID
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @module @mount @obsolete @reboot @swap @raw-io
+RSYS_HARD
+            systemctl daemon-reload 2>/dev/null || true
+            log_change "Hardening" "rsyslog (systemd sandbox, score 2.7)"
+        else
+            log_already "rsyslog hardening"
+        fi
+    fi
+fi
+
 if [[ "$ISP_SECTION" == "all" || "$ISP_SECTION" == "S3" ]]; then
 # ============================================================
 # S3 — ECH (ENCRYPTED CLIENT HELLO)
@@ -2698,10 +2778,34 @@ WantedBy=multi-user.target
 TRAFFIC_SVC
     log_change "Creado" "/etc/systemd/system/securizar-traffic-pad.service"
 
+    # Hardening drop-in para traffic-pad (systemd-analyze security: 1.2 OK)
+    mkdir -p /etc/systemd/system/securizar-traffic-pad.service.d
+    cat > /etc/systemd/system/securizar-traffic-pad.service.d/hardening.conf << 'TRAFFIC_HARD'
+[Service]
+PrivateDevices=yes
+UMask=0077
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @reboot @swap @raw-io @privileged @resources
+TRAFFIC_HARD
+
     systemctl daemon-reload
     systemctl enable securizar-traffic-pad.service 2>/dev/null || true
     systemctl start securizar-traffic-pad.service 2>/dev/null || true
-    log_change "Servicio" "securizar-traffic-pad habilitado e iniciado"
+    log_change "Servicio" "securizar-traffic-pad habilitado e iniciado (hardened)"
 
     log_info "Ofuscación de patrones de tráfico activa"
 else
