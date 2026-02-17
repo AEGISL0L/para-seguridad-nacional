@@ -1332,7 +1332,16 @@ submenu_isp() {
                 ;;
             v|V)
                 echo ""
-                mod_38_proteger_isp "--verify" || true
+                echo -e "  ${BG_CYAN} Verificación exhaustiva - Protección contra ISP ${NC}"
+                echo ""
+                local verify_script="$SCRIPT_DIR/proteger-contra-isp.sh"
+                if [[ -f "$verify_script" ]]; then
+                    bash "$verify_script" "--verify" 2>&1 || {
+                        echo -e "  ${RED}✗${NC} La verificación finalizó con errores (código: $?)"
+                    }
+                else
+                    echo -e "  ${RED}✗${NC} No encontrado: $verify_script"
+                fi
                 _pause
                 ;;
             b|B|0)  return ;;

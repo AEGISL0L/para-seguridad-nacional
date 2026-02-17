@@ -63,7 +63,7 @@ _detect_dns_resolver() {
 
 # ── Verificación exhaustiva ──────────────────────────────────
 _isp_verificacion_exhaustiva() {
-    local ok=0 total=27
+    local ok=0 total=40
     local _r _dns_resolver
     _dns_resolver=$(_detect_dns_resolver)
 
@@ -73,7 +73,7 @@ _isp_verificacion_exhaustiva() {
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
 
-    # ── VPN (5 checks) ──
+    # ── VPN (6 checks) ──
     echo -e "  ${BOLD}[VPN]${NC}"
 
     _r="!!"
@@ -104,9 +104,26 @@ _isp_verificacion_exhaustiva() {
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Interfaz VPN activa"
+
+    # Persistencia kill switch: reglas sobreviven restart de NetworkManager
+    _r="!!"
+    if systemctl is-enabled securizar-vpn-killswitch.service &>/dev/null; then
+        local _ks_wants=""
+        _ks_wants=$(systemctl show securizar-vpn-killswitch.service -p WantedBy --value 2>/dev/null || true)
+        if [[ "$_ks_wants" == *"multi-user.target"* ]] || [[ "$_ks_wants" == *"network-online.target"* ]]; then
+            # Verificar que el servicio no depende de NM (debe cargar antes o independiente)
+            local _ks_after=""
+            _ks_after=$(systemctl show securizar-vpn-killswitch.service -p After --value 2>/dev/null || true)
+            if [[ "$_ks_after" != *"NetworkManager"* ]] || \
+               [[ -f /etc/systemd/system/securizar-vpn-killswitch.service ]]; then
+                _r="OK"; ((ok++)) || true
+            fi
+        fi
+    fi
+    echo -e "    ${_r} Kill switch persiste tras restart NM"
     echo ""
 
-    # ── DNS (6 checks) ──
+    # ── DNS (7 checks) ──
     echo -e "  ${BOLD}[DNS]${NC} (modo: ${_dns_resolver})"
 
     _r="!!"
@@ -160,9 +177,31 @@ _isp_verificacion_exhaustiva() {
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Monitor fallback DNS activo"
+
+    # DNS real-time: verificar que consultas DNS pasan por resolver cifrado
+    _r="!!"
+    if [[ "$_dns_resolver" != "none" ]]; then
+        if command -v dig &>/dev/null; then
+            local _dig_server=""
+            _dig_server=$(dig +short +timeout=3 +tries=1 cloudflare.com @127.0.0.1 2>/dev/null | head -1 || true)
+            if [[ -n "$_dig_server" ]]; then
+                _r="OK"; ((ok++)) || true
+            fi
+        elif command -v nslookup &>/dev/null; then
+            if nslookup cloudflare.com 127.0.0.1 &>/dev/null; then
+                _r="OK"; ((ok++)) || true
+            fi
+        else
+            # Sin dig ni nslookup: verificar que el puerto responde
+            if timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/53' 2>/dev/null; then
+                _r="OK"; ((ok++)) || true
+            fi
+        fi
+    fi
+    echo -e "    ${_r} DNS resolver responde en localhost"
     echo ""
 
-    # ── Privacidad (2 checks) ──
+    # ── Privacidad (4 checks) ──
     echo -e "  ${BOLD}[Privacidad]${NC}"
 
     _r="!!"
@@ -177,7 +216,51 @@ _isp_verificacion_exhaustiva() {
        sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null | grep -q '1'; then
         _r="OK"; ((ok++)) || true
     fi
-    echo -e "    ${_r} IPv6 deshabilitado"
+    echo -e "    ${_r} IPv6 deshabilitado (sysctl)"
+
+    # IPv6 real: verificar TODAS las interfaces no-loopback
+    _r="!!"
+    local _ipv6_leak=0
+    while IFS= read -r _iface; do
+        _iface="${_iface%%:*}"
+        _iface="${_iface##* }"
+        [[ "$_iface" == "lo" ]] && continue
+        local _ipv6_val=""
+        _ipv6_val=$(sysctl -n "net.ipv6.conf.${_iface}.disable_ipv6" 2>/dev/null || echo "0")
+        if [[ "$_ipv6_val" != "1" ]]; then
+            _ipv6_leak=1
+            break
+        fi
+    done < <(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' || true)
+    if [[ $_ipv6_leak -eq 0 ]]; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} IPv6 deshabilitado en TODAS las interfaces"
+
+    # mDNS/LLMNR leak: verificar que no se resuelve por multicast
+    _r="!!"
+    local _mdns_leak=0
+    if systemctl is-active avahi-daemon &>/dev/null; then
+        _mdns_leak=1
+    fi
+    # Verificar que systemd-resolved no usa mDNS/LLMNR
+    if systemctl is-active systemd-resolved &>/dev/null; then
+        local _resolved_mdns=""
+        _resolved_mdns=$(resolvectl mdns 2>/dev/null | grep -i 'yes' || true)
+        local _resolved_llmnr=""
+        _resolved_llmnr=$(resolvectl llmnr 2>/dev/null | grep -i 'yes' || true)
+        if [[ -n "$_resolved_mdns" ]] || [[ -n "$_resolved_llmnr" ]]; then
+            _mdns_leak=1
+        fi
+    fi
+    # Verificar que no hay sockets escuchando en puertos mDNS/LLMNR
+    if ss -ulnp 2>/dev/null | grep -qE ':5353\b|:5355\b'; then
+        _mdns_leak=1
+    fi
+    if [[ $_mdns_leak -eq 0 ]]; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} Sin fugas mDNS/LLMNR (5353/5355)"
     echo ""
 
     # ── Red (3 checks) ──
@@ -236,11 +319,28 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} timesyncd inactivo"
     echo ""
 
-    # ── Navegador (3 checks) ──
+    # ── Navegador (4 checks) ──
     echo -e "  ${BOLD}[Navegador]${NC}"
 
     local _ff_found=0 _ech=0 _webrtc=0 _https=0
+    # Rutas estándar
     for ff_dir in /home/*/.mozilla/firefox/*.default* /root/.mozilla/firefox/*.default*; do
+        [[ -f "${ff_dir}/user.js" ]] || continue
+        _ff_found=1
+        grep -q 'network.dns.echconfig.enabled.*true' "${ff_dir}/user.js" 2>/dev/null && _ech=1 || true
+        grep -q 'media.peerconnection.enabled.*false' "${ff_dir}/user.js" 2>/dev/null && _webrtc=1 || true
+        grep -q 'dom.security.https_only_mode.*true' "${ff_dir}/user.js" 2>/dev/null && _https=1 || true
+    done
+    # Snap Firefox
+    for ff_dir in /home/*/snap/firefox/common/.mozilla/firefox/*.default*; do
+        [[ -f "${ff_dir}/user.js" ]] || continue
+        _ff_found=1
+        grep -q 'network.dns.echconfig.enabled.*true' "${ff_dir}/user.js" 2>/dev/null && _ech=1 || true
+        grep -q 'media.peerconnection.enabled.*false' "${ff_dir}/user.js" 2>/dev/null && _webrtc=1 || true
+        grep -q 'dom.security.https_only_mode.*true' "${ff_dir}/user.js" 2>/dev/null && _https=1 || true
+    done
+    # Flatpak Firefox
+    for ff_dir in /home/*/.var/app/org.mozilla.firefox/.mozilla/firefox/*.default*; do
         [[ -f "${ff_dir}/user.js" ]] || continue
         _ff_found=1
         grep -q 'network.dns.echconfig.enabled.*true' "${ff_dir}/user.js" 2>/dev/null && _ech=1 || true
@@ -259,6 +359,11 @@ _isp_verificacion_exhaustiva() {
     _r="!!"
     if [[ $_https -eq 1 ]]; then _r="OK"; ((ok++)) || true; fi
     echo -e "    ${_r} HTTPS-Only mode"
+
+    # Perfiles Firefox detectados
+    _r="!!"
+    if [[ $_ff_found -eq 1 ]]; then _r="OK"; ((ok++)) || true; fi
+    echo -e "    ${_r} Perfiles Firefox detectados (estándar/Snap/Flatpak)"
     echo ""
 
     # ── WARP (3 checks, solo si WARP está instalado) ──
@@ -297,19 +402,101 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} detectar-http-inseguro.sh"
     echo ""
 
+    # ── Integración cross-section (4 checks) ──
+    echo -e "  ${BOLD}[Integración]${NC}"
+
+    # VPN + Kill switch + DNS: la tríada fundamental
+    _r="!!"
+    local _vpn_ok=0 _ks_ok=0 _dns_ok=0
+    if ip link show 2>/dev/null | grep -qE '(wg[0-9]|tun[0-9]|tap[0-9]|proton[0-9]|mullvad|nordlynx|CloudflareWARP)' || \
+       { command -v wg &>/dev/null && wg show interfaces 2>/dev/null | grep -q .; }; then
+        _vpn_ok=1
+    fi
+    if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q 'securizar-vpn-killswitch' 2>/dev/null; then
+        _ks_ok=1
+    elif iptables -S 2>/dev/null | grep -q 'securizar-vpn' 2>/dev/null; then
+        _ks_ok=1
+    fi
+    if [[ "$_dns_resolver" != "none" ]]; then _dns_ok=1; fi
+    if [[ $_vpn_ok -eq 1 ]] && [[ $_ks_ok -eq 1 ]] && [[ $_dns_ok -eq 1 ]]; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} Tríada VPN + Kill switch + DNS cifrado"
+
+    # Kill switch + IPv6 disabled: no bypass posible
+    _r="!!"
+    if [[ $_ks_ok -eq 1 ]] && \
+       sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null | grep -q '1'; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} Kill switch + IPv6 deshabilitado (sin bypass)"
+
+    # DNS cifrado + resolv.conf local: no DNS leak posible
+    _r="!!"
+    if [[ $_dns_ok -eq 1 ]] && grep -q '^nameserver 127\.0\.0\.1' /etc/resolv.conf 2>/dev/null; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} DNS cifrado + resolv.conf local (sin DNS leak)"
+
+    # Firewall bloquea DNS externo (puerto 53 saliente solo a localhost)
+    _r="!!"
+    if command -v nft &>/dev/null; then
+        if nft list ruleset 2>/dev/null | grep -qE 'dport 53.*(drop|reject)' 2>/dev/null || \
+           nft list ruleset 2>/dev/null | grep -q 'securizar.*dns' 2>/dev/null; then
+            _r="OK"; ((ok++)) || true
+        fi
+    elif iptables -S 2>/dev/null | grep -qE 'dport 53.*(DROP|REJECT)' 2>/dev/null; then
+        _r="OK"; ((ok++)) || true
+    fi
+    echo -e "    ${_r} Firewall bloquea DNS externo (puerto 53)"
+    echo ""
+
     # ── Scoring ──
     echo "  ─────────────────────────────────────────"
-    local nivel
-    if [[ $ok -ge 24 ]]; then
-        nivel="EXCELENTE"
-    elif [[ $ok -ge 18 ]]; then
-        nivel="BUENO"
-    elif [[ $ok -ge 10 ]]; then
-        nivel="MEJORABLE"
+    local nivel color
+    if [[ $ok -ge $((total * 90 / 100)) ]]; then
+        nivel="EXCELENTE"; color="${GREEN}"
+    elif [[ $ok -ge $((total * 65 / 100)) ]]; then
+        nivel="BUENO"; color="${CYAN}"
+    elif [[ $ok -ge $((total * 40 / 100)) ]]; then
+        nivel="MEJORABLE"; color="${YELLOW}"
     else
-        nivel="DEFICIENTE"
+        nivel="DEFICIENTE"; color="${RED}"
     fi
-    echo -e "  Resultado: ${BOLD}${ok}/${total} OK${NC} — ${nivel}"
+    local pct=0
+    [[ $total -gt 0 ]] && pct=$((ok * 100 / total)) || true
+    echo -e "  Resultado: ${BOLD}${ok}/${total} OK${NC} (${pct}%) — ${color}${BOLD}${nivel}${NC}"
+
+    # Resumen de brechas críticas
+    local _gaps=0
+    echo ""
+    if [[ $_vpn_ok -eq 0 ]]; then
+        echo -e "  ${RED}▸${NC} ${BOLD}Sin VPN activa${NC} — todo el tráfico es visible al ISP"
+        ((_gaps++)) || true
+    fi
+    if [[ $_ks_ok -eq 0 ]] && [[ $_vpn_ok -eq 1 ]]; then
+        echo -e "  ${RED}▸${NC} ${BOLD}VPN sin kill switch${NC} — tráfico se filtra si cae la VPN"
+        ((_gaps++)) || true
+    fi
+    if [[ $_dns_ok -eq 0 ]]; then
+        echo -e "  ${RED}▸${NC} ${BOLD}Sin DNS cifrado${NC} — el ISP ve cada dominio que visitas"
+        ((_gaps++)) || true
+    fi
+    if [[ $_ipv6_leak -eq 1 ]]; then
+        echo -e "  ${YELLOW}▸${NC} ${BOLD}IPv6 activo en alguna interfaz${NC} — posible bypass de VPN"
+        ((_gaps++)) || true
+    fi
+    if [[ $_mdns_leak -eq 1 ]]; then
+        echo -e "  ${YELLOW}▸${NC} ${BOLD}mDNS/LLMNR activo${NC} — dominios .local visibles al ISP"
+        ((_gaps++)) || true
+    fi
+    if [[ $_ff_found -eq 0 ]]; then
+        echo -e "  ${YELLOW}▸${NC} ${BOLD}Sin perfiles Firefox${NC} — protecciones de navegador no verificables"
+        ((_gaps++)) || true
+    fi
+    if [[ $_gaps -eq 0 ]]; then
+        echo -e "  ${GREEN}▸${NC} Sin brechas críticas detectadas"
+    fi
     echo ""
 }
 
@@ -775,11 +962,23 @@ fi
 prev_state="unknown"
 [[ -f "$STATE_FILE" ]] && prev_state=$(cat "$STATE_FILE" 2>/dev/null || echo "unknown")
 
-_dbg "deteccion: vpn_up=$vpn_up iface=${vpn_iface:-ninguna} prev_state=$prev_state"
+# Determinar nuevo estado
+if [[ "$vpn_up" == "true" ]]; then
+    new_state="up"
+else
+    new_state="down"
+fi
 
-if [[ "$vpn_up" == "true" && "$prev_state" != "up" ]]; then
+# Solo loguear y actuar cuando hay cambio de estado
+if [[ "$new_state" == "$prev_state" ]]; then
+    # Sin cambio: no loguear nada (evita spam en debug.log)
+    exit 0
+fi
+
+_dbg "transicion: $prev_state -> $new_state (iface=${vpn_iface:-ninguna})"
+
+if [[ "$new_state" == "up" ]]; then
     # VPN acaba de subir → activar kill switch
-    _dbg "transicion: $prev_state → up (iface=$vpn_iface), activando kill switch"
     if /etc/securizar/vpn-killswitch.sh 2>/dev/null; then
         _dbg "kill switch activado OK"
         logger -t securizar-vpn-watchdog "Kill switch ACTIVADO (interfaz $vpn_iface detectada)"
@@ -787,19 +986,17 @@ if [[ "$vpn_up" == "true" && "$prev_state" != "up" ]]; then
         _dbg "kill switch FALLO al activar (exit=$?)"
         logger -t securizar-vpn-watchdog "Kill switch: fallo al activar para $vpn_iface"
     fi
-    echo "up" > "$STATE_FILE"
-elif [[ "$vpn_up" == "false" && "$prev_state" == "up" ]]; then
+else
     # VPN acaba de caer → desactivar kill switch
-    _dbg "transicion: up → down, desactivando kill switch"
     if /etc/securizar/vpn-killswitch-off.sh 2>/dev/null; then
         _dbg "kill switch desactivado OK"
-        logger -t securizar-vpn-watchdog "Kill switch DESACTIVADO (VPN caída)"
+        logger -t securizar-vpn-watchdog "Kill switch DESACTIVADO (VPN caida)"
     else
         _dbg "kill switch FALLO al desactivar (exit=$?)"
         logger -t securizar-vpn-watchdog "Kill switch: fallo al desactivar"
     fi
-    echo "down" > "$STATE_FILE"
 fi
+echo "$new_state" > "$STATE_FILE"
 VPN_WATCHDOG
         chmod 755 "${ISP_BIN_DIR}/vpn-watchdog.sh"
         log_change "Creado" "${ISP_BIN_DIR}/vpn-watchdog.sh"
