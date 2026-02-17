@@ -39,7 +39,7 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 3. `hardening-final.sh` - Hardening final consolidado (auditd, sysctl, firewall, updates)
 4. `hardening-externo.sh` - Hardening de servicios externos (banners, honeypot, DNS, VPN)
 5. `hardening-extremo.sh` - Nivel extremo SEGURO (USB, kernel, red — sin lockout, inline en menú)
-6. `hardening-paranoico.sh` - Nivel paranoico SEGURO (core dumps, GRUB, audit — sin PAM, inline en menú)
+6. `hardening-paranoico.sh` - Nivel paranoico SEGURO, 23 secciones (core dumps, GRUB, audit, sysctl, per-interface hardening, faillock, user namespaces, crypto FUTURE, OBEX/Geoclue/captive portal, mount options — sin PAM, inline en menú)
 7. `contramedidas-mesh.sh` - Contramedidas de red mesh (WiFi, Bluetooth, IoT)
 8. `proteger-privacidad.sh` - Protección de privacidad (VNC, cámara, DNS leaks, Tor)
 9. `aplicar-banner-total.sh` - Aplicación de banners (MOTD, issue, SSH, GDM, Firefox)
@@ -116,8 +116,8 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 ### Scripts de detección y respuesta (9) — categoría `d`
 41. `logging-centralizado.sh` - rsyslog TLS, SIEM, correlación, forense
 44. `forense-avanzado.sh` - Memoria, disco, timeline, custodia
-64. `auditoria-red-wireshark.sh` - Wireshark, tshark, capturas, anomalías
-65. `auditoria-red-infraestructura.sh` - Provisionador: instala 22 scripts de auditoría de red en `/usr/local/bin/auditoria-red-*.sh` (discovery, puertos, TLS/SSL, SNMP, config, inventario, baseline/drift, reporte global con scoring 0-100)
+64. `auditoria-red-wireshark.sh` - Wireshark, tshark, capturas, 20 checks de anomalías (ARP/DNS/DHCP/LLMNR/mDNS/SSDP poisoning, protocolos inseguros, C2/backdoor, tunneling, captive portal, SNI plaintext)
+65. `auditoria-red-infraestructura.sh` - Provisionador: instala 22 scripts de auditoría de red en `/usr/local/bin/auditoria-red-*.sh` (discovery, puertos, TLS/SSL, SNMP, config, inventario, baseline/drift, reporte global con scoring 0-100, verificación LUKS, mount options, crypto policy, systemd sandboxing — 12 fases)
 68. `respuesta-incidentes.sh` - Forense, custodia, IOCs, escalación, hunting, métricas
 69. `edr-osquery.sh` - Osquery, Wazuh, threat queries, fleet, baseline
 70. `gestion-vulnerabilidades.sh` - Trivy, grype, SCAP, CVSS/EPSS, drift, madurez
@@ -340,6 +340,8 @@ Parámetros ya correctos en el sistema (no requirieron cambio):
 - `net.ipv4.icmp_ignore_bogus_error_responses = 1`, `net.ipv4.icmp_echo_ignore_broadcasts = 1`
 - `net.ipv4.conf.all.send_redirects = 0`, `net.ipv4.conf.all.arp_accept = 0`
 - `net.ipv6.conf.all.accept_source_route = 0`, `net.ipv6.conf.all.accept_redirects = 0`
+- `net.ipv4.tcp_sack = 0` (anti CVE-2019-11477 SACK Panic), `net.ipv4.tcp_rfc1337 = 1` (anti TIME-WAIT assassination)
+- `net.ipv4.tcp_timestamps = 0` (anti TCP fingerprinting)
 
 ### Hardening manual aplicado (2026-02-16)
 
@@ -499,7 +501,7 @@ Ruta config openSUSE: `/etc/nftables/rules/main.nft` (copia en `/etc/nftables.co
 **Capabilities**: 6 normales (dumpcap, clockdiff, kwin, newuidmap, newgidmap, mtr)
 **Kernel modules**: todos estándar Tiger Lake (i915, xe, iwlwifi, snd, nf_tables, etc.)
 **SELinux**: enforcing, política targeted
-**Kernel security**: ASLR=2, ptrace_scope=1, kptr_restrict=1, dmesg_restrict=1, perf_paranoid=2, unprivileged_bpf=2
+**Kernel security**: ASLR=2, ptrace_scope=1, kptr_restrict=2, dmesg_restrict=1, perf_paranoid=3, unprivileged_bpf=1, core_pattern=|/bin/false, protected_hardlinks=1, protected_symlinks=1
 **LD_PRELOAD/ld.so.preload**: limpio. /dev/shm vacío. /tmp sin ejecutables
 **Crontabs**: 0 user, 0 system. 20 timers systemd legítimos
 **Login failures**: 0. SSH inactivo. Sin authorized_keys
@@ -522,6 +524,47 @@ Auditoría de 40+ vectores con capturas de 15s, 30s, 60s, 90s y 120s:
 - **Destinos legítimos**: Anthropic, Google, ProtonMail, GitHub, openSUSE, Datadog
 - **Huawei Y6s**: NetBIOS 137/138, SNMP 161, mDNS 5353, Spotify 57621/udp expuestos — AISLADO
 - **Mi TV Stick**: API Google Cast (8008,8009,8443) sin autenticación — AISLADO
+
+### Auditoría exhaustiva de sistema (2026-02-17, 42 vectores)
+
+#### Hallazgos críticos y fixes aplicados
+- **IPv6 per-interface**: `disable_ipv6=1` global no propagaba a wlp0s20f3 → link-local fe80:: activo. Fix: `sysctl -w net.ipv6.conf.wlp0s20f3.disable_ipv6=1`, persistido en `/etc/sysctl.d/99-securizar-ipv6.conf` (600)
+- **rp_filter per-interface**: `all=1` pero wlp0s20f3=2 (loose). Fix: `sysctl -w net.ipv4.conf.wlp0s20f3.rp_filter=1`, persistido en `/etc/sysctl.d/99-securizar-rpfilter.conf` (600)
+- **OBEX bluetooth**: obexd se re-activaba vía D-Bus aunque bluetooth estaba masked. Fix: `systemctl --user mask obex.service`
+- **Geoclue location agent**: triangulaba posición vía WiFi BSSIDs. Fix: `Hidden=true` en autostart desktop file
+- **Crypto policy FUTURE**: `update-crypto-policies --set FUTURE` → TLS mínimo 1.3, RSA mínimo 3072, SHA-1 deshabilitado
+
+#### Estado por vector (42 checks)
+**OK (24)**: Puertos escucha (0 TCP, 1 UDP chrony localhost), conexiones (100% HTTPS), servicios (29 legítimos), kernel params (todos correctos), WiFi (WPA2-PSK 5GHz, MAC randomizada), SELinux (enforcing targeted), SSH (disabled, ed25519 only para GitHub), SUID (17 estándar), RPM integrity, /tmp /dev/shm limpios, crontabs (0), env variables limpias, containers (0), hostname=localhost, firmware actualizado, DNS (Quad9 sin leaks), NTP (chrony stratum 1), 0 world-writable en /etc /usr, credentials (600), git (SSH remote, 0 secrets)
+
+**CRITICAL (1)**: Disco NO cifrado (sin LUKS, swap sin cifrar)
+
+**WARN (13)**: Secure Boot OFF, GRUB sin contraseña, mount options (/home sin nosuid,nodev; /tmp sin noexec; /boot/efi sin nosuid,nodev,noexec), PASS_MAX_DAYS=99999, faillock no configurado, user_namespaces=30026 (alto, CVE-2022-0185), WiFi PSK visible vía nmcli -s, SNI plaintext (ISP ve dominios), captive portal checks (NM + Firefox), systemd sandboxing (security-monitor 9.6 UNSAFE), Firefox (0 extensiones, no DoH, WebRTC/WebGL no deshabilitados), gcc/gdb/strace disponibles, telemetría Datadog (Claude Code)
+
+**INFO (2)**: Kernel taint 2147484160 (out-of-tree iwlmvm + SUSE tech preview, sin impacto seguridad), dumpcap cap_net_admin,cap_net_raw=eip (flag inheritable notable)
+
+#### Capturas de red (2626 + 7351 paquetes)
+- 100% TCP/TLS, DNS solo a 9.9.9.9, NTP 8 paquetes
+- 0 ARP/broadcast/LAN traffic
+- Dominios DNS: api.anthropic.com, cdn.opensuse.org, conncheck.opensuse.org, detectportal.firefox.com, http-intake.logs.us5.datadoghq.com, storage.googleapis.com
+- Exposición externa: IP 213.94.43.40, ISP XTRA TELECOM (Oviedo), sin VPN/Tor/WARP
+
+#### Nuevos módulos en hardening-paranoico.sh (S17-S22)
+- **S17**: Per-interface hardening — IPv6 disable + rp_filter=1 en todas las interfaces
+- **S18**: Faillock brute-force — pam_faillock (5 intentos → 15min bloqueo, incluso root)
+- **S19**: User namespaces limit — `user.max_user_namespaces = 0`
+- **S20**: Crypto policy FUTURE — `update-crypto-policies --set FUTURE`
+- **S21**: Disable tracking — OBEX masked, Geoclue Hidden, NM captive portal deshabilitado
+- **S22**: Mount options — /home nosuid,nodev; /boot/efi nosuid,nodev,noexec
+
+#### Nuevos checks en auditoria-red-wireshark.sh (19-20)
+- **Check 19**: Detección tráfico captive portal (conncheck, detectportal, nmcheck)
+- **Check 20**: Análisis SNI plaintext (dominios visibles al ISP en ClientHello TLS)
+
+#### Nuevas fases en auditoria-red-infraestructura.sh (9-12)
+- **Fase 9**: Verificación cifrado disco (LUKS en particiones + swap)
+- **Fase 10**: Auditoría mount options (/home, /tmp, /var, /boot/efi, /dev/shm)
+- **Fase 11**: Crypto policy + systemd sandboxing (UNSAFE/EXPOSED/OK scoring)
 
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)
