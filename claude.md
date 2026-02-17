@@ -594,6 +594,33 @@ Directivas eliminadas (causan `sshd -t` failure):
 - `PrintMotd`, `PrintLastLog` → eliminados completamente
 - `Protocol 2` → redundante desde OpenSSH 7.4
 
+### Integración de hallazgos de auditoría de red (2026-02-17, 4 rondas)
+
+Todos los hallazgos de `corregir-adaptador-red.sh` (10 fixes puntuales) integrados en scripts canónicos:
+
+#### Nuevas secciones en scripts canónicos
+- **hardening-opensuse.sh**: TCP SACK/DSACK=0 (CVE-2019-11477), keepalive=600/30/5, IPv6 use_tempaddr=2 en heredoc sysctl base
+- **proteger-red-avanzado.sh S5b**: Per-interface sysctl enforcement — enumera `/sys/class/net/*` (excluyendo lo), escribe 9 params por interfaz en `/etc/sysctl.d/99-per-interface-hardening.conf`
+- **contramedidas-mesh.sh §2b**: `bt_coex_active=N` en `/etc/modprobe.d/disable-bluetooth.conf` (solo si iwlwifi cargado)
+- **contramedidas-mesh.sh §11**: WoWLAN disable via `iw phy` + persistencia NM dispatcher `/etc/NetworkManager/dispatcher.d/99-disable-wowlan`
+- **seguridad-wireless.sh**: PSK-flags=1 credential protection, Polkit WiFi toggle restriction
+- **proteger-privacidad.sh §11**: NM connectivity check disable (`/etc/NetworkManager/conf.d/99-no-connectivity-check.conf`)
+- **proteger-privacidad.sh §12**: Firefox HTTPS-Only mode via user.js
+- **auditoria-red-infraestructura.sh**: +4 SYSCTL_CHECKS (tcp_sack, tcp_dsack, tcp_keepalive_time, use_tempaddr), per-interface sysctl + ARP audit
+- **validar-controles.sh**: +5 validaciones (TCP SACK, keepalive, per-interface sysctl, NM connectivity)
+
+#### Fixes cross-script (robustez)
+- **Detección dinámica de interfaz**: Reemplazados fallbacks `eth0` hardcoded con 3-tier: `ip route get` → `ip link show up` → `/sys/class/net/` → `eth0` (securizar-menu.sh, auditoria-red-infraestructura.sh, auditoria-red-wireshark.sh, respuesta-incidentes.sh)
+- **Guards `command -v`**: Antes de usar `nmcli`/`iw` en contramedidas-mesh.sh, proteger-privacidad.sh, hardening-externo.sh, deploy-dns-fix.sh
+- **Bluetooth config idempotente**: hardening-final.sh usa grep antes de append (evita duplicados con contramedidas-mesh.sh)
+- **Sudoers atómicos**: hardening-final.sh y mitigar-escalada.sh usan `install -m 440` antes de escribir contenido
+- **Sysctl consistencia**: tcp_timestamps=1→0 en seguridad-dns-avanzada.sh, rp_filter 1→2 en hardening-paranoico.sh, duplicado rp_filter eliminado en hardening-opensuse.sh
+- **hardening-kernel-boot.sh**: Variable `$GRUB_USER_CFG` entrecomillada en 4 ubicaciones
+- **verificar-segmentacion-final.sh**: Flag `-e` faltante añadido a `set -euo pipefail`
+
+#### UPnP eliminado del sistema
+- **libupnp17** desinstalada (arrastra VLC como dependencia). Servicios UPnP ya masked y puertos bloqueados por nftables
+
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)
 - `/var/lib/security-monitoring/` - Monitorización (correlaciones, baselines, healthchecks, digests)
@@ -617,6 +644,12 @@ Directivas eliminadas (causan `sshd -t` failure):
 - **Paquetes**: Usar `pkg_install`, `pkg_is_installed`, etc. de `lib/securizar-pkg.sh`. Nunca llamar a zypper/apt/dnf/pacman directamente
 - **Firewall**: Usar `fw_add_service`, `fw_add_rich_rule`, etc. de `lib/securizar-firewall.sh`. Nunca llamar a firewall-cmd/ufw/nft directamente
 - **Rutas GRUB/SCAP**: Usar variables `$GRUB_CFG`, `$SCAP_DS_PATH`, etc. de `lib/securizar-paths.sh`. Nunca hardcodear rutas específicas de una distro
+- **Detección de interfaz**: Nunca hardcodear `eth0`. Usar detección dinámica: `ip route get 1.1.1.1` → `ip -o link show up` → `ls /sys/class/net/` → `eth0` como último fallback
+- **Guards de comandos externos**: Usar `command -v nmcli/iw/etc.` antes de invocarlos. Si no están disponibles, usar fallback (`systemctl` para NM) o skip con advertencia
+- **Permisos atómicos**: Al crear ficheros sudoers o sensibles, usar `install -m 440 /dev/null <path>` antes de escribir contenido (evita ventana de permisos inseguros)
+- **Idempotencia en configs compartidos**: Al append a ficheros que múltiples scripts pueden modificar (ej. disable-bluetooth.conf), verificar con grep antes de añadir (evitar duplicados)
+- **Sysctl per-interface**: Los valores `conf.all` NO se propagan automáticamente a interfaces existentes. Siempre aplicar también a `conf.$iface` para cada interfaz activa
+- **Pre-checks**: Scripts con `_precheck()` deben actualizar el conteo al añadir nuevos checks (`_precheck N` donde N = total)
 
 ## Restricciones
 
