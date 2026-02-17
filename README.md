@@ -30,8 +30,8 @@ Suite completa de hardening y securizacion para Linux, con 78 modulos interactiv
 - **Seguridad de APIs**: rate limiting, JWT/OAuth2, mTLS, GraphQL, WAF
 - **IoT**: MQTT hardening, device inventory, firmware integrity, segmentacion
 - **DNS avanzado**: DNSSEC, DoT/DoH, RPZ sinkhole, tunneling detection
-- **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias (18 checks: ARP, DHCP, DNS tunneling, Spotify Connect, Google Cast, SSDP/UPnP, SNMP, MAC randomization), correlacion IDS
-- **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift, deteccion de APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN, protocolos modernos (MQTT, Modbus/ICS, CoAP, AMQP, Kubernetes API), CVE cross-reference de versiones de servicios
+- **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias (20 checks: ARP, DHCP, DNS tunneling, Spotify Connect, Google Cast, SSDP/UPnP, SNMP, MAC randomization, captive portal detection, SNI plaintext analysis), correlacion IDS
+- **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift, deteccion de APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN, protocolos modernos (MQTT, Modbus/ICS, CoAP, AMQP, Kubernetes API), CVE cross-reference de versiones de servicios, verificacion cifrado disco LUKS, auditoria mount options, crypto policy check, systemd sandboxing audit (12 fases)
 - **Runtime kernel**: LKRG, kernel lockdown, eBPF hardening, Falco, module signing, CPU mitigations
 - **Memoria y procesos**: ASLR, PIE enforcement, W^X, seccomp-BPF, cgroups v2, ptrace, coredumps
 - **YARA + Sigma**: reglas de deteccion de malware y correlacion de eventos de evasion
@@ -118,7 +118,7 @@ securizar/
 ├── hardening-final.sh             # Modulo   3: Hardening final consolidado
 ├── hardening-externo.sh           # Modulo   4: Hardening de servicios externos
 ├── hardening-extremo.sh           # Modulo   5: Nivel extremo (via menu = seguro)
-├── hardening-paranoico.sh         # Modulo   6: Nivel paranoico (via menu = seguro)
+├── hardening-paranoico.sh         # Modulo   6: Nivel paranoico, 23 secciones (via menu = seguro)
 ├── contramedidas-mesh.sh          # Modulo   7: Contramedidas de red mesh
 ├── proteger-privacidad.sh         # Modulo   8: Proteccion de privacidad
 ├── aplicar-banner-total.sh        # Modulo  9: Banners de seguridad
@@ -471,7 +471,7 @@ Modulos fundamentales de securizacion del sistema.
 | 3 | **Hardening final** | `hardening-final.sh` | Consolidacion de auditd, sysctl avanzado, reglas de firewall, actualizaciones |
 | 4 | **Hardening externo** | `hardening-externo.sh` | Banners de seguridad, honeypot, DNS seguro, plantilla VPN |
 | 5 | **Hardening extremo** | *(inline en menu)* | USB, kernel, red. **SEGURO**: el menu reimplementa este modulo eliminando las secciones que causan lockout (deshabilitacion de sshd, firewall DROP, chattr +i) |
-| 6 | **Hardening paranoico** | *(inline en menu)* | Core dumps, GRUB, auditoria avanzada, deteccion conflicto firewalld/nftables, aislamiento LAN triple (MAC+IP+subnet). **SEGURO**: el menu reimplementa eliminando TMOUT readonly y modificacion de PAM |
+| 6 | **Hardening paranoico** | *(inline en menu)* | 23 secciones: core dumps, GRUB, auditoria avanzada, deteccion conflicto firewalld/nftables, aislamiento LAN triple (MAC+IP+subnet), per-interface hardening (IPv6 disable + rp_filter strict), faillock brute-force (5 intentos/15min), user namespaces limit, crypto policy FUTURE (TLS 1.3 min, RSA 3072), disable OBEX/Geoclue/captive portal, mount options hardening (/home nosuid,nodev; /boot/efi nosuid,nodev,noexec). **SEGURO**: el menu reimplementa eliminando TMOUT readonly y modificacion de PAM |
 | 7 | **Contramedidas mesh** | `contramedidas-mesh.sh` | Proteccion de redes WiFi, Bluetooth e IoT mesh |
 | 8 | **Proteger privacidad** | `proteger-privacidad.sh` | VNC seguro, camara, prevencion DNS leaks, integracion Tor |
 | 9 | **Aplicar banners** | `aplicar-banner-total.sh` | MOTD, /etc/issue, banner SSH, GDM, Firefox |
