@@ -14,9 +14,10 @@ require_root
 securizar_setup_traps
 
 # --- Pre-check: verificar si ya está todo aplicado ---
-_precheck 10
+_precheck 12
 _pc true
 _pc 'check_file_exists /etc/modprobe.d/disable-bluetooth.conf'
+_pc 'grep -q bt_coex_active /etc/modprobe.d/disable-bluetooth.conf 2>/dev/null'
 _pc 'check_file_exists /etc/NetworkManager/conf.d/99-no-mesh.conf'
 _pc 'check_file_exists /etc/modprobe.d/disable-zigbee.conf'
 _pc '! systemctl is-enabled avahi-daemon 2>/dev/null'
@@ -25,6 +26,7 @@ _pc 'check_file_exists /etc/NetworkManager/conf.d/99-random-mac-full.conf'
 _pc 'check_executable /usr/local/bin/monitor-mesh.sh'
 _pc true
 _pc 'check_file_exists /etc/modprobe.d/disable-nfc.conf'
+_pc 'check_file_exists /etc/NetworkManager/dispatcher.d/99-disable-wowlan'
 _precheck_result
 
 echo ""
@@ -99,6 +101,28 @@ elif ask "¿Bloquear Bluetooth completamente?"; then
     log_info "Bluetooth bloqueado completamente"
 else
     log_skip "Bloquear Bluetooth"
+fi
+
+# ============================================================
+# 2b. DESHABILITAR bt_coex_active (coexistencia BT/WiFi)
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 2b. DESHABILITAR BT COEXISTENCE ═══${NC}"
+echo ""
+echo "bt_coex_active permite coordinación WiFi-Bluetooth."
+echo "Si BT está bloqueado, desactivar esta opción reduce superficie de ataque."
+echo ""
+
+if grep -q "bt_coex_active" /etc/modprobe.d/disable-bluetooth.conf 2>/dev/null; then
+    log_already "bt_coex_active deshabilitado en disable-bluetooth.conf"
+elif ! lsmod | grep -q "^iwlwifi" 2>/dev/null; then
+    log_info "iwlwifi no cargado, bt_coex_active no aplica"
+elif ask "¿Deshabilitar bt_coex_active en iwlwifi?"; then
+    echo "options iwlwifi bt_coex_active=N" | sudo tee -a /etc/modprobe.d/disable-bluetooth.conf > /dev/null
+    log_change "Añadido" "bt_coex_active=N en /etc/modprobe.d/disable-bluetooth.conf"
+    log_info "bt_coex_active deshabilitado (requiere reinicio para aplicar)"
+else
+    log_skip "Deshabilitar bt_coex_active"
 fi
 
 # ============================================================
@@ -355,6 +379,51 @@ elif ask "¿Bloquear NFC?"; then
     log_info "NFC bloqueado"
 else
     log_skip "Bloquear NFC"
+fi
+
+# ============================================================
+# 11. DESHABILITAR WAKE-ON-WLAN (WoWLAN)
+# ============================================================
+echo ""
+echo -e "${CYAN}═══ 11. DESHABILITAR WAKE-ON-WLAN ═══${NC}"
+echo ""
+echo "WoWLAN permite despertar el equipo via WiFi."
+echo "Un atacante podría activar el equipo remotamente."
+echo ""
+
+if check_file_exists /etc/NetworkManager/dispatcher.d/99-disable-wowlan; then
+    log_already "Wake-on-WLAN deshabilitado (99-disable-wowlan)"
+elif ask "¿Deshabilitar Wake-on-WLAN?"; then
+    # Deshabilitar WoWLAN en todas las interfaces WiFi actuales
+    for phy in /sys/class/ieee80211/phy*; do
+        phy_name=$(basename "$phy")
+        sudo iw phy "$phy_name" wowlan disable 2>/dev/null || true
+        log_change "Deshabilitado" "WoWLAN en $phy_name"
+    done
+
+    # Persistir con dispatcher script de NetworkManager
+    sudo mkdir -p /etc/NetworkManager/dispatcher.d
+    cat << 'WOWLAN_EOF' | sudo tee /etc/NetworkManager/dispatcher.d/99-disable-wowlan > /dev/null
+#!/bin/bash
+# Deshabilitar Wake-on-WLAN en cada conexión WiFi
+# Generado por contramedidas-mesh.sh
+
+IFACE="$1"
+ACTION="$2"
+
+if [[ "$ACTION" == "up" ]]; then
+    # Encontrar el phy correspondiente a esta interfaz
+    if [[ -d "/sys/class/net/$IFACE/phy80211" ]]; then
+        PHY=$(basename "$(readlink -f "/sys/class/net/$IFACE/phy80211")")
+        iw phy "$PHY" wowlan disable 2>/dev/null || true
+    fi
+fi
+WOWLAN_EOF
+    sudo chmod 755 /etc/NetworkManager/dispatcher.d/99-disable-wowlan
+    log_change "Creado" "/etc/NetworkManager/dispatcher.d/99-disable-wowlan"
+    log_info "Wake-on-WLAN deshabilitado permanentemente"
+else
+    log_skip "Deshabilitar Wake-on-WLAN"
 fi
 
 show_changes_summary

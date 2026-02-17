@@ -1037,6 +1037,28 @@ echo ""
         fi
     done
 
+    # ARP per-interface check
+    echo ""
+    echo "  ARP per-interface:"
+    for iface in /sys/class/net/*; do
+        iface_name=$(basename "$iface")
+        [[ "$iface_name" == "lo" ]] && continue
+        for param_val in "arp_ignore:1" "arp_announce:2"; do
+            param="${param_val%%:*}"
+            expected="${param_val##*:}"
+            current=$(sysctl -n "net.ipv4.conf.${iface_name}.${param}" 2>/dev/null || echo "N/A")
+            if [[ "$current" == "$expected" ]]; then
+                echo -e "  ${GREEN}[OK]${NC} ${iface_name}.${param} = $current"
+                echo "  [OK] ${iface_name}.${param}=$current"
+            else
+                echo -e "  ${RED}[FAIL]${NC} ${iface_name}.${param} = $current (esperado: $expected)"
+                echo "  [FAIL] ${iface_name}.${param}=$current (esperado: $expected)"
+                SCORE=$((SCORE - 3))
+                ((ISSUES++)) || true
+            fi
+        done
+    done
+
     # Verificar ebtables/nftables para filtrado L2
     L2_FILTER=false
     if command -v ebtables &>/dev/null; then
@@ -2074,6 +2096,10 @@ echo ""
         ["net.ipv4.conf.all.arp_accept"]="0|ARP accept (rechazar gratuitous ARP)"
         ["net.ipv6.conf.all.accept_redirects"]="0|IPv6 ICMP redirects (prevenir MITM)"
         ["net.ipv6.conf.default.accept_ra"]="0|IPv6 RA default (prevenir RA spoofing)"
+        ["net.ipv4.tcp_sack"]="0|TCP SACK (CVE-2019-11477, debe estar deshabilitado)"
+        ["net.ipv4.tcp_dsack"]="0|TCP DSACK (CVE-2019-11477, debe estar deshabilitado)"
+        ["net.ipv4.tcp_keepalive_time"]="600|TCP keepalive time (deteccion rapida de conexiones muertas)"
+        ["net.ipv6.conf.all.use_tempaddr"]="2|IPv6 direcciones temporales (privacidad si IPv6 se reactiva)"
     )
 
     for param in "${!SYSCTL_CHECKS[@]}"; do
@@ -2091,6 +2117,39 @@ echo ""
             echo "  [FAIL] $param = $current (esperado: $expected)"
             SCORE=$((SCORE - 5))
             ((ISSUES++)) || true
+        fi
+    done
+
+    # ── Per-interface sysctl audit ──
+    echo ""
+    echo "  Per-interface sysctl:"
+    declare -A PER_IF_EXPECTED=(
+        ["arp_ignore"]="1"
+        ["arp_announce"]="2"
+        ["rp_filter"]="2"
+        ["accept_redirects"]="0"
+        ["send_redirects"]="0"
+        ["accept_source_route"]="0"
+        ["log_martians"]="1"
+    )
+    for iface in /sys/class/net/*; do
+        iface_name=$(basename "$iface")
+        [[ "$iface_name" == "lo" ]] && continue
+        PER_IF_OK=true
+        for param in "${!PER_IF_EXPECTED[@]}"; do
+            expected="${PER_IF_EXPECTED[$param]}"
+            current=$(sysctl -n "net.ipv4.conf.${iface_name}.${param}" 2>/dev/null || echo "N/A")
+            if [[ "$current" != "$expected" ]]; then
+                echo -e "    ${RED}[FAIL]${NC} ${iface_name}.${param} = $current (esperado: $expected)"
+                echo "  [FAIL] ${iface_name}.${param}=$current (esperado: $expected)"
+                SCORE=$((SCORE - 2))
+                ((ISSUES++)) || true
+                PER_IF_OK=false
+            fi
+        done
+        if $PER_IF_OK; then
+            echo -e "    ${GREEN}[OK]${NC}   $iface_name: todos los parámetros per-interface correctos"
+            echo "  [OK] $iface_name per-interface OK"
         fi
     done
     echo ""

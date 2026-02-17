@@ -75,6 +75,9 @@ net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.default.accept_redirects = 0
 net.ipv6.conf.all.accept_source_route = 0
 net.ipv6.conf.default.accept_source_route = 0
+# Defensa en profundidad: si IPv6 se reactiva, usar direcciones temporales
+net.ipv6.conf.all.use_tempaddr = 2
+net.ipv6.conf.default.use_tempaddr = 2
 
 # Protecciones del kernel
 kernel.sysrq = 0
@@ -125,6 +128,15 @@ net.ipv6.conf.default.accept_ra = 0
 net.ipv4.tcp_rfc1337 = 1
 # Deshabilitar TIPC si no se usa (superficie de ataque kernel)
 # net.tipc.enabled = 0
+
+# ── Mitigación TCP SACK/DSACK (CVE-2019-11477) ──
+net.ipv4.tcp_sack = 0
+net.ipv4.tcp_dsack = 0
+
+# ── TCP keepalive agresivo (detectar conexiones muertas rápido) ──
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
 EOF
     log_change "Creado" "/etc/sysctl.d/50-hardening-base.conf"
 
@@ -693,15 +705,32 @@ echo ""
 log_info "=== 10. AUDITORÍA DEL SISTEMA ==="
 echo ""
 
-if systemctl is-active auditd &>/dev/null; then
-    log_info "auditd está activo (bien)"
+if command -v auditctl &>/dev/null; then
+    log_info "audit instalado — configurando reglas"
 
-    if ask "¿Agregar reglas de auditoría básicas?"; then
+    # Habilitar auditd si no está activo
+    if ! systemctl is-active auditd &>/dev/null; then
+        systemctl enable auditd 2>/dev/null || true
+    fi
+
+    if ask "¿Configurar reglas de auditoría MITRE ATT&CK?"; then
+        # Limpiar reglas conflictivas que causan "Rule exists"
+        for f in /etc/audit/rules.d/*.rules; do
+            [[ "$(basename "$f")" == "90-hardening.rules" ]] && continue
+            [[ -f "$f" ]] && mv "$f" "$f.bak.$(date +%s)" 2>/dev/null || true
+        done
+
         cat > /etc/audit/rules.d/90-hardening.rules << 'EOF'
 # ══════════════════════════════════════════════════
 # Reglas de auditoría - Hardening 2025
 # Mapeadas a MITRE ATT&CK
+# Archivo único: evita conflictos con augenrules
 # ══════════════════════════════════════════════════
+
+# Limpiar reglas previas y configurar buffer
+-D
+-b 8192
+--backlog_wait_time 60000
 
 # ── Identidad y acceso (T1078 - Valid Accounts) ──
 -w /etc/passwd -p wa -k identity
@@ -772,11 +801,13 @@ if systemctl is-active auditd &>/dev/null; then
 
 # ── Evasión de defensas (T1562 - Impair Defenses) ──
 -w /etc/audit/ -p wa -k audit-config
--w /etc/apparmor/ -p wa -k apparmor-config
--w /etc/apparmor.d/ -p wa -k apparmor-config
+-w /etc/selinux/ -p wa -k selinux-config
+-w /usr/share/selinux/ -p wa -k selinux-policy
 -w /sbin/insmod -p x -k kernel-tools
 -w /sbin/rmmod -p x -k kernel-tools
 -w /sbin/modprobe -p x -k kernel-tools
+-w /usr/sbin/setenforce -p x -k selinux-tools
+-w /usr/sbin/setsebool -p x -k selinux-tools
 
 # ── Acceso a credenciales (T1003 - OS Credential Dumping) ──
 -a always,exit -F arch=b64 -S open -S openat -F path=/etc/shadow -k credential-access
@@ -789,14 +820,29 @@ if systemctl is-active auditd &>/dev/null; then
 EOF
         log_change "Creado" "/etc/audit/rules.d/90-hardening.rules"
 
-        augenrules --load 2>/dev/null || service auditd reload
-        log_change "Aplicado" "augenrules --load"
-        log_info "Reglas de auditoría agregadas"
+        # Regenerar audit.rules y reiniciar
+        augenrules --load 2>&1 && log_change "Aplicado" "augenrules --load" || {
+            log_warn "augenrules falló, intentando reinicio directo"
+            systemctl restart auditd 2>/dev/null || true
+        }
+
+        # Verificar que auditd arrancó
+        if systemctl is-active auditd &>/dev/null; then
+            NRULES=$(auditctl -l 2>/dev/null | wc -l)
+            log_info "auditd activo con $NRULES reglas cargadas"
+        else
+            systemctl start auditd 2>/dev/null || true
+            if systemctl is-active auditd &>/dev/null; then
+                log_info "auditd iniciado correctamente"
+            else
+                log_warn "auditd no arranca — verificar: journalctl -u audit-rules"
+            fi
+        fi
     else
-        log_skip "Agregar reglas de auditoría básicas"
+        log_skip "Configurar reglas de auditoría MITRE ATT&CK"
     fi
 else
-    log_warn "auditd no está activo"
+    log_warn "audit no instalado — instalar con: zypper install audit"
 fi
 
 # ============================================

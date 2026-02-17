@@ -599,6 +599,43 @@ EOFPMF
             fi
         fi
 
+        # Proteger credenciales WiFi: psk-flags=1 evita almacenar PSK en plano
+        PSK_EXPOSED=0
+        for conn_file in "$NM_CONN_DIR"/*; do
+            [[ -f "$conn_file" ]] || continue
+            if grep -q "psk=" "$conn_file" 2>/dev/null && \
+               ! grep -q "psk-flags=1" "$conn_file" 2>/dev/null; then
+                ((PSK_EXPOSED++)) || true
+            fi
+        done
+
+        if [[ $PSK_EXPOSED -gt 0 ]]; then
+            log_warn "$PSK_EXPOSED perfil(es) WiFi con PSK almacenada en texto plano"
+            if ask "¿Proteger credenciales WiFi? (psk-flags=1, NM pedirá la contraseña)"; then
+                for conn_file in "$NM_CONN_DIR"/*; do
+                    [[ -f "$conn_file" ]] || continue
+                    if grep -q "psk=" "$conn_file" 2>/dev/null && \
+                       ! grep -q "psk-flags=1" "$conn_file" 2>/dev/null; then
+                        conn_name=$(basename "$conn_file")
+                        cp -a "$conn_file" "$BACKUP_DIR/"
+                        # Añadir psk-flags=1 en la sección wifi-security
+                        if grep -q "\[wifi-security\]" "$conn_file" 2>/dev/null; then
+                            sed -i '/\[wifi-security\]/a psk-flags=1' "$conn_file"
+                        elif grep -q "\[802-11-wireless-security\]" "$conn_file" 2>/dev/null; then
+                            sed -i '/\[802-11-wireless-security\]/a psk-flags=1' "$conn_file"
+                        fi
+                        # Eliminar la línea psk= (el agente NM pedirá la contraseña)
+                        sed -i '/^psk=/d' "$conn_file"
+                        log_change "Protegido" "PSK eliminada de: $conn_name (psk-flags=1)"
+                    fi
+                done
+            else
+                log_skip "proteger credenciales WiFi (psk-flags)"
+            fi
+        else
+            log_info "No hay perfiles WiFi con PSK expuesta en texto plano"
+        fi
+
         # Recargar NetworkManager si esta activo
         if systemctl is-active NetworkManager &>/dev/null; then
             systemctl reload NetworkManager 2>/dev/null || \
@@ -614,6 +651,32 @@ EOFPMF
 
 else
     log_skip "hardening de NetworkManager WiFi"
+fi
+
+# ── Polkit: restringir toggle WiFi sin autenticación ──
+POLKIT_RULES_DIR="/usr/share/polkit-1/rules.d"
+POLKIT_WIFI_RULE="${POLKIT_RULES_DIR}/50-restrict-nm-wifi.rules"
+
+if check_file_exists "$POLKIT_WIFI_RULE"; then
+    log_already "Polkit: toggle WiFi requiere autenticación"
+elif ask "¿Restringir enable/disable WiFi a usuarios con auth (polkit)?"; then
+    mkdir -p "$POLKIT_RULES_DIR"
+    cat > "$POLKIT_WIFI_RULE" << 'POLKIT_EOF'
+// Requerir autenticación para toggle WiFi
+// Evita que cualquier proceso deshabilite la red sin credenciales
+// Generado por seguridad-wireless.sh
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.NetworkManager.enable-disable-wifi" &&
+        !subject.isInGroup("wheel")) {
+        return polkit.Result.AUTH_ADMIN;
+    }
+});
+POLKIT_EOF
+    chmod 644 "$POLKIT_WIFI_RULE"
+    log_change "Creado" "$POLKIT_WIFI_RULE"
+    log_info "Toggle WiFi ahora requiere autenticación para usuarios no-wheel"
+else
+    log_skip "Polkit restricción WiFi toggle"
 fi
 
 # ============================================================

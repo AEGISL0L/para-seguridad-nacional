@@ -13,7 +13,7 @@ require_root
 securizar_setup_traps
 
 # ── Pre-check: detectar secciones ya aplicadas ──────────────
-_precheck 12
+_precheck 14
 _pc true  # S1 - detección/acción directa (siempre re-evaluar)
 _pc true  # S2 - limpieza cookies (siempre re-evaluar)
 _pc 'check_file_exists ~/.config/xdg-desktop-portal/portals.conf'
@@ -24,8 +24,10 @@ _pc true  # S7 - limpieza historial (siempre re-evaluar)
 _pc 'check_file_exists ~/.config/kscreenlockerrc'
 _pc 'check_file_exists ~/.config/autostart/security-notify.desktop'
 _pc true  # S10 - detección spyware (siempre re-evaluar)
-_pc true  # S11 - firewall (siempre re-evaluar)
-_pc true  # S12 - informativo
+_pc 'check_file_exists /etc/NetworkManager/conf.d/99-no-connectivity-check.conf'
+_pc true  # S12 - Firefox HTTPS-Only (siempre re-evaluar)
+_pc true  # S13 - firewall (siempre re-evaluar)
+_pc true  # S14 - informativo
 _precheck_result
 
 echo ""
@@ -313,9 +315,88 @@ if [[ $SPYWARE_FOUND -eq 0 ]]; then
 fi
 
 # ============================================================
-# 11. CONFIGURAR FIREWALL PARA BLOQUEAR EXFILTRACIÓN
+# 11. DESHABILITAR NM CONNECTIVITY CHECK
 # ============================================================
-log_info "11. Bloqueando puertos de exfiltración comunes..."
+log_info "11. Deshabilitando NetworkManager connectivity check..."
+
+# NM hace peticiones periódicas a servidores de detección de portal cautivo
+# Esto filtra información de red y actividad a terceros
+if check_file_exists /etc/NetworkManager/conf.d/99-no-connectivity-check.conf; then
+    log_already "NM connectivity check deshabilitado"
+else
+    mkdir -p /etc/NetworkManager/conf.d
+    cat > /etc/NetworkManager/conf.d/99-no-connectivity-check.conf << 'CONN_EOF'
+# Deshabilitar connectivity check de NetworkManager
+# Evita peticiones periódicas a servidores externos
+# Generado por proteger-privacidad.sh
+[connectivity]
+enabled=false
+CONN_EOF
+    chmod 644 /etc/NetworkManager/conf.d/99-no-connectivity-check.conf
+    log_change "Creado" "/etc/NetworkManager/conf.d/99-no-connectivity-check.conf"
+
+    # Recargar configuración de NM
+    if systemctl is-active NetworkManager &>/dev/null; then
+        nmcli general reload conf 2>/dev/null || true
+        log_change "Recargado" "NetworkManager conf (connectivity check deshabilitado)"
+    fi
+fi
+
+log_info "   NM connectivity check deshabilitado"
+
+# ============================================================
+# 12. FIREFOX HTTPS-ONLY MODE
+# ============================================================
+log_info "12. Verificando Firefox HTTPS-Only mode..."
+
+# Forzar HTTPS en toda la navegación para evitar interceptación de tráfico HTTP
+FIREFOX_PROFILES_DIR=""
+for d in /home/*/.mozilla/firefox; do
+    [[ -d "$d" ]] && FIREFOX_PROFILES_DIR="$d" && break
+done
+
+if [[ -n "$FIREFOX_PROFILES_DIR" ]]; then
+    _https_applied=0
+    _https_missing=0
+    while IFS= read -r -d '' profile_dir; do
+        if grep -q 'user_pref("dom.security.https_only_mode", true)' "$profile_dir/user.js" 2>/dev/null; then
+            ((_https_applied++)) || true
+        else
+            ((_https_missing++)) || true
+        fi
+    done < <(find "$FIREFOX_PROFILES_DIR" -maxdepth 1 -name "*.default*" -type d -print0 2>/dev/null)
+
+    if [[ $_https_missing -eq 0 ]] && [[ $_https_applied -gt 0 ]]; then
+        log_info "   Firefox HTTPS-Only ya configurado en todos los perfiles"
+    elif [[ $_https_missing -gt 0 ]]; then
+        log_warn "   $_https_missing perfil(es) Firefox sin HTTPS-Only"
+        echo "   HTTPS-Only fuerza HTTPS en toda navegación, previniendo MITM."
+        echo ""
+        while IFS= read -r -d '' profile_dir; do
+            if ! grep -q 'user_pref("dom.security.https_only_mode", true)' "$profile_dir/user.js" 2>/dev/null; then
+                {
+                    echo ""
+                    echo '// Hardening: forzar HTTPS-Only mode'
+                    echo 'user_pref("dom.security.https_only_mode", true);'
+                    echo 'user_pref("dom.security.https_only_mode_ever_enabled", true);'
+                    echo 'user_pref("dom.security.https_only_mode.upgrade_local", true);'
+                    echo 'user_pref("dom.security.https_only_mode_ever_enabled_pbm", true);'
+                } >> "$profile_dir/user.js"
+                local_user=$(stat -c '%U' "$profile_dir")
+                chown "$local_user:$(id -gn "$local_user")" "$profile_dir/user.js"
+                log_change "Aplicado" "HTTPS-Only en $(basename "$profile_dir")"
+            fi
+        done < <(find "$FIREFOX_PROFILES_DIR" -maxdepth 1 -name "*.default*" -type d -print0 2>/dev/null)
+        log_warn "   Requiere reiniciar Firefox para aplicarse"
+    fi
+else
+    log_info "   No se encontraron perfiles de Firefox"
+fi
+
+# ============================================================
+# 13. CONFIGURAR FIREWALL PARA BLOQUEAR EXFILTRACIÓN
+# ============================================================
+log_info "13. Bloqueando puertos de exfiltración comunes..."
 
 # Puertos usados por spyware común
 fw_add_rich_rule 'rule family="ipv4" port port="4444" protocol="tcp" drop'
@@ -327,7 +408,7 @@ fw_reload 2>/dev/null || true
 log_info "   Puertos de exfiltración bloqueados"
 
 # ============================================================
-# 12. INSTRUCCIONES FINALES
+# 14. INSTRUCCIONES FINALES
 # ============================================================
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"

@@ -8,6 +8,7 @@
 #   S3  - DNS over TLS (systemd-resolved)
 #   S4  - WireGuard (plantilla, NO activar)
 #   S5  - arpwatch + sysctl ARP
+#   S5b - Per-interface sysctl hardening
 #   S6  - Forense de red (tcpdump ring buffer)
 #   S7  - Zeek/Suricata avanzado (custom rules)
 #   S8  - DNS sinkhole (abuse.ch, PhishTank)
@@ -26,12 +27,13 @@ init_backup "proteger-red-avanzado"
 securizar_setup_traps
 
 # ── Pre-check: detectar secciones ya aplicadas ──────────────
-_precheck 10
+_precheck 11
 _pc 'check_service_enabled suricata'
 _pc 'check_file_exists /etc/cron.weekly/suricata-update'
 _pc 'check_file_exists /etc/systemd/resolved.conf.d/dns-over-tls.conf'
 _pc 'check_file_exists /etc/wireguard/wg0.conf'
 _pc 'check_file_exists /etc/sysctl.d/99-arp-protection.conf'
+_pc 'check_file_exists /etc/sysctl.d/99-per-interface-hardening.conf'
 _pc 'check_executable /usr/local/bin/captura-forense-red.sh'
 _pc 'check_executable /usr/local/bin/configurar-ids-avanzado.sh'
 _pc 'check_executable /usr/local/bin/dns-sinkhole.sh'
@@ -694,6 +696,58 @@ EOFARP
     fi
 else
     log_skip "Instalar arpwatch y configurar protección ARP"
+fi
+
+echo ""
+
+# ============================================================
+# S5b: HARDENING SYSCTL PER-INTERFACE
+# ============================================================
+log_section "S5b: HARDENING SYSCTL PER-INTERFACE"
+
+echo "Los valores sysctl per-interface sobreescriben conf.all."
+echo "Esto asegura que cada interfaz tenga los valores correctos."
+echo ""
+
+if check_file_exists /etc/sysctl.d/99-per-interface-hardening.conf; then
+    log_already "Hardening per-interface aplicado (99-per-interface-hardening.conf)"
+elif ask "¿Aplicar hardening sysctl per-interface a todas las interfaces?"; then
+
+    PER_IF_CONF="/etc/sysctl.d/99-per-interface-hardening.conf"
+    cat > "$PER_IF_CONF" << 'PERIF_HEADER'
+# Per-interface sysctl hardening
+# Generado por proteger-red-avanzado.sh
+# Los valores per-interface sobreescriben conf.all
+PERIF_HEADER
+
+    for iface in /sys/class/net/*; do
+        iface_name=$(basename "$iface")
+        [[ "$iface_name" == "lo" ]] && continue
+
+        cat >> "$PER_IF_CONF" << PERIF_IFACE
+
+# ── Interfaz: $iface_name ──
+net.ipv4.conf.${iface_name}.arp_ignore = 1
+net.ipv4.conf.${iface_name}.arp_announce = 2
+net.ipv4.conf.${iface_name}.arp_accept = 0
+net.ipv4.conf.${iface_name}.rp_filter = 2
+net.ipv4.conf.${iface_name}.accept_redirects = 0
+net.ipv4.conf.${iface_name}.send_redirects = 0
+net.ipv4.conf.${iface_name}.accept_source_route = 0
+net.ipv4.conf.${iface_name}.secure_redirects = 0
+net.ipv4.conf.${iface_name}.log_martians = 1
+PERIF_IFACE
+
+        log_change "Configurado" "sysctl per-interface: $iface_name"
+    done
+
+    chmod 644 "$PER_IF_CONF"
+    sysctl --system > /dev/null 2>&1 || true
+    log_change "Creado" "$PER_IF_CONF"
+    log_change "Aplicado" "sysctl --system (per-interface)"
+    log_info "Hardening per-interface aplicado a todas las interfaces"
+else
+    log_skip "Hardening sysctl per-interface"
 fi
 
 echo ""
