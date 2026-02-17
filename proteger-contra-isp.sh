@@ -85,9 +85,9 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} Script kill switch OFF existe"
 
     _r="!!"
-    if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q 'securizar-vpn-killswitch' 2>/dev/null; then
+    if command -v nft &>/dev/null && nft list table inet securizar_ks &>/dev/null 2>&1; then
         _r="OK"; ((ok++)) || true
-    elif iptables -S 2>/dev/null | grep -q 'securizar-vpn' 2>/dev/null; then
+    elif iptables -L SECURIZAR_KS -n &>/dev/null 2>&1; then
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Kill switch ACTIVO (nft/iptables)"
@@ -280,23 +280,23 @@ _isp_verificacion_exhaustiva() {
 
     _r="!!"
     if [[ "$_dns_resolver" == "unbound" ]]; then
-        if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
+        if command -v nft &>/dev/null && nft list table inet securizar_ks 2>/dev/null | grep -q '853'; then
             _r="OK"; ((ok++)) || true
         elif command -v firewall-cmd &>/dev/null && firewall-cmd --list-ports 2>/dev/null | grep -q '853' 2>/dev/null; then
             _r="OK"; ((ok++)) || true
-        elif iptables -S 2>/dev/null | grep -q '853' 2>/dev/null; then
+        elif iptables -L SECURIZAR_KS -n 2>/dev/null | grep -q '853'; then
             _r="OK"; ((ok++)) || true
         fi
         echo -e "    ${_r} Puerto 853 (DoT) en firewall"
     elif [[ "$_dns_resolver" == "dnscrypt-proxy" ]]; then
-        if command -v nft &>/dev/null && nft list tables 2>/dev/null | grep -q 'securizar-doh' 2>/dev/null; then
+        if command -v nft &>/dev/null && nft list table inet securizar_ks 2>/dev/null | grep -q '443'; then
             _r="OK"; ((ok++)) || true
-        elif iptables -S 2>/dev/null | grep -q '443.*doh' 2>/dev/null; then
+        elif iptables -L SECURIZAR_KS -n 2>/dev/null | grep -q '443'; then
             _r="OK"; ((ok++)) || true
         fi
         echo -e "    ${_r} Firewall DoH (443 a resolvers)"
     else
-        if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q '853' 2>/dev/null; then
+        if command -v nft &>/dev/null && nft list table inet securizar_ks 2>/dev/null | grep -q '853'; then
             _r="OK"; ((ok++)) || true
         fi
         echo -e "    ${_r} Puerto DNS en firewall"
@@ -412,9 +412,9 @@ _isp_verificacion_exhaustiva() {
        { command -v wg &>/dev/null && wg show interfaces 2>/dev/null | grep -q .; }; then
         _vpn_ok=1
     fi
-    if command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q 'securizar-vpn-killswitch' 2>/dev/null; then
+    if command -v nft &>/dev/null && nft list table inet securizar_ks &>/dev/null 2>&1; then
         _ks_ok=1
-    elif iptables -S 2>/dev/null | grep -q 'securizar-vpn' 2>/dev/null; then
+    elif iptables -L SECURIZAR_KS -n &>/dev/null 2>&1; then
         _ks_ok=1
     fi
     if [[ "$_dns_resolver" != "none" ]]; then _dns_ok=1; fi
@@ -440,12 +440,13 @@ _isp_verificacion_exhaustiva() {
 
     # Firewall bloquea DNS externo (puerto 53 saliente solo a localhost)
     _r="!!"
-    if command -v nft &>/dev/null; then
-        if nft list ruleset 2>/dev/null | grep -qE 'dport 53.*(drop|reject)' 2>/dev/null || \
-           nft list ruleset 2>/dev/null | grep -q 'securizar.*dns' 2>/dev/null; then
+    if command -v nft &>/dev/null && nft list table inet securizar_ks &>/dev/null 2>&1; then
+        local _nft_ks=""
+        _nft_ks=$(nft list table inet securizar_ks 2>/dev/null) || true
+        if echo "$_nft_ks" | grep -qE 'dport 53.*(drop|reject)'; then
             _r="OK"; ((ok++)) || true
         fi
-    elif iptables -S 2>/dev/null | grep -qE 'dport 53.*(DROP|REJECT)' 2>/dev/null; then
+    elif iptables -L SECURIZAR_KS -n 2>/dev/null | grep -qE 'dpt:53.*(DROP|REJECT)'; then
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Firewall bloquea DNS externo (puerto 53)"
@@ -634,14 +635,18 @@ if command -v nft &>/dev/null; then
     nft add rule inet securizar_ks output oifname "lo" accept
     # Permitir conexiones establecidas (primero para rendimiento)
     nft add rule inet securizar_ks output ct state established,related accept
-    # Permitir LAN (RFC1918)
-    nft add rule inet securizar_ks output ip daddr 10.0.0.0/8 accept
-    nft add rule inet securizar_ks output ip daddr 172.16.0.0/12 accept
-    nft add rule inet securizar_ks output ip daddr 192.168.0.0/16 accept
+    # Bloquear DNS plano a destinos externos (fuerza DNS cifrado via resolver local)
+    nft add rule inet securizar_ks output ip daddr != 127.0.0.1 udp dport 53 drop
+    nft add rule inet securizar_ks output ip daddr != 127.0.0.1 tcp dport 53 drop
+    # Permitir LAN (RFC1918) - solo puertos esenciales
+    _LAN="{10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16}"
+    nft add rule inet securizar_ks output ip daddr $_LAN meta l4proto icmp accept
+    nft add rule inet securizar_ks output ip daddr $_LAN tcp dport '{ 22, 80, 443, 445, 631, 5900, 8080, 9090 }' accept
+    nft add rule inet securizar_ks output ip daddr $_LAN udp dport '{ 123, 137-138, 443, 5353 }' accept
     # Permitir DHCP
     nft add rule inet securizar_ks output udp dport 67-68 accept
-    # Permitir DNS cifrado DoT (puerto 853)
-    nft add rule inet securizar_ks output tcp dport 853 accept
+    # Permitir DNS cifrado DoT (puerto 853) a resolvers conocidos
+    nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 } tcp dport 853 accept
     # Permitir DoH a resolvers DNS conocidos (puerto 443)
     nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 } tcp dport 443 accept
     # Permitir endpoints VPN (permite reconexión si VPN cae)
@@ -671,11 +676,20 @@ elif command -v iptables &>/dev/null; then
     iptables -N "$CHAIN"
     iptables -A "$CHAIN" -o lo -j ACCEPT
     iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    iptables -A "$CHAIN" -d 10.0.0.0/8 -j ACCEPT
-    iptables -A "$CHAIN" -d 172.16.0.0/12 -j ACCEPT
-    iptables -A "$CHAIN" -d 192.168.0.0/16 -j ACCEPT
+    # Bloquear DNS plano a destinos externos
+    iptables -A "$CHAIN" ! -d 127.0.0.1 -p udp --dport 53 -j DROP
+    iptables -A "$CHAIN" ! -d 127.0.0.1 -p tcp --dport 53 -j DROP
+    # LAN (RFC1918) - solo puertos esenciales
+    for _lan in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+        iptables -A "$CHAIN" -d "$_lan" -p icmp -j ACCEPT
+        iptables -A "$CHAIN" -d "$_lan" -p tcp -m multiport --dports 22,80,443,445,631,5900,8080,9090 -j ACCEPT
+        iptables -A "$CHAIN" -d "$_lan" -p udp -m multiport --dports 123,137,138,443,5353 -j ACCEPT
+    done
     iptables -A "$CHAIN" -p udp --dport 67:68 -j ACCEPT
-    iptables -A "$CHAIN" -p tcp --dport 853 -j ACCEPT
+    # DoT (puerto 853) a resolvers conocidos
+    for _dot_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
+        iptables -A "$CHAIN" -d "$_dot_ip" -p tcp --dport 853 -j ACCEPT
+    done
     # Permitir DoH a resolvers DNS conocidos (puerto 443)
     for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
         iptables -A "$CHAIN" -d "$_doh_ip" -p tcp --dport 443 -j ACCEPT
@@ -697,27 +711,38 @@ elif command -v iptables &>/dev/null; then
     _dbg "iptables: cadena SECURIZAR_KS creada, $(iptables -L SECURIZAR_KS 2>/dev/null | grep -c 'ACCEPT\|DROP') reglas"
     echo "[+] VPN Kill Switch ACTIVADO via iptables (${#_vpn_endpoints[@]} endpoints VPN permitidos)"
 
-elif command -v firewall-cmd &>/dev/null; then
-    # ── firewalld ──
+elif command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
+    # ── firewalld (solo si servicio activo, no masked/stopped) ──
     # Añadir reglas a zona drop ANTES de cambiarla a default (previene lockdown)
     _fw_ok=0
     _fw_total=0
-    for _rule in \
-        'rule family="ipv4" destination address="10.0.0.0/8" accept' \
-        'rule family="ipv4" destination address="172.16.0.0/12" accept' \
-        'rule family="ipv4" destination address="192.168.0.0/16" accept' \
-        'rule family="ipv4" port port="853" protocol="tcp" accept' \
-        'rule family="ipv4" port port="67-68" protocol="udp" accept'; do
+    _fw_add() {
         ((_fw_total++)) || true
-        if firewall-cmd --zone=drop --add-rich-rule="$_rule" --permanent 2>/dev/null; then
+        if firewall-cmd --zone=drop --add-rich-rule="$1" --permanent 2>/dev/null; then
             ((_fw_ok++)) || true
         fi
+    }
+    # Bloquear DNS plano a destinos externos
+    _fw_add 'rule family="ipv4" destination NOT address="127.0.0.1" port port="53" protocol="udp" drop'
+    _fw_add 'rule family="ipv4" destination NOT address="127.0.0.1" port port="53" protocol="tcp" drop'
+    # LAN (RFC1918) - solo puertos esenciales
+    for _lan in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+        _fw_add "rule family=\"ipv4\" destination address=\"${_lan}\" protocol value=\"icmp\" accept"
+        for _port in 22 80 443 445 631 5900 8080 9090; do
+            _fw_add "rule family=\"ipv4\" destination address=\"${_lan}\" port port=\"${_port}\" protocol=\"tcp\" accept"
+        done
+        for _port in 123 137 138 443 5353; do
+            _fw_add "rule family=\"ipv4\" destination address=\"${_lan}\" port port=\"${_port}\" protocol=\"udp\" accept"
+        done
+    done
+    # DHCP
+    _fw_add 'rule family="ipv4" port port="67-68" protocol="udp" accept'
+    # DoT (puerto 853) a resolvers conocidos
+    for _dot_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
+        _fw_add "rule family=\"ipv4\" destination address=\"${_dot_ip}\" port port=\"853\" protocol=\"tcp\" accept"
     done
     for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
-        ((_fw_total++)) || true
-        if firewall-cmd --zone=drop --add-rich-rule="rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept" --permanent 2>/dev/null; then
-            ((_fw_ok++)) || true
-        fi
+        _fw_add "rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept"
     done
     # Endpoints VPN (reconexión)
     for _ep in "${_vpn_endpoints[@]}"; do
@@ -728,7 +753,7 @@ elif command -v firewall-cmd &>/dev/null; then
     firewall-cmd --zone=drop --add-rich-rule='rule family="ipv4" destination address="162.159.192.0/24" port port="2408" protocol="udp" accept' --permanent 2>/dev/null || true
     firewall-cmd --zone=drop --add-rich-rule='rule family="ipv4" destination address="162.159.193.0/24" port port="2408" protocol="udp" accept' --permanent 2>/dev/null || true
     # Verificar reglas críticas ANTES de cambiar zona
-    if [[ $_fw_ok -lt 3 ]]; then
+    if [[ $_fw_ok -lt 5 ]]; then
         _dbg "ABORT firewalld: solo $_fw_ok/$_fw_total reglas criticas aplicadas en zona drop"
         echo "[!] ABORTANDO: solo $_fw_ok/$_fw_total reglas aplicadas en zona drop"
         echo "[!] Zona default NO cambiada (sigue: $(firewall-cmd --get-default-zone 2>/dev/null))"
@@ -770,7 +795,7 @@ elif command -v iptables &>/dev/null; then
     iptables -X "$CHAIN" 2>/dev/null || true
     _dbg "iptables: cadena SECURIZAR_KS eliminada"
     echo "[+] VPN Kill Switch DESACTIVADO (iptables)"
-elif command -v firewall-cmd &>/dev/null; then
+elif command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
     _dbg "firewalld: restaurando zona default a public"
     firewall-cmd --set-default-zone=public 2>/dev/null || true
     firewall-cmd --reload 2>/dev/null || true
@@ -795,6 +820,11 @@ IFACE="$1"
 ACTION="$2"
 
 logger -t securizar-nm-ks "dispatch: iface=$IFACE action=$ACTION"
+
+# Desactivar IPv6 en cualquier interfaz que suba (previene bypass VPN)
+if [[ "$ACTION" == "up" || "$ACTION" == "vpn-up" ]] && [[ -n "$IFACE" ]]; then
+    sysctl -q -w "net.ipv6.conf.${IFACE}.disable_ipv6=1" 2>/dev/null || true
+fi
 
 case "$ACTION" in
     vpn-up)
@@ -1189,7 +1219,7 @@ server:
 
     username: "unbound"
     directory: "/etc/unbound"
-    chroot: ""
+    chroot: ""  # Desactivado: systemd sandboxing (hardening.conf) es superior
 
     auto-trust-anchor-file: "/var/lib/unbound/root.key"
     val-clean-additional: yes
@@ -1203,8 +1233,20 @@ server:
     prefetch: yes
     prefetch-key: yes
 
+    # Protección DNS rebinding (bloquea respuestas con IPs privadas)
+    private-address: 10.0.0.0/8
+    private-address: 172.16.0.0/12
+    private-address: 192.168.0.0/16
+    private-address: 169.254.0.0/16
+    private-address: fd00::/8
+    private-address: fe80::/10
+    private-address: 127.0.0.0/8
+    private-address: ::ffff:0:0/96
+
     qname-minimisation: yes
     qname-minimisation-strict: no
+    aggressive-nsec: yes
+    deny-any: yes
     minimal-responses: yes
     hide-identity: yes
     hide-version: yes
@@ -1212,6 +1254,19 @@ server:
     harden-dnssec-stripped: yes
     harden-below-nxdomain: yes
     harden-referral-path: yes
+    harden-large-queries: yes
+    harden-algo-downgrade: yes
+
+    # Resiliencia: servir respuestas expiradas si upstream falla
+    serve-expired: yes
+    serve-expired-ttl: 86400
+    serve-expired-reply-ttl: 30
+    serve-expired-client-timeout: 1800
+
+    # Extended DNS Errors (RFC 8914)
+    ede: yes
+
+    unwanted-reply-threshold: 10000
 
     num-threads: 2
     so-reuseport: yes
@@ -1227,6 +1282,14 @@ server:
     logfile: "/var/log/unbound/unbound.log"
     use-syslog: no
 
+remote-control:
+    control-enable: yes
+    control-interface: 127.0.0.1
+    server-key-file: "/etc/unbound/unbound_server.key"
+    server-cert-file: "/etc/unbound/unbound_server.pem"
+    control-key-file: "/etc/unbound/unbound_control.key"
+    control-cert-file: "/etc/unbound/unbound_control.pem"
+
 forward-zone:
     name: "."
     forward-tls-upstream: yes
@@ -1240,10 +1303,35 @@ forward-zone:
     forward-addr: 8.8.8.8@853#dns.google
     forward-addr: 8.8.4.4@853#dns.google
 UNBOUND_CONF
-    log_change "Creado" "/etc/unbound/unbound.conf (DoT estricto, DNSSEC, cache)"
+    log_change "Creado" "/etc/unbound/unbound.conf (DoT estricto, DNSSEC, hardened)"
 
     mkdir -p /var/log/unbound
     chown unbound:unbound /var/log/unbound 2>/dev/null || true
+
+    # Systemd sandboxing para unbound
+    mkdir -p /etc/systemd/system/unbound.service.d
+    cat > /etc/systemd/system/unbound.service.d/hardening.conf << 'UNBOUND_HARDENING'
+[Service]
+# Sandboxing equivalente a chroot pero más robusto
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+ReadWritePaths=/var/lib/unbound /var/log/unbound /run/unbound
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_SYS_CHROOT CAP_DAC_OVERRIDE
+SystemCallArchitectures=native
+# NoNewPrivileges incompatible con SELinux named_cache_t transition en ExecStartPre
+UNBOUND_HARDENING
+    log_change "Creado" "unbound hardening (systemd sandbox + chroot)"
+    systemctl daemon-reload 2>/dev/null || true
 
     if unbound-checkconf /etc/unbound/unbound.conf &>/dev/null; then
         log_info "Configuración de unbound válida"
@@ -1484,8 +1572,19 @@ RESOLV_CONF
     fi
 
     # ── Firewall: según modo DNS ──
-    if [[ "$DNS_MODE" == "dot" ]]; then
-        if command -v firewall-cmd &>/dev/null; then
+    # Si el kill switch (S1) ya está activo, sus reglas ya cubren DoT/DoH → skip
+    _ks_dns_skip=false
+    if command -v nft &>/dev/null && nft list table inet securizar_ks &>/dev/null 2>&1; then
+        _ks_dns_skip=true
+    elif command -v iptables &>/dev/null && iptables -L SECURIZAR_KS &>/dev/null 2>&1; then
+        _ks_dns_skip=true
+    elif command -v firewall-cmd &>/dev/null && [[ "$(firewall-cmd --get-default-zone 2>/dev/null)" == "drop" ]]; then
+        _ks_dns_skip=true
+    fi
+    if [[ "$_ks_dns_skip" == "true" ]]; then
+        log_already "Firewall DNS (reglas ya presentes en kill switch S1)"
+    elif [[ "$DNS_MODE" == "dot" ]]; then
+        if command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
             firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
             firewall-cmd --add-rich-rule='rule family="ipv6" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
             firewall-cmd --reload 2>/dev/null || true
@@ -1504,7 +1603,7 @@ RESOLV_CONF
             nft add chain inet securizar-doh output '{ type filter hook output priority 0; policy accept; }'
             nft add rule inet securizar-doh output ip daddr '{ 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 }' tcp dport 443 accept
             log_change "Firewall" "DoH (443) a resolvers DNS permitido via nftables (tabla securizar-doh)"
-        elif command -v firewall-cmd &>/dev/null; then
+        elif command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
             for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
                 firewall-cmd --add-rich-rule="rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept" --permanent 2>/dev/null || true
             done
