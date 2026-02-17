@@ -621,6 +621,53 @@ Todos los hallazgos de `corregir-adaptador-red.sh` (10 fixes puntuales) integrad
 #### UPnP eliminado del sistema
 - **libupnp17** desinstalada (arrastra VLC como dependencia). Servicios UPnP ya masked y puertos bloqueados por nftables
 
+### Auditoría de pantalla y acceso remoto (2026-02-17)
+
+#### Investigación de monitoreo de pantalla
+Auditoría completa de 12 vectores de acceso remoto: VNC/RDP/TeamViewer/AnyDesk/RustDesk, SSH, keyloggers, grabadores de pantalla, X11 access control, autostart, cron/timers, kernel modules USB. **Resultado: 0 acceso remoto activo, 0 procesos sospechosos, 0 sesiones no autorizadas.**
+
+#### Hallazgo: X11 permite captura de pantalla entre procesos
+- Sistema usaba `startplasma-x11` — X11 no aísla aplicaciones entre sí
+- Cualquier proceso del mismo usuario puede capturar pantalla/teclado sin restricciones
+- **Fix**: Configurado SDDM para Wayland por defecto (`/etc/sddm.conf.d/default-session.conf` → `Session=plasmawayland.desktop`)
+- Wayland aísla aplicaciones entre sí, impidiendo captura de pantalla no autorizada
+
+#### TigerVNC desinstalado
+- Paquetes eliminados: `xorg-x11-Xvnc`, `xorg-x11-Xvnc-module`, `tigervnc-selinux`, `libXvnc1` (4 paquetes, 4.0 MiB)
+- `xvnc.socket` estaba disabled/inactive pero constituía superficie de ataque innecesaria
+- Librerías cliente GTK-VNC conservadas (solo permiten conectar a otros, no recibir conexiones)
+
+#### Auditoría puerto 5900 — QEMU VNC (VM opensuse16.0)
+
+**Hallazgo crítico**: VNC sin autenticación (Security Type 1: None)
+- Puerto TCP 5900 en 127.0.0.1 (consola QEMU de VM libvirt)
+- Protocolo RFB 003.008, sin password, sin TLS, sin SASL
+- Cualquier proceso local podía conectarse y ver/controlar la VM
+- Proceso QEMU con sandbox correcta: usuario `qemu` (UID 107), Seccomp=2, NoNewPrivs=1, CapEff=0x0
+
+**Fix aplicado** (requiere reinicio de VM):
+
+| Antes | Después |
+|---|---|
+| `TCP 127.0.0.1:5900` | Socket UNIX `/run/libvirt/qemu/opensuse16.0-vnc.sock` |
+| Sin autenticación | Password VNC (8 chars) |
+| Accesible por cualquier proceso local vía TCP | Accesible solo por permisos de archivo (root/qemu) |
+
+Config libvirt:
+```xml
+<!-- ANTES -->
+<graphics type='vnc' port='-1' autoport='yes'>
+  <listen type='address'/>
+</graphics>
+
+<!-- DESPUÉS -->
+<graphics type='vnc' socket='/run/libvirt/qemu/opensuse16.0-vnc.sock' passwd='[REDACTED]'>
+  <listen type='socket'/>
+</graphics>
+```
+- Backup config original: `/tmp/opensuse16.0-backup.xml`
+- `virt-manager` sigue funcionando (conecta vía API libvirt, no directo al socket)
+
 ### Datos de operaciones
 - `/var/lib/incident-response/` - Datos de incidentes (forense, playbooks, timelines)
 - `/var/lib/security-monitoring/` - Monitorización (correlaciones, baselines, healthchecks, digests)
