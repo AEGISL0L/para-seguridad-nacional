@@ -471,7 +471,8 @@ if [[ -x /usr/local/bin/ioc-lookup.sh ]]; then
 fi
 
 echo "[6/6] Evaluando posible exfiltración..." | tee -a "$LOG"
-IFACE=$(ip route get "$IP_SOSPECHOSA" 2>/dev/null | grep -oP 'dev \K\S+' || echo "eth0")
+IFACE=$(ip route get "$IP_SOSPECHOSA" 2>/dev/null | grep -oP 'dev \K\S+' || ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+IFACE="${IFACE:-$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)}"
 echo "  Interfaz: $IFACE" | tee -a "$LOG"
 
 logger -t incident-response "PLAYBOOK: C2/Exfil IP=$IP_SOSPECHOSA bloqueada (INC: $INCIDENT_ID)"

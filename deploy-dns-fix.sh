@@ -76,7 +76,11 @@ chmod 755 /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn
 echo "[+] Creado /etc/NetworkManager/dispatcher.d/98-securizar-dns-vpn"
 
 # 3. Recargar NM
-nmcli general reload dns 2>/dev/null || systemctl reload NetworkManager 2>/dev/null || true
+if command -v nmcli &>/dev/null; then
+    nmcli general reload dns 2>/dev/null || true
+else
+    systemctl reload NetworkManager 2>/dev/null || true
+fi
 echo "[+] NetworkManager recargado"
 
 # 4. Verificar

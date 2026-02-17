@@ -124,11 +124,15 @@ if systemctl is-active bluetooth &>/dev/null; then
         systemctl mask bluetooth 2>/dev/null || true
         log_change "Servicio" "bluetooth mask"
 
-        # Bloquear módulo
-        echo "install bluetooth /bin/false" >> /etc/modprobe.d/disable-bluetooth.conf
-        log_change "Modificado" "/etc/modprobe.d/disable-bluetooth.conf"
-        echo "install btusb /bin/false" >> /etc/modprobe.d/disable-bluetooth.conf
-        log_change "Modificado" "/etc/modprobe.d/disable-bluetooth.conf"
+        # Bloquear módulo (idempotente: no duplicar si contramedidas-mesh.sh ya aplicó)
+        if ! grep -q "install bluetooth /bin/false" /etc/modprobe.d/disable-bluetooth.conf 2>/dev/null; then
+            echo "install bluetooth /bin/false" >> /etc/modprobe.d/disable-bluetooth.conf
+            log_change "Añadido" "install bluetooth en disable-bluetooth.conf"
+        fi
+        if ! grep -q "install btusb /bin/false" /etc/modprobe.d/disable-bluetooth.conf 2>/dev/null; then
+            echo "install btusb /bin/false" >> /etc/modprobe.d/disable-bluetooth.conf
+            log_change "Añadido" "install btusb en disable-bluetooth.conf"
+        fi
 
         # Descargar módulo si está cargado
         rmmod btusb 2>/dev/null || true

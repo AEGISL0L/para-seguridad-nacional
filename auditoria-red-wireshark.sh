@@ -59,6 +59,9 @@ detect_main_interface() {
     if [[ -z "$iface" ]]; then
         iface=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
     fi
+    if [[ -z "$iface" ]]; then
+        iface=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
+    fi
     echo "${iface:-eth0}"
 }
 
@@ -540,6 +543,7 @@ PERFIL="${1:-general}"
 IFACE="${2:-$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)}"
 DURACION="${3:-300}"
 
+[[ -z "$IFACE" ]] && IFACE=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
 IFACE="${IFACE:-eth0}"
 
 # Verificar tshark
@@ -942,6 +946,7 @@ NC='\033[0m'
 
 IFACE="${1:-$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)}"
 DURACION="${2:-60}"
+[[ -z "$IFACE" ]] && IFACE=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
 IFACE="${IFACE:-eth0}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 ALERT_LOG="/var/log/securizar-red-anomalias.log"

@@ -541,7 +541,8 @@ if [[ "$FW_BACKEND" == "nftables" ]]; then
         # Auto-detectar gateway, interfaz y subred
         local_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
         local_gw=$(ip route | grep default | awk '{print $3}' | head -1)
-        local_ip_cidr=$(ip -o -4 addr show "${local_iface:-eth0}" 2>/dev/null | awk '{print $4}' | head -1)
+        local_iface="${local_iface:-$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)}"
+        local_ip_cidr=$(ip -o -4 addr show "$local_iface" 2>/dev/null | awk '{print $4}' | head -1)
         local_ip="${local_ip_cidr%/*}"
         local_subnet_cidr="${local_ip%.*}.0/24"
 

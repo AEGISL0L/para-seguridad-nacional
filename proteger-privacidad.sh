@@ -337,7 +337,11 @@ CONN_EOF
 
     # Recargar configuración de NM
     if systemctl is-active NetworkManager &>/dev/null; then
-        nmcli general reload conf 2>/dev/null || true
+        if command -v nmcli &>/dev/null; then
+            nmcli general reload conf 2>/dev/null || true
+        else
+            systemctl reload NetworkManager 2>/dev/null || true
+        fi
         log_change "Recargado" "NetworkManager conf (connectivity check deshabilitado)"
     fi
 fi

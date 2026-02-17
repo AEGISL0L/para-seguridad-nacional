@@ -68,6 +68,9 @@ detect_main_interface() {
     if [[ -z "$iface" ]]; then
         iface=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
     fi
+    if [[ -z "$iface" ]]; then
+        iface=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
+    fi
     echo "${iface:-eth0}"
 }
 
@@ -2374,6 +2377,7 @@ WARNINGS=0
 if [[ -z "$TARGET_IFACE" ]]; then
     TARGET_IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
     [[ -z "$TARGET_IFACE" ]] && TARGET_IFACE=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+    [[ -z "$TARGET_IFACE" ]] && TARGET_IFACE=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
     TARGET_IFACE="${TARGET_IFACE:-eth0}"
 fi
 

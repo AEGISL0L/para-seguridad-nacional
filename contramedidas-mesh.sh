@@ -395,11 +395,15 @@ if check_file_exists /etc/NetworkManager/dispatcher.d/99-disable-wowlan; then
     log_already "Wake-on-WLAN deshabilitado (99-disable-wowlan)"
 elif ask "¿Deshabilitar Wake-on-WLAN?"; then
     # Deshabilitar WoWLAN en todas las interfaces WiFi actuales
-    for phy in /sys/class/ieee80211/phy*; do
-        phy_name=$(basename "$phy")
-        sudo iw phy "$phy_name" wowlan disable 2>/dev/null || true
-        log_change "Deshabilitado" "WoWLAN en $phy_name"
-    done
+    if command -v iw &>/dev/null; then
+        for phy in /sys/class/ieee80211/phy*; do
+            phy_name=$(basename "$phy")
+            sudo iw phy "$phy_name" wowlan disable 2>/dev/null || true
+            log_change "Deshabilitado" "WoWLAN en $phy_name"
+        done
+    else
+        log_warn "iw no instalado — WoWLAN no se puede deshabilitar en caliente"
+    fi
 
     # Persistir con dispatcher script de NetworkManager
     sudo mkdir -p /etc/NetworkManager/dispatcher.d

@@ -137,7 +137,10 @@ echo ""
 
 if ask "¿Configurar DNS seguros (Cloudflare + Quad9)?"; then
     # Configurar en NetworkManager para que persista
-    CONN_NAME=$(nmcli -t -f NAME con show --active | head -1)
+    if ! command -v nmcli &>/dev/null; then
+        log_warn "nmcli no disponible — configura DNS manualmente en /etc/resolv.conf"
+    fi
+    CONN_NAME=$(nmcli -t -f NAME con show --active 2>/dev/null | head -1)
     if [[ -n "$CONN_NAME" ]]; then
         nmcli con mod "$CONN_NAME" ipv4.dns "1.1.1.1 9.9.9.9"
         log_change "Modificado" "conexión $CONN_NAME -> DNS 1.1.1.1 9.9.9.9"

@@ -1622,6 +1622,8 @@ submenu_wireshark() {
         # Recopilar datos de red
         local _ws_if _ws_ip4 _ws_ip6 _ws_gw _ws_mac _ws_dns _ws_mtu
         _ws_if=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+        [[ -z "$_ws_if" ]] && _ws_if=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+        [[ -z "$_ws_if" ]] && _ws_if=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
         _ws_if="${_ws_if:-eth0}"
         _ws_ip4=$(ip -4 -o addr show "$_ws_if" 2>/dev/null | awk '{print $4}' | head -1)
         _ws_ip6=$(ip -6 -o addr show "$_ws_if" scope global 2>/dev/null | awk '{print $4}' | head -1)
@@ -2290,6 +2292,8 @@ submenu_wireshark() {
 
         local _ws_iface
         _ws_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+        [[ -z "$_ws_iface" ]] && _ws_iface=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+        [[ -z "$_ws_iface" ]] && _ws_iface=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
         _ws_iface="${_ws_iface:-eth0}"
 
         # Seleccionar interfaz
@@ -2410,6 +2414,8 @@ submenu_wireshark() {
         if [[ -x /usr/local/bin/auditoria-red-anomalias.sh ]]; then
             local _ws_iface
             _ws_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+            [[ -z "$_ws_iface" ]] && _ws_iface=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+            [[ -z "$_ws_iface" ]] && _ws_iface=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
             _ws_iface="${_ws_iface:-eth0}"
 
             echo -ne "  Interfaz ${DIM}[${_ws_iface}]${NC} ${BOLD}❯${NC} "
@@ -2633,6 +2639,8 @@ submenu_wireshark() {
 
         local _ws_iface
         _ws_iface=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+        [[ -z "$_ws_iface" ]] && _ws_iface=$(ip -o link show up 2>/dev/null | awk -F': ' '{print $2}' | grep -v lo | head -1)
+        [[ -z "$_ws_iface" ]] && _ws_iface=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -1)
         _ws_iface="${_ws_iface:-eth0}"
 
         echo -e "  Interfaz: ${WHITE}${_ws_iface}${NC} | Duración: ${WHITE}10s${NC}"
