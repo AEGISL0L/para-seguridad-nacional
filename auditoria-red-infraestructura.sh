@@ -4704,6 +4704,304 @@ fi
 fi # S10
 
 # ============================================================
+# S11: AUDITORÍA DE PROTOCOLOS MODERNOS Y CVE CROSS-REFERENCE
+# ============================================================
+log_section "S11: PROTOCOLOS MODERNOS, IoT/ICS Y CVE CROSS-REFERENCE"
+
+echo "Auditoría de protocolos IoT/ICS y cross-reference de CVEs:"
+echo "  - MQTT (1883/8883) - Mensajería IoT"
+echo "  - Modbus (502) - Control industrial (ICS/SCADA)"
+echo "  - CoAP (5683/udp) - IoT lightweight"
+echo "  - AMQP (5672) - Message broker"
+echo "  - Kubernetes API (6443/10250) - Container orchestration"
+echo "  - Cross-reference versiones vs CVEs conocidos"
+echo ""
+
+if check_executable /usr/local/bin/auditoria-red-protocolos-modernos.sh; then
+    log_already "Auditoría de protocolos modernos"
+elif ask "¿Crear auditoría de protocolos modernos y CVE cross-reference?"; then
+
+    cat > /usr/local/bin/auditoria-red-protocolos-modernos.sh << 'EOFMODPROT'
+#!/bin/bash
+# ============================================================
+# AUDITORÍA DE PROTOCOLOS MODERNOS + CVE CROSS-REFERENCE
+# IoT, ICS/SCADA, Container orchestration
+# ============================================================
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+SUBNET="${1:-$(ip route show default 2>/dev/null | awk '/default/{print $3}' | sed 's/\.[0-9]*$/.0\/24/')}"
+RESULT_DIR="/var/log/securizar/auditoria-red"
+mkdir -p "$RESULT_DIR"
+RESULT_FILE="$RESULT_DIR/protocolos-modernos-$(date +%Y%m%d-%H%M%S).txt"
+
+TOTAL=0; CRIT=0; WARN=0; OK=0
+
+_result() {
+    local sev="$1" proto="$2" detail="$3"
+    TOTAL=$((TOTAL+1))
+    case "$sev" in
+        CRIT) CRIT=$((CRIT+1)); echo -e "  ${RED}[CRIT]${NC} $proto: $detail" | tee -a "$RESULT_FILE" ;;
+        WARN) WARN=$((WARN+1)); echo -e "  ${YELLOW}[WARN]${NC} $proto: $detail" | tee -a "$RESULT_FILE" ;;
+        OK)   OK=$((OK+1));     echo -e "  ${GREEN}[OK]${NC}   $proto: $detail" | tee -a "$RESULT_FILE" ;;
+        INFO)                   echo -e "  ${DIM}[INFO]${NC} $proto: $detail" | tee -a "$RESULT_FILE" ;;
+    esac
+}
+
+echo -e "${BOLD}╔════════════════════════════════════════════════════╗${NC}" | tee "$RESULT_FILE"
+echo -e "${BOLD}║   AUDITORÍA PROTOCOLOS MODERNOS + CVE CROSSREF     ║${NC}" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}╚════════════════════════════════════════════════════╝${NC}" | tee -a "$RESULT_FILE"
+echo "Subnet: $SUBNET" | tee -a "$RESULT_FILE"
+echo "Fecha:  $(date -Iseconds)" | tee -a "$RESULT_FILE"
+echo "" | tee -a "$RESULT_FILE"
+
+# ══════════════════════════════════════════
+# 1. MQTT (Message Queuing Telemetry Transport)
+# ══════════════════════════════════════════
+echo -e "${CYAN}── MQTT (IoT Messaging) ──${NC}" | tee -a "$RESULT_FILE"
+
+if command -v nmap &>/dev/null; then
+    MQTT_HOSTS=$(nmap -p 1883,8883 --open -sV "$SUBNET" -oG - 2>/dev/null | grep "open" || true)
+    if [[ -n "$MQTT_HOSTS" ]]; then
+        MQTT_COUNT=$(echo "$MQTT_HOSTS" | grep -c "Host:" || true)
+        _result "WARN" "MQTT" "$MQTT_COUNT broker(s) detectados en la red"
+
+        # Verificar si permite conexión anónima
+        while IFS= read -r line; do
+            HOST=$(echo "$line" | grep -oP 'Host: \K[\d.]+')
+            [[ -z "$HOST" ]] && continue
+
+            # Test conexión anónima (sin auth)
+            if command -v mosquitto_pub &>/dev/null; then
+                if timeout 5 mosquitto_pub -h "$HOST" -t "audit/test" -m "probe" 2>/dev/null; then
+                    _result "CRIT" "MQTT" "$HOST permite publicación ANÓNIMA (sin auth)"
+                else
+                    _result "OK" "MQTT" "$HOST requiere autenticación"
+                fi
+            else
+                # Fallback: nmap script
+                MQTT_INFO=$(nmap -p 1883 --script mqtt-subscribe -sV "$HOST" 2>/dev/null || true)
+                if echo "$MQTT_INFO" | grep -qi "anonymous\|connected"; then
+                    _result "CRIT" "MQTT" "$HOST posible acceso anónimo"
+                else
+                    _result "INFO" "MQTT" "$HOST detectado (instalar mosquitto-clients para test completo)"
+                fi
+            fi
+
+            # Verificar si usa TLS (puerto 8883)
+            if echo "$MQTT_HOSTS" | grep "$HOST" | grep -q "8883"; then
+                _result "OK" "MQTT-TLS" "$HOST tiene MQTTS (8883) habilitado"
+            else
+                _result "WARN" "MQTT-TLS" "$HOST solo MQTT plano (1883) - sin cifrado"
+            fi
+        done <<< "$MQTT_HOSTS"
+    else
+        _result "OK" "MQTT" "Sin brokers MQTT detectados en $SUBNET"
+    fi
+else
+    _result "INFO" "MQTT" "nmap no disponible para escaneo"
+fi
+
+# ══════════════════════════════════════════
+# 2. Modbus (ICS/SCADA)
+# ══════════════════════════════════════════
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── Modbus TCP (ICS/SCADA) ──${NC}" | tee -a "$RESULT_FILE"
+
+if command -v nmap &>/dev/null; then
+    MODBUS_HOSTS=$(nmap -p 502 --open "$SUBNET" -oG - 2>/dev/null | grep "open" || true)
+    if [[ -n "$MODBUS_HOSTS" ]]; then
+        MODBUS_COUNT=$(echo "$MODBUS_HOSTS" | grep -c "Host:" || true)
+        _result "CRIT" "Modbus" "$MODBUS_COUNT dispositivo(s) Modbus detectados - SIN AUTENTICACIÓN NATIVA"
+        _result "CRIT" "Modbus" "Modbus TCP no tiene cifrado ni autenticación - AISLAR en VLAN dedicada"
+
+        while IFS= read -r line; do
+            HOST=$(echo "$line" | grep -oP 'Host: \K[\d.]+')
+            [[ -z "$HOST" ]] && continue
+            # Nmap script para identificar dispositivo
+            MODBUS_ID=$(nmap -p 502 --script modbus-discover "$HOST" 2>/dev/null | grep "Device" || true)
+            if [[ -n "$MODBUS_ID" ]]; then
+                _result "INFO" "Modbus" "$HOST: $MODBUS_ID"
+            fi
+        done <<< "$MODBUS_HOSTS"
+    else
+        _result "OK" "Modbus" "Sin dispositivos Modbus en $SUBNET"
+    fi
+fi
+
+# ══════════════════════════════════════════
+# 3. CoAP (Constrained Application Protocol)
+# ══════════════════════════════════════════
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── CoAP UDP (IoT Lightweight) ──${NC}" | tee -a "$RESULT_FILE"
+
+if command -v nmap &>/dev/null; then
+    COAP_HOSTS=$(nmap -p 5683 -sU --open "$SUBNET" -oG - 2>/dev/null | grep "open" || true)
+    if [[ -n "$COAP_HOSTS" ]]; then
+        COAP_COUNT=$(echo "$COAP_HOSTS" | grep -c "Host:" || true)
+        _result "WARN" "CoAP" "$COAP_COUNT dispositivo(s) CoAP detectados"
+        _result "WARN" "CoAP" "CoAP sin DTLS es vulnerable a eavesdropping"
+    else
+        _result "OK" "CoAP" "Sin dispositivos CoAP en $SUBNET"
+    fi
+fi
+
+# ══════════════════════════════════════════
+# 4. AMQP (Advanced Message Queuing Protocol)
+# ══════════════════════════════════════════
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── AMQP (Message Broker) ──${NC}" | tee -a "$RESULT_FILE"
+
+if command -v nmap &>/dev/null; then
+    AMQP_HOSTS=$(nmap -p 5672,5671,15672 --open -sV "$SUBNET" -oG - 2>/dev/null | grep "open" || true)
+    if [[ -n "$AMQP_HOSTS" ]]; then
+        _result "WARN" "AMQP" "Broker(s) AMQP detectados (RabbitMQ/ActiveMQ)"
+
+        # Puerto 15672 es management UI - debe estar protegido
+        if echo "$AMQP_HOSTS" | grep -q "15672"; then
+            _result "CRIT" "AMQP" "Management UI (15672) expuesto - credenciales default guest/guest"
+        fi
+        # Puerto 5671 es AMQPS (con TLS)
+        if echo "$AMQP_HOSTS" | grep -q "5671"; then
+            _result "OK" "AMQP-TLS" "AMQPS (5671) habilitado"
+        fi
+    else
+        _result "OK" "AMQP" "Sin brokers AMQP en $SUBNET"
+    fi
+fi
+
+# ══════════════════════════════════════════
+# 5. Kubernetes API / Container Orchestration
+# ══════════════════════════════════════════
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── Kubernetes / Container Orchestration ──${NC}" | tee -a "$RESULT_FILE"
+
+if command -v nmap &>/dev/null; then
+    K8S_HOSTS=$(nmap -p 6443,10250,10255,2379,2380 --open -sV "$SUBNET" -oG - 2>/dev/null | grep "open" || true)
+    if [[ -n "$K8S_HOSTS" ]]; then
+        _result "WARN" "K8s" "Puertos Kubernetes detectados en la red"
+
+        if echo "$K8S_HOSTS" | grep -q "10255"; then
+            _result "CRIT" "K8s" "Kubelet read-only (10255) expuesto - acceso sin auth"
+        fi
+        if echo "$K8S_HOSTS" | grep -q "2379"; then
+            _result "CRIT" "K8s" "etcd (2379) expuesto - contiene todos los secrets del cluster"
+        fi
+        if echo "$K8S_HOSTS" | grep -q "6443"; then
+            _result "WARN" "K8s" "API Server (6443) detectado - verificar RBAC"
+        fi
+    else
+        _result "OK" "K8s" "Sin Kubernetes detectado en $SUBNET"
+    fi
+fi
+
+# ══════════════════════════════════════════
+# 6. CVE CROSS-REFERENCE DE VERSIONES
+# ══════════════════════════════════════════
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── CVE Cross-Reference de Servicios ──${NC}" | tee -a "$RESULT_FILE"
+
+# Base de datos local de versiones vulnerables conocidas
+declare -A CVE_DB=(
+    # Formato: "producto:version_regex"="CVE-ID (descripción)"
+    ["OpenSSH:7\.[0-9]"]="CVE-2023-38408 (PKCS#11 RCE)"
+    ["OpenSSH:8\.[0-7]"]="CVE-2024-6387 (regreSSHion Race Condition)"
+    ["OpenSSH:9\.[0-7]"]="CVE-2024-6387 (regreSSHion - verificar patch)"
+    ["nginx:1\.([0-9]|1[0-9]|2[0-4])\."]="CVE-2024-7347 (mp4 module UAF)"
+    ["Apache:2\.4\.(0|[1-4][0-9]|5[0-7])[^0-9]"]="CVE-2024-38476 (SSRF via mod_rewrite)"
+    ["MariaDB:10\.[0-5]\."]="CVE-2023-22084 (privilege escalation)"
+    ["PostgreSQL:1[0-5]\."]="CVE-2024-10978 (SET ROLE escalada)"
+    ["Redis:[0-6]\."]="CVE-2024-31449 (Lua sandbox escape RCE)"
+    ["curl:7\.[0-9]{1,2}\."]="CVE-2024-2398 (HTTP/2 push headers memory leak)"
+    ["Exim:4\.(9[0-6])"]="CVE-2024-39929 (MIME header parsing bypass)"
+)
+
+# Escanear servicios con versiones en localhost y red local
+echo -e "  ${DIM}Escaneando versiones de servicios en localhost...${NC}"
+if command -v nmap &>/dev/null; then
+    SERVICE_SCAN=$(nmap -sV --version-intensity 5 127.0.0.1 -oN - 2>/dev/null || true)
+
+    CVE_FOUND=0
+    for pattern in "${!CVE_DB[@]}"; do
+        PRODUCT=$(echo "$pattern" | cut -d: -f1)
+        REGEX=$(echo "$pattern" | cut -d: -f2)
+        if echo "$SERVICE_SCAN" | grep -iP "${PRODUCT}.*${REGEX}" &>/dev/null; then
+            CVE_FOUND=$((CVE_FOUND+1))
+            _result "CRIT" "CVE-XREF" "$PRODUCT - ${CVE_DB[$pattern]}"
+        fi
+    done
+
+    if [[ $CVE_FOUND -eq 0 ]]; then
+        _result "OK" "CVE-XREF" "Sin CVEs conocidos para versiones locales detectadas"
+    fi
+else
+    _result "INFO" "CVE-XREF" "nmap no disponible"
+fi
+
+# Verificar también versiones de servicios locales directamente
+echo -e "  ${DIM}Verificando versiones de servicios instalados...${NC}"
+# OpenSSH
+if command -v ssh &>/dev/null; then
+    SSH_VER=$(ssh -V 2>&1 | grep -oP 'OpenSSH_\K[0-9.]+' || true)
+    if [[ -n "$SSH_VER" ]]; then
+        SSH_MAJ=$(echo "$SSH_VER" | cut -d. -f1)
+        SSH_MIN=$(echo "$SSH_VER" | cut -d. -f2)
+        # CVE-2024-6387: regreSSHion - OpenSSH 8.5-9.7
+        if [[ "$SSH_MAJ" -eq 9 && "$SSH_MIN" -le 7 ]] || [[ "$SSH_MAJ" -eq 8 && "$SSH_MIN" -ge 5 ]]; then
+            _result "CRIT" "OpenSSH" "v$SSH_VER vulnerable a CVE-2024-6387 (regreSSHion)"
+        else
+            _result "OK" "OpenSSH" "v$SSH_VER parcheado"
+        fi
+    fi
+fi
+
+# curl
+if command -v curl &>/dev/null; then
+    CURL_VER=$(curl --version 2>/dev/null | head -1 | grep -oP 'curl \K[0-9.]+' || true)
+    CURL_MAJ=$(echo "$CURL_VER" | cut -d. -f1)
+    CURL_MIN=$(echo "$CURL_VER" | cut -d. -f2)
+    if [[ "$CURL_MAJ" -eq 7 ]]; then
+        _result "WARN" "curl" "v$CURL_VER - rama 7.x (considerar actualizar a 8.x)"
+    else
+        _result "OK" "curl" "v$CURL_VER"
+    fi
+fi
+
+# nginx
+if command -v nginx &>/dev/null; then
+    NGINX_VER=$(nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+' || true)
+    if [[ -n "$NGINX_VER" ]]; then
+        _result "INFO" "nginx" "v$NGINX_VER detectado (verificar CVEs específicos)"
+    fi
+fi
+
+# ═══ Resumen ═══
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}══════════════════════════════════════════${NC}" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}  RESUMEN PROTOCOLOS MODERNOS${NC}" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}══════════════════════════════════════════${NC}" | tee -a "$RESULT_FILE"
+echo "  Total checks:   $TOTAL" | tee -a "$RESULT_FILE"
+echo -e "  Críticos:        ${RED}$CRIT${NC}" | tee -a "$RESULT_FILE"
+echo -e "  Advertencias:    ${YELLOW}$WARN${NC}" | tee -a "$RESULT_FILE"
+echo -e "  OK:              ${GREEN}$OK${NC}" | tee -a "$RESULT_FILE"
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${DIM}Reporte: $RESULT_FILE${NC}"
+EOFMODPROT
+
+    chmod 755 /usr/local/bin/auditoria-red-protocolos-modernos.sh
+    log_change "Creado" "/usr/local/bin/auditoria-red-protocolos-modernos.sh"
+    log_info "Auditoría de protocolos modernos instalada"
+    log_info "  Uso: auditoria-red-protocolos-modernos.sh [SUBNET]"
+    log_info "  Protocolos: MQTT, Modbus, CoAP, AMQP, Kubernetes"
+    log_info "  + CVE cross-reference de versiones de servicios"
+
+else
+    log_skip "Auditoría de protocolos modernos"
+fi
+
+# ============================================================
 # RESUMEN FINAL
 # ============================================================
 log_section "RESUMEN DEL MODULO 67"
@@ -4727,7 +5025,8 @@ for script in auditoria-red-descubrimiento auditoria-red-puertos auditoria-red-t
               auditoria-red-snmp auditoria-red-config auditoria-red-inventario \
               auditoria-red-baseline auditoria-red-programada auditoria-red-reporte-global \
               auditoria-red-limpieza auditoria-red-topologia auditoria-red-infralink \
-              auditoria-red-baseline-ext auditoria-red-programada-ext auditoria-red-reporte-ext; do
+              auditoria-red-baseline-ext auditoria-red-programada-ext auditoria-red-reporte-ext \
+              auditoria-red-protocolos-modernos; do
     if [[ -x "/usr/local/bin/${script}.sh" ]]; then
         echo -e "    ${GREEN}+${NC} ${script}.sh"
     fi
@@ -4765,6 +5064,11 @@ echo -e "    ${CYAN}auditoria-red-baseline-ext.sh --capture${NC}      Capturar b
 echo -e "    ${CYAN}auditoria-red-baseline-ext.sh --compare${NC}      Detectar drift extendido"
 echo -e "    ${CYAN}auditoria-red-programada-ext.sh completa${NC}     Auditoría extendida completa"
 echo -e "    ${CYAN}auditoria-red-reporte-ext.sh${NC}                 Reporte extendido"
+echo ""
+echo -e "  ${BOLD}Uso rápido (protocolos modernos):${NC}"
+echo ""
+echo -e "    ${CYAN}auditoria-red-protocolos-modernos.sh${NC}         MQTT, Modbus, CoAP, K8s + CVE crossref"
+echo -e "    ${CYAN}auditoria-red-protocolos-modernos.sh 10.0.0.0/24${NC}  Escanear subnet específica"
 echo ""
 
 show_changes_summary

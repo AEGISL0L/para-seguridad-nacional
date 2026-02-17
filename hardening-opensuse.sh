@@ -14,8 +14,10 @@ init_backup "hardening-opensuse"
 securizar_setup_traps
 
 # ── Pre-check: salida temprana si todo aplicado ──
-_precheck 13
+_precheck 16
 _pc check_file_exists /etc/sysctl.d/50-hardening-base.conf
+_pc check_file_exists /etc/modprobe.d/50-hardening-blacklist.conf
+_pc true  # S1c: filesystem hardening (verificación dinámica)
 _pc true  # S2: deshabilitar FTP (condicional)
 _pc true  # S3: servicios innecesarios (condicional)
 _pc true  # S4: firewall (condicional)
@@ -28,6 +30,7 @@ _pc true  # S10: auditd (condicional)
 _pc check_file_exists /etc/ssh/sshd_config.d/91-mfa.conf
 _pc check_executable /usr/local/bin/clamav-escanear.sh
 _pc check_executable /usr/local/bin/openscap-auditar.sh
+_pc true  # S14: CVE check (siempre re-evaluar)
 _precheck_result
 
 echo ""
@@ -91,6 +94,37 @@ kernel.kexec_load_disabled = 1
 net.ipv4.conf.all.log_martians = 1
 net.ipv4.conf.default.log_martians = 1
 net.ipv4.tcp_rfc1337 = 1
+
+# ── Protecciones de memoria y procesos (CVE-2025-21756, CVE-2025-38236) ──
+# Restringir acceso a logs del kernel (leak de direcciones)
+kernel.dmesg_restrict = 1
+# Ocultar punteros del kernel en /proc (anti-KASLR bypass)
+kernel.kptr_restrict = 2
+# Restringir ptrace: solo padre puede trazar hijo (anti CVE-2025-21756 vsock UAF)
+kernel.yama.ptrace_scope = 2
+# Deshabilitar user namespaces sin privilegios (vector de escape de contenedores)
+kernel.unprivileged_userns_clone = 0
+# Protección contra ataques de rendimiento/side-channel
+kernel.perf_event_paranoid = 3
+# Deshabilitar carga de módulos en caliente tras boot (anti-rootkit)
+# kernel.modules_disabled = 1  # CUIDADO: descomentar solo si no necesitas cargar módulos
+# Desactivar vsock para mitigar CVE-2025-21756 si no usas VMs
+# net.vmw_vsock.vmci_transport.disable = 1
+
+# ── Protecciones de red avanzadas ──
+# Protección contra IP spoofing estricta (modo strict)
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
+# Limitar cola de conexiones (anti-DDoS)
+net.core.netdev_max_backlog = 1000
+net.ipv4.tcp_max_syn_backlog = 2048
+# Deshabilitar IPv6 router advertisements (MITM vector)
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
+# Protección TCP TIME-WAIT assassination
+net.ipv4.tcp_rfc1337 = 1
+# Deshabilitar TIPC si no se usa (superficie de ataque kernel)
+# net.tipc.enabled = 0
 EOF
     log_change "Creado" "/etc/sysctl.d/50-hardening-base.conf"
 
@@ -100,6 +134,154 @@ EOF
 else
     log_skip "Aplicar hardening del kernel"
     log_warn "Kernel hardening omitido"
+fi
+
+# ============================================
+# 1b. BLACKLIST DE MÓDULOS KERNEL PELIGROSOS
+# ============================================
+echo ""
+log_info "=== 1b. BLACKLIST DE MÓDULOS KERNEL PELIGROSOS ==="
+echo "Deshabilita módulos del kernel que amplían la superficie de ataque."
+echo "  - Protocolos obsoletos (DCCP, SCTP, RDS, TIPC)"
+echo "  - Filesystems raros (cramfs, freevxfs, jffs2, hfs, hfsplus, udf)"
+echo "  - USB storage (si no se necesita)"
+echo ""
+
+if check_file_exists /etc/modprobe.d/50-hardening-blacklist.conf; then
+    log_already "Blacklist de módulos kernel"
+elif ask "¿Aplicar blacklist de módulos kernel peligrosos?"; then
+    cat > /etc/modprobe.d/50-hardening-blacklist.conf << 'EOF'
+# ── Protocolos de red obsoletos/peligrosos ──
+# DCCP: Datagram Congestion Control Protocol (vector de escalada, múltiples CVEs)
+install dccp /bin/false
+blacklist dccp
+# SCTP: Stream Control Transmission Protocol (raramente necesario)
+install sctp /bin/false
+blacklist sctp
+# RDS: Reliable Datagram Sockets (CVEs de escalada recurrentes)
+install rds /bin/false
+blacklist rds
+# TIPC: Transparent Inter-Process Communication (CVE-2021-43267 y posteriores)
+install tipc /bin/false
+blacklist tipc
+# n-hdlc: vulnerabilidades UAF recurrentes
+install n-hdlc /bin/false
+blacklist n-hdlc
+# ax25/netrom/rose: protocolos amateur radio (superficie innecesaria)
+install ax25 /bin/false
+install netrom /bin/false
+install rose /bin/false
+
+# ── Filesystems raros (CIS Benchmark) ──
+install cramfs /bin/false
+install freevxfs /bin/false
+install jffs2 /bin/false
+install hfs /bin/false
+install hfsplus /bin/false
+install udf /bin/false
+install squashfs /bin/false
+
+# ── Bluetooth (si no se usa) ──
+# blacklist bluetooth
+# blacklist btusb
+
+# ── USB storage (descomentar si no se necesitan USBs) ──
+# install usb-storage /bin/false
+# blacklist usb-storage
+# blacklist uas
+
+# ── Firewire (vector de DMA attack) ──
+install firewire-core /bin/false
+install firewire-ohci /bin/false
+install firewire-sbp2 /bin/false
+blacklist firewire-core
+blacklist firewire-ohci
+blacklist firewire-sbp2
+
+# ── Thunderbolt (vector de DMA attack si no se usa) ──
+# install thunderbolt /bin/false
+# blacklist thunderbolt
+EOF
+    log_change "Creado" "/etc/modprobe.d/50-hardening-blacklist.conf"
+    log_info "Blacklist de módulos kernel aplicada"
+    log_info "  - Protocolos obsoletos: DCCP, SCTP, RDS, TIPC, n-hdlc"
+    log_info "  - Filesystems: cramfs, freevxfs, jffs2, hfs, squashfs"
+    log_info "  - Firewire: deshabilitado (vector DMA)"
+else
+    log_skip "Blacklist de módulos kernel"
+fi
+
+# ============================================
+# 1c. HARDENING DE FILESYSTEM (noexec, nosuid, nodev)
+# ============================================
+echo ""
+log_info "=== 1c. HARDENING DE FILESYSTEM ==="
+echo "Aplica restricciones noexec/nosuid/nodev a particiones temporales."
+echo "  - Previene ejecución de malware desde /tmp y /dev/shm"
+echo "  - MITRE T1059.004 (Command and Scripting Interpreter)"
+echo ""
+
+_FS_HARDENED=0
+# Verificar /tmp
+if mount | grep -q '/tmp.*noexec'; then
+    _FS_HARDENED=1
+fi
+
+if [[ $_FS_HARDENED -eq 1 ]]; then
+    log_already "Filesystem hardening (noexec en /tmp)"
+elif ask "¿Aplicar hardening de filesystem (noexec en /tmp, /dev/shm)?"; then
+    # /dev/shm - aplicar inmediatamente con remount
+    if mount | grep -q '/dev/shm'; then
+        mount -o remount,noexec,nosuid,nodev /dev/shm 2>/dev/null || true
+        log_change "Remount" "/dev/shm con noexec,nosuid,nodev"
+    fi
+
+    # Agregar a /etc/fstab si no está
+    if ! grep -q '/dev/shm.*noexec' /etc/fstab 2>/dev/null; then
+        cp /etc/fstab "$BACKUP_DIR/fstab.bak"
+        log_change "Backup" "/etc/fstab"
+        # Añadir entrada para /dev/shm si no existe, o modificar la existente
+        if grep -q '/dev/shm' /etc/fstab; then
+            sed -i '/\/dev\/shm/ s/defaults/defaults,noexec,nosuid,nodev/' /etc/fstab
+        else
+            echo "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" >> /etc/fstab
+        fi
+        log_change "Modificado" "/etc/fstab - /dev/shm noexec,nosuid,nodev"
+    fi
+
+    # /tmp - crear systemd override si /tmp es tmpfs
+    if systemctl is-enabled tmp.mount &>/dev/null 2>&1; then
+        mkdir -p /etc/systemd/system/tmp.mount.d
+        cat > /etc/systemd/system/tmp.mount.d/noexec.conf << 'EOF'
+[Mount]
+Options=mode=1777,strictatime,noexec,nosuid,nodev
+EOF
+        log_change "Creado" "/etc/systemd/system/tmp.mount.d/noexec.conf"
+        systemctl daemon-reload
+    elif ! grep -q '/tmp.*noexec' /etc/fstab 2>/dev/null; then
+        if grep -q '/tmp' /etc/fstab; then
+            sed -i '/[[:space:]]\/tmp[[:space:]]/ s/defaults/defaults,noexec,nosuid,nodev/' /etc/fstab
+        else
+            echo "tmpfs /tmp tmpfs defaults,noexec,nosuid,nodev,size=2G 0 0" >> /etc/fstab
+        fi
+        log_change "Modificado" "/etc/fstab - /tmp noexec,nosuid,nodev"
+        mount -o remount /tmp 2>/dev/null || log_warn "/tmp: remount requiere reboot"
+    fi
+
+    # /var/tmp
+    if ! grep -q '/var/tmp.*noexec' /etc/fstab 2>/dev/null; then
+        echo "# Bind mount /var/tmp a /tmp para heredar restricciones" >> /etc/fstab
+        echo "/tmp /var/tmp none bind 0 0" >> /etc/fstab
+        log_change "Modificado" "/etc/fstab - /var/tmp bind a /tmp"
+    fi
+
+    log_info "Filesystem hardening aplicado"
+    log_info "  - /dev/shm: noexec,nosuid,nodev"
+    log_info "  - /tmp: noexec,nosuid,nodev"
+    log_info "  - /var/tmp: bind a /tmp"
+    log_warn "Puede requerir reboot para aplicar completamente"
+else
+    log_skip "Hardening de filesystem"
 fi
 
 # ============================================
@@ -248,11 +430,14 @@ if [[ -f /etc/ssh/sshd_config ]]; then
 # SSH Hardening - Compatible con GitHub y conexiones a VPS
 # Esta configuración afecta SOLO conexiones ENTRANTES a esta máquina
 
-Protocol 2
+# Protocol 2 es redundante en OpenSSH >= 7.4 (eliminado)
 PermitRootLogin no
-MaxAuthTries 4
-MaxSessions 5
-LoginGraceTime 60
+MaxAuthTries 3
+MaxSessions 3
+LoginGraceTime 30
+
+# Protección contra DDoS en pre-auth
+MaxStartups 10:30:60
 
 # Autenticación
 PubkeyAuthentication yes
@@ -270,19 +455,37 @@ AllowTcpForwarding no
 # X11 Forwarding deshabilitado (seguridad)
 X11Forwarding no
 
+# Deshabilitar StreamLocalForwarding (vector de pivot)
+StreamLocalBindUnlink no
+GatewayPorts no
+
+# Deshabilitar túneles (anti-pivoting)
+PermitTunnel no
+
+# Deshabilitar compresión (anti-CRIME/BREACH)
+Compression no
+
 # Keepalive para evitar desconexiones
 TCPKeepAlive yes
-ClientAliveInterval 300
-ClientAliveCountMax 3
+ClientAliveInterval 120
+ClientAliveCountMax 2
 
-# Logs
+# Banner legal de advertencia
+Banner /etc/issue.net
+
+# Logs detallados (MITRE T1078 - detectar uso indebido)
+LogLevel VERBOSE
 PrintMotd no
 PrintLastLog yes
 
-# Algoritmos seguros (compatibles con GitHub)
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group-exchange-sha256
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
-MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+# Restringir environment variables (anti-injection)
+PermitUserEnvironment no
+
+# Algoritmos seguros (2025+ hardened - prioriza curve25519, elimina NIST débiles)
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
+HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256
 EOF
         log_change "Creado" "/etc/ssh/sshd_config.d/50-hardening-base.conf"
 
@@ -495,22 +698,94 @@ if systemctl is-active auditd &>/dev/null; then
 
     if ask "¿Agregar reglas de auditoría básicas?"; then
         cat > /etc/audit/rules.d/90-hardening.rules << 'EOF'
-# Monitorear cambios en usuarios/grupos
+# ══════════════════════════════════════════════════
+# Reglas de auditoría - Hardening 2025
+# Mapeadas a MITRE ATT&CK
+# ══════════════════════════════════════════════════
+
+# ── Identidad y acceso (T1078 - Valid Accounts) ──
 -w /etc/passwd -p wa -k identity
 -w /etc/group -p wa -k identity
 -w /etc/shadow -p wa -k identity
 -w /etc/gshadow -p wa -k identity
 -w /etc/sudoers -p wa -k sudoers
 -w /etc/sudoers.d/ -p wa -k sudoers
+-w /etc/security/ -p wa -k security-config
 
-# Monitorear logins
+# ── Logins y sesiones (T1078) ──
 -w /var/log/lastlog -p wa -k logins
 -w /var/log/wtmp -p wa -k logins
 -w /var/log/btmp -p wa -k logins
+-w /var/run/utmp -p wa -k session
 
-# Monitorear cambios en hora del sistema
+# ── Tiempo del sistema (T1070.006 - Timestomp) ──
 -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
 -a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+-a always,exit -F arch=b64 -S clock_settime -k time-change
+-w /etc/localtime -p wa -k time-change
+
+# ── Ejecución de procesos (T1059 - Command Execution) ──
+-a always,exit -F arch=b64 -S execve -k exec
+-a always,exit -F arch=b32 -S execve -k exec
+
+# ── Conexiones de red (T1071 - Application Layer Protocol) ──
+-a always,exit -F arch=b64 -S connect -S accept -S bind -k network
+-a always,exit -F arch=b64 -S socket -F a0=2 -k network-ipv4
+-a always,exit -F arch=b64 -S socket -F a0=10 -k network-ipv6
+
+# ── Módulos del kernel (T1547.006 - Kernel Modules) ──
+-a always,exit -F arch=b64 -S init_module -S finit_module -k kernel-module-load
+-a always,exit -F arch=b64 -S delete_module -k kernel-module-unload
+-w /etc/modprobe.d/ -p wa -k modprobe
+
+# ── Escalada de privilegios (T1548 - Abuse Elevation) ──
+-a always,exit -F arch=b64 -S setuid -S setgid -S setreuid -S setregid -k priv-escalation
+-a always,exit -F arch=b64 -S setresuid -S setresgid -k priv-escalation
+-w /usr/bin/su -p x -k priv-escalation
+-w /usr/bin/sudo -p x -k priv-escalation
+-w /usr/bin/pkexec -p x -k priv-escalation
+
+# ── Ptrace (T1055 - Process Injection, CVE-2025-21756 vsock) ──
+-a always,exit -F arch=b64 -S ptrace -k process-injection
+-a always,exit -F arch=b32 -S ptrace -k process-injection
+
+# ── Archivos críticos del sistema (T1565 - Data Manipulation) ──
+-w /boot/ -p wa -k boot-modification
+-w /etc/sysctl.conf -p wa -k sysctl
+-w /etc/sysctl.d/ -p wa -k sysctl
+-w /etc/ssh/sshd_config -p wa -k ssh-config
+-w /etc/ssh/sshd_config.d/ -p wa -k ssh-config
+-w /etc/pam.d/ -p wa -k pam-config
+-w /etc/ld.so.conf -p wa -k ld-config
+-w /etc/ld.so.conf.d/ -p wa -k ld-config
+
+# ── Persistencia (T1053 - Scheduled Task/Job) ──
+-w /etc/crontab -p wa -k cron
+-w /etc/cron.d/ -p wa -k cron
+-w /etc/cron.daily/ -p wa -k cron
+-w /etc/cron.hourly/ -p wa -k cron
+-w /etc/cron.weekly/ -p wa -k cron
+-w /etc/cron.monthly/ -p wa -k cron
+-w /var/spool/cron/ -p wa -k cron
+-w /etc/systemd/system/ -p wa -k systemd-persist
+-w /usr/lib/systemd/system/ -p wa -k systemd-persist
+
+# ── Evasión de defensas (T1562 - Impair Defenses) ──
+-w /etc/audit/ -p wa -k audit-config
+-w /etc/apparmor/ -p wa -k apparmor-config
+-w /etc/apparmor.d/ -p wa -k apparmor-config
+-w /sbin/insmod -p x -k kernel-tools
+-w /sbin/rmmod -p x -k kernel-tools
+-w /sbin/modprobe -p x -k kernel-tools
+
+# ── Acceso a credenciales (T1003 - OS Credential Dumping) ──
+-a always,exit -F arch=b64 -S open -S openat -F path=/etc/shadow -k credential-access
+-a always,exit -F arch=b64 -S open -S openat -F path=/etc/gshadow -k credential-access
+
+# ── Montajes y namespaces (container escape, CVE-2025-38236) ──
+-a always,exit -F arch=b64 -S mount -S umount2 -k mount
+-a always,exit -F arch=b64 -S unshare -k namespace
+-a always,exit -F arch=b64 -S clone -F a0&0x7e020000 -k namespace
 EOF
         log_change "Creado" "/etc/audit/rules.d/90-hardening.rules"
 
@@ -1240,6 +1515,99 @@ else
 fi
 
 # ============================================
+# 14. VERIFICACIÓN DE CVEs KERNEL CRÍTICOS (2025)
+# ============================================
+echo ""
+log_info "=== 14. VERIFICACIÓN DE CVEs KERNEL CRÍTICOS ==="
+echo "Verifica si el kernel actual es vulnerable a CVEs recientes."
+echo ""
+
+KERNEL_VER=$(uname -r)
+KERNEL_MAJOR=$(echo "$KERNEL_VER" | cut -d. -f1)
+KERNEL_MINOR=$(echo "$KERNEL_VER" | cut -d. -f2)
+KERNEL_PATCH=$(echo "$KERNEL_VER" | cut -d. -f3 | cut -d- -f1)
+
+log_info "Kernel actual: $KERNEL_VER"
+echo ""
+
+_cve_check() {
+    local cve="$1" desc="$2" fixed_major="$3" fixed_minor="$4" fixed_patch="$5"
+    if [[ "$KERNEL_MAJOR" -lt "$fixed_major" ]] || \
+       [[ "$KERNEL_MAJOR" -eq "$fixed_major" && "$KERNEL_MINOR" -lt "$fixed_minor" ]] || \
+       [[ "$KERNEL_MAJOR" -eq "$fixed_major" && "$KERNEL_MINOR" -eq "$fixed_minor" && "$KERNEL_PATCH" -lt "$fixed_patch" ]]; then
+        log_warn "VULNERABLE: $cve - $desc"
+        log_warn "  Actualizar a kernel >= ${fixed_major}.${fixed_minor}.${fixed_patch}"
+        return 1
+    else
+        log_info "PARCHEADO: $cve - $desc"
+        return 0
+    fi
+}
+
+_VULN_COUNT=0
+
+# CVE-2025-21756: vsock use-after-free (escalada a root, CVSS 7.8)
+_cve_check "CVE-2025-21756" "vsock UAF escalada a root" 6 13 4 || ((_VULN_COUNT++)) || true
+
+# CVE-2025-38236: MSG_OOB UNIX socket (control total del kernel)
+_cve_check "CVE-2025-38236" "MSG_OOB UNIX socket kernel control" 6 9 8 || ((_VULN_COUNT++)) || true
+
+# CVE-2025-39866: Filesystem writeback UAF
+_cve_check "CVE-2025-39866" "Filesystem writeback use-after-free" 6 12 16 || ((_VULN_COUNT++)) || true
+
+# CVE-2022-0847: DirtyPipe (sigue siendo relevante en kernels viejos)
+_cve_check "CVE-2022-0847" "DirtyPipe escalada de privilegios" 5 16 11 || ((_VULN_COUNT++)) || true
+
+# CVE-2024-1086: nf_tables UAF (netfilter)
+_cve_check "CVE-2024-1086" "nf_tables use-after-free" 6 7 3 || ((_VULN_COUNT++)) || true
+
+echo ""
+if [[ $_VULN_COUNT -gt 0 ]]; then
+    log_error "$_VULN_COUNT CVE(s) del kernel detectada(s) - ACTUALIZAR URGENTE"
+    log_warn "Ejecutar: $PKG_UPDATE_CMD para actualizar el kernel"
+else
+    log_info "Kernel sin CVEs críticas conocidas detectadas"
+fi
+
+# Verificar también módulos vsock cargados (vector CVE-2025-21756)
+if lsmod | grep -q vsock 2>/dev/null; then
+    log_warn "Módulo vsock cargado - considerar descargar si no usas VMs:"
+    log_warn "  sudo modprobe -r vsock vmw_vsock_vmci_transport"
+fi
+
+# ============================================
+# 15. BANNER LEGAL DE ADVERTENCIA
+# ============================================
+echo ""
+log_info "=== 15. BANNER LEGAL DE ADVERTENCIA ==="
+echo "Configura un banner legal en /etc/issue.net para SSH."
+echo ""
+
+if [[ -f /etc/issue.net ]] && grep -q "ACCESO NO AUTORIZADO" /etc/issue.net 2>/dev/null; then
+    log_already "Banner legal de advertencia"
+elif ask "¿Configurar banner legal de advertencia?"; then
+    cp /etc/issue.net "$BACKUP_DIR/" 2>/dev/null || true
+    cat > /etc/issue.net << 'EOF'
+*************************************************************
+*  SISTEMA RESTRINGIDO - ACCESO NO AUTORIZADO PROHIBIDO     *
+*                                                           *
+*  El uso no autorizado de este sistema está prohibido y    *
+*  será procesado conforme a la ley aplicable.              *
+*  Todas las actividades son monitoreadas y registradas.    *
+*  Al acceder, usted consiente a dicho monitoreo.          *
+*************************************************************
+EOF
+    log_change "Creado" "/etc/issue.net"
+
+    # Copiar a /etc/issue para login local
+    cp /etc/issue.net /etc/issue
+    log_change "Copiado" "/etc/issue.net -> /etc/issue"
+    log_info "Banner legal configurado"
+else
+    log_skip "Banner legal"
+fi
+
+# ============================================
 # RESUMEN
 # ============================================
 show_changes_summary
@@ -1261,5 +1629,13 @@ echo "  - MFA SSH: requiere llave + contraseña (si activado)"
 echo "  - ClamAV: /usr/local/bin/clamav-escanear.sh"
 echo "  - OpenSCAP: /usr/local/bin/openscap-auditar.sh"
 echo "  - FIDO2: /usr/local/bin/generar-llave-fido2.sh"
+echo ""
+echo "Protecciones añadidas (2025):"
+echo "  - Kernel: dmesg_restrict, ptrace_scope=2, kptr_restrict=2"
+echo "  - Módulos: blacklist DCCP, SCTP, RDS, TIPC, Firewire"
+echo "  - Filesystem: noexec en /tmp, /dev/shm, /var/tmp"
+echo "  - SSH: MaxStartups, LogLevel VERBOSE, ciphers 2025"
+echo "  - Auditoría: execve, ptrace, módulos, namespaces, red"
+echo "  - CVE checks: CVE-2025-21756, CVE-2025-38236, CVE-2025-39866"
 echo ""
 log_info "Si algo falla, restaura desde: $BACKUP_DIR"

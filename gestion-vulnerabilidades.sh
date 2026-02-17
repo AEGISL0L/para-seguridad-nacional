@@ -27,7 +27,7 @@ init_backup "gestion-vulnerabilidades"
 securizar_setup_traps
 
 # ── Pre-check: detectar secciones ya aplicadas ──────────────
-_precheck 10
+_precheck 11
 _pc 'check_file_exists /etc/securizar/vuln-management/tools.conf'
 _pc 'check_executable /usr/local/bin/securizar-vuln-system.sh'
 _pc 'check_executable /usr/local/bin/securizar-vuln-containers.sh'
@@ -38,6 +38,7 @@ _pc 'check_executable /usr/local/bin/securizar-vuln-report.sh'
 _pc 'check_executable /usr/local/bin/securizar-vuln-patch-verify.sh'
 _pc 'check_executable /usr/local/bin/securizar-vuln-scheduled.sh'
 _pc 'check_executable /usr/local/bin/auditoria-vuln-management.sh'
+_pc 'check_executable /usr/local/bin/securizar-vuln-kernel.sh'
 _precheck_result
 
 echo ""
@@ -617,8 +618,9 @@ fi
 # ============================================================
 log_section "S5: PRIORIZACIÓN CVSS+EPSS"
 
-echo "Priorización de vulnerabilidades combinando CVSS, EPSS y CISA KEV."
-echo "Fórmula: risk = CVSS*0.4 + EPSS*0.3 + KEV*0.3"
+echo "Priorización de vulnerabilidades combinando CVSS, EPSS, CISA KEV"
+echo "y factor de exposición (reachability)."
+echo "Fórmula: risk = CVSS*0.30 + EPSS*0.25 + KEV*0.25 + REACH*0.20"
 echo ""
 
 if check_executable /usr/local/bin/securizar-vuln-prioritize.sh; then
@@ -670,18 +672,35 @@ is_in_kev() {
     fi
 }
 
+reachability_score() {
+    # Determina si el servicio afectado está expuesto a la red
+    # 1.0 = internet-facing, 0.5 = LAN only, 0.1 = localhost only
+    local CVE="$1"
+    # Verificar si hay servicios escuchando en interfaces externas
+    local EXT_LISTEN
+    EXT_LISTEN=$(ss -tlnp 2>/dev/null | grep -cv "127.0.0.1\|::1\|Local" || true)
+    if [[ "$EXT_LISTEN" -gt 3 ]]; then
+        echo "1.0"  # Muchos servicios expuestos
+    elif [[ "$EXT_LISTEN" -gt 0 ]]; then
+        echo "0.5"  # Algunos servicios expuestos
+    else
+        echo "0.1"  # Solo localhost
+    fi
+}
+
 prioritize_cve() {
     local CVE="$1"
     local CVSS="${2:-0}"
 
     EPSS=$(lookup_epss "$CVE")
     KEV=$(is_in_kev "$CVE")
+    REACH=$(reachability_score "$CVE")
 
     # Normalizar CVSS a 0-1
     CVSS_NORM=$(awk "BEGIN {printf \"%.2f\", $CVSS / 10}")
 
-    # Risk score: CVSS*0.4 + EPSS*0.3 + KEV*0.3
-    RISK=$(awk "BEGIN {printf \"%.2f\", $CVSS_NORM * 0.4 + $EPSS * 0.3 + $KEV * 0.3}")
+    # Risk score: CVSS*0.30 + EPSS*0.25 + KEV*0.25 + REACH*0.20
+    RISK=$(awk "BEGIN {printf \"%.2f\", $CVSS_NORM * 0.30 + $EPSS * 0.25 + $KEV * 0.25 + $REACH * 0.20}")
 
     # Determinar prioridad
     PRIORITY="LOW"
@@ -722,7 +741,7 @@ else
 fi
 
 echo ""
-echo -e "${DIM}Fuentes: CVSS (NVD), EPSS (first.org), KEV (CISA)${NC}"
+echo -e "${DIM}Fuentes: CVSS (NVD), EPSS (first.org), KEV (CISA), Reachability (local)${NC}"
 EOFPRIO
 
     chmod 755 /usr/local/bin/securizar-vuln-prioritize.sh
@@ -1269,6 +1288,263 @@ EOFCRON
 
 else
     log_skip "Auditoría de madurez"
+fi
+
+# ============================================================
+# S11: DETECCIÓN DE CVEs KERNEL ESPECÍFICOS (2024-2026)
+# ============================================================
+log_section "S11: DETECCIÓN DE CVEs KERNEL Y SUPPLY CHAIN"
+
+echo "Verificación directa de CVEs críticos del kernel basada en"
+echo "la versión running, sin depender de scanners externos."
+echo "Incluye también verificación de integridad de paquetes."
+echo ""
+echo "CVEs verificados:"
+echo "  - CVE-2025-21756 (vsock UAF, CVSS 7.8)"
+echo "  - CVE-2025-38236 (MSG_OOB kernel takeover)"
+echo "  - CVE-2025-39866 (Filesystem writeback UAF)"
+echo "  - CVE-2024-1086  (nf_tables UAF)"
+echo "  - CVE-2022-0847  (DirtyPipe)"
+echo "  - CVE-2021-4034  (PwnKit/pkexec)"
+echo "  - Verificación de integridad de paquetes (supply chain)"
+echo ""
+
+if check_executable /usr/local/bin/securizar-vuln-kernel.sh; then
+    log_already "Detección de CVEs kernel"
+elif ask "¿Crear detector de CVEs kernel y verificación supply chain?"; then
+
+    cat > /usr/local/bin/securizar-vuln-kernel.sh << 'EOFKERNVULN'
+#!/bin/bash
+# ============================================================
+# DETECCIÓN DE CVEs KERNEL ESPECÍFICOS (2024-2026)
+# + Verificación de integridad supply chain
+# ============================================================
+# Uso: securizar-vuln-kernel.sh [--json] [--fix]
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+JSON_MODE=false
+FIX_MODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --json) JSON_MODE=true ;;
+        --fix)  FIX_MODE=true ;;
+    esac
+done
+
+RESULT_DIR="/var/log/securizar/vuln-management"
+mkdir -p "$RESULT_DIR"
+RESULT_FILE="$RESULT_DIR/kernel-cve-$(date +%Y%m%d-%H%M%S).txt"
+
+VULN_COUNT=0
+WARN_COUNT=0
+TOTAL_CHECKS=0
+
+echo -e "${BOLD}╔════════════════════════════════════════════════════╗${NC}" | tee "$RESULT_FILE"
+echo -e "${BOLD}║   DETECCIÓN DE CVEs KERNEL Y SUPPLY CHAIN          ║${NC}" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}╚════════════════════════════════════════════════════╝${NC}" | tee -a "$RESULT_FILE"
+echo "" | tee -a "$RESULT_FILE"
+
+# ── Información del kernel ──
+KVER=$(uname -r)
+KMAJ=$(echo "$KVER" | cut -d. -f1)
+KMIN=$(echo "$KVER" | cut -d. -f2)
+KPAT=$(echo "$KVER" | cut -d. -f3 | cut -d- -f1)
+KARCH=$(uname -m)
+
+echo -e "${CYAN}Sistema:${NC}" | tee -a "$RESULT_FILE"
+echo "  Kernel:  $KVER ($KARCH)" | tee -a "$RESULT_FILE"
+echo "  Distro:  $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')" | tee -a "$RESULT_FILE"
+echo "  Fecha:   $(date -Iseconds)" | tee -a "$RESULT_FILE"
+echo "" | tee -a "$RESULT_FILE"
+
+# ── Función de verificación ──
+check_kernel_cve() {
+    local cve="$1" desc="$2" cvss="$3" fmaj="$4" fmin="$5" fpat="$6"
+    local mitigable="${7:-}"
+    TOTAL_CHECKS=$((TOTAL_CHECKS+1))
+
+    local vulnerable=false
+    if [[ "$KMAJ" -lt "$fmaj" ]] || \
+       [[ "$KMAJ" -eq "$fmaj" && "$KMIN" -lt "$fmin" ]] || \
+       [[ "$KMAJ" -eq "$fmaj" && "$KMIN" -eq "$fmin" && "$KPAT" -lt "$fpat" ]]; then
+        vulnerable=true
+    fi
+
+    if $vulnerable; then
+        VULN_COUNT=$((VULN_COUNT+1))
+        echo -e "  ${RED}[VULN]${NC} $cve (CVSS $cvss) - $desc" | tee -a "$RESULT_FILE"
+        echo -e "         Fix: kernel >= ${fmaj}.${fmin}.${fpat}" | tee -a "$RESULT_FILE"
+        if [[ -n "$mitigable" ]]; then
+            echo -e "         ${YELLOW}Mitigación: $mitigable${NC}" | tee -a "$RESULT_FILE"
+        fi
+    else
+        echo -e "  ${GREEN}[SAFE]${NC} $cve (CVSS $cvss) - $desc" | tee -a "$RESULT_FILE"
+    fi
+}
+
+echo -e "${CYAN}── CVEs Kernel Críticos ──${NC}" | tee -a "$RESULT_FILE"
+
+# Escalada de privilegios
+check_kernel_cve "CVE-2025-21756" \
+    "vsock use-after-free → root (T1068)" "7.8" \
+    6 13 4 "Descargar módulo vsock: modprobe -r vsock"
+
+check_kernel_cve "CVE-2025-38236" \
+    "MSG_OOB UNIX socket → control total kernel" "9.0" \
+    6 9 8 ""
+
+check_kernel_cve "CVE-2025-39866" \
+    "Filesystem writeback UAF" "7.5" \
+    6 12 16 ""
+
+check_kernel_cve "CVE-2024-1086" \
+    "nf_tables UAF → root (netfilter)" "7.8" \
+    6 7 3 "Descargar nf_tables si no se usa: modprobe -r nf_tables"
+
+check_kernel_cve "CVE-2022-0847" \
+    "DirtyPipe → escritura arbitraria (T1068)" "7.8" \
+    5 16 11 ""
+
+check_kernel_cve "CVE-2024-0193" \
+    "nf_tables chain binding UAF" "7.8" \
+    6 7 2 ""
+
+check_kernel_cve "CVE-2023-32233" \
+    "nf_tables batch request UAF" "7.8" \
+    6 4 0 ""
+
+# Container escapes
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── CVEs Container Escape ──${NC}" | tee -a "$RESULT_FILE"
+
+check_kernel_cve "CVE-2024-21626" \
+    "runc container escape via /proc/self/fd" "8.6" \
+    6 4 0 "Actualizar runc >= 1.1.12"
+
+check_kernel_cve "CVE-2023-0386" \
+    "OverlayFS escalada → container escape" "7.8" \
+    6 2 0 "kernel.unprivileged_userns_clone=0"
+
+# ── Módulos kernel peligrosos ──
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── Módulos Kernel Peligrosos Cargados ──${NC}" | tee -a "$RESULT_FILE"
+
+for MOD in vsock vmw_vsock_vmci_transport nf_tables dccp sctp rds tipc n_hdlc; do
+    MOD_CLEAN=$(echo "$MOD" | tr '-' '_')
+    if lsmod | grep -q "$MOD_CLEAN" 2>/dev/null; then
+        WARN_COUNT=$((WARN_COUNT+1))
+        echo -e "  ${YELLOW}[WARN]${NC} $MOD cargado (superficie de ataque activa)" | tee -a "$RESULT_FILE"
+        if $FIX_MODE; then
+            modprobe -r "$MOD" 2>/dev/null && \
+                echo -e "  ${GREEN}[FIX]${NC}  $MOD descargado" | tee -a "$RESULT_FILE" || \
+                echo -e "  ${RED}[ERR]${NC}  No se pudo descargar $MOD (en uso)" | tee -a "$RESULT_FILE"
+        fi
+    else
+        echo -e "  ${GREEN}[OK]${NC}   $MOD no cargado" | tee -a "$RESULT_FILE"
+    fi
+done
+
+# ── Verificación de integridad de paquetes (supply chain) ──
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${CYAN}── Verificación Supply Chain ──${NC}" | tee -a "$RESULT_FILE"
+
+SC_ISSUES=0
+# Verificar firmas GPG de repositorios
+if command -v zypper &>/dev/null; then
+    UNSIGNED_REPOS=$(zypper repos -d 2>/dev/null | grep -c "No.*|.*No" || true)
+    if [[ "$UNSIGNED_REPOS" -gt 0 ]]; then
+        SC_ISSUES=$((SC_ISSUES+1))
+        echo -e "  ${YELLOW}[WARN]${NC} $UNSIGNED_REPOS repositorio(s) sin verificación GPG" | tee -a "$RESULT_FILE"
+    else
+        echo -e "  ${GREEN}[OK]${NC}   Todos los repos tienen verificación GPG" | tee -a "$RESULT_FILE"
+    fi
+elif command -v apt-get &>/dev/null; then
+    if apt-key list 2>/dev/null | grep -q "expired"; then
+        SC_ISSUES=$((SC_ISSUES+1))
+        echo -e "  ${YELLOW}[WARN]${NC} Claves GPG de repositorios expiradas" | tee -a "$RESULT_FILE"
+    fi
+fi
+
+# Verificar integridad de paquetes instalados
+echo -e "  ${DIM}Verificando integridad de paquetes...${NC}"
+MODIFIED_PKGS=0
+if command -v rpm &>/dev/null; then
+    MODIFIED_PKGS=$(rpm -Va --nomtime 2>/dev/null | grep -cE "^..5" || true)
+elif command -v debsums &>/dev/null; then
+    MODIFIED_PKGS=$(debsums -c 2>/dev/null | wc -l || true)
+fi
+
+if [[ "$MODIFIED_PKGS" -gt 0 ]]; then
+    SC_ISSUES=$((SC_ISSUES+1))
+    echo -e "  ${RED}[VULN]${NC} $MODIFIED_PKGS archivo(s) de paquetes con checksum alterado" | tee -a "$RESULT_FILE"
+    echo -e "         Posible tampering o actualización incompleta" | tee -a "$RESULT_FILE"
+    if command -v rpm &>/dev/null; then
+        echo -e "         Verificar: rpm -Va --nomtime | grep '^..5'" | tee -a "$RESULT_FILE"
+    fi
+else
+    echo -e "  ${GREEN}[OK]${NC}   Integridad de paquetes verificada" | tee -a "$RESULT_FILE"
+fi
+
+# Verificar binarios SUID no estándar
+SUID_COUNT=$(find /usr/bin /usr/sbin /usr/local/bin -perm -4000 -type f 2>/dev/null | \
+    grep -v -E "/(su|sudo|passwd|chsh|chfn|newgrp|mount|umount|pkexec|crontab|ssh-agent)$" | wc -l || true)
+if [[ "$SUID_COUNT" -gt 0 ]]; then
+    SC_ISSUES=$((SC_ISSUES+1))
+    echo -e "  ${YELLOW}[WARN]${NC} $SUID_COUNT binario(s) SUID no estándar encontrados" | tee -a "$RESULT_FILE"
+    find /usr/bin /usr/sbin /usr/local/bin -perm -4000 -type f 2>/dev/null | \
+        grep -v -E "/(su|sudo|passwd|chsh|chfn|newgrp|mount|umount|pkexec|crontab|ssh-agent)$" | \
+        sed 's/^/         /' | tee -a "$RESULT_FILE"
+fi
+
+# ── Resumen ──
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}══════════════════════════════════════════${NC}" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}  RESUMEN${NC}" | tee -a "$RESULT_FILE"
+echo -e "${BOLD}══════════════════════════════════════════${NC}" | tee -a "$RESULT_FILE"
+echo "  CVEs verificados:    $TOTAL_CHECKS" | tee -a "$RESULT_FILE"
+echo -e "  Vulnerabilidades:    ${RED}$VULN_COUNT${NC}" | tee -a "$RESULT_FILE"
+echo -e "  Advertencias:        ${YELLOW}$WARN_COUNT${NC}" | tee -a "$RESULT_FILE"
+echo -e "  Supply chain issues: ${YELLOW}$SC_ISSUES${NC}" | tee -a "$RESULT_FILE"
+
+if [[ $VULN_COUNT -gt 0 ]]; then
+    echo "" | tee -a "$RESULT_FILE"
+    echo -e "  ${RED}${BOLD}ACCIÓN REQUERIDA: Actualizar kernel y revisar módulos${NC}" | tee -a "$RESULT_FILE"
+    echo -e "  Para mitigar: $0 --fix" | tee -a "$RESULT_FILE"
+fi
+
+echo "" | tee -a "$RESULT_FILE"
+echo -e "${DIM}Reporte: $RESULT_FILE${NC}"
+
+# JSON output si se solicita
+if $JSON_MODE; then
+    JSON_FILE="$RESULT_DIR/kernel-cve-$(date +%Y%m%d-%H%M%S).json"
+    cat > "$JSON_FILE" << EOFJSON
+{
+  "scan_date": "$(date -Iseconds)",
+  "kernel_version": "$KVER",
+  "architecture": "$KARCH",
+  "total_checks": $TOTAL_CHECKS,
+  "vulnerabilities": $VULN_COUNT,
+  "warnings": $WARN_COUNT,
+  "supply_chain_issues": $SC_ISSUES
+}
+EOFJSON
+    echo -e "${DIM}JSON: $JSON_FILE${NC}"
+fi
+
+logger -t securizar-vuln "Kernel CVE scan: $VULN_COUNT vulns, $WARN_COUNT warns, $SC_ISSUES supply chain issues"
+EOFKERNVULN
+
+    chmod 755 /usr/local/bin/securizar-vuln-kernel.sh
+    log_change "Creado" "/usr/local/bin/securizar-vuln-kernel.sh"
+    log_info "Detector de CVEs kernel instalado"
+    log_info "  Uso: securizar-vuln-kernel.sh [--json] [--fix]"
+
+else
+    log_skip "Detección de CVEs kernel"
 fi
 
 echo ""

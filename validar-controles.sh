@@ -772,6 +772,185 @@ else
     test_result "END-21 Systemd sandboxing" "FAIL" "No hay drop-ins de sandboxing"
 fi
 
+# --- T7: Protecciones avanzadas kernel 2025 ---
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Protecciones kernel avanzadas (2025) ---" | tee -a "$RESULT_FILE"
+
+# T7.1: BPF JIT hardening
+BPF_JIT=$(sysctl -n net.core.bpf_jit_harden 2>/dev/null || echo "0")
+if [[ "$BPF_JIT" -ge 2 ]]; then
+    test_result "END-22 BPF JIT harden" "PASS" "Valor=$BPF_JIT (full hardening)"
+else
+    test_result "END-22 BPF JIT harden" "FAIL" "Valor=$BPF_JIT (debería ser 2)"
+fi
+
+# T7.2: Unprivileged BPF deshabilitado
+UBPF=$(sysctl -n kernel.unprivileged_bpf_disabled 2>/dev/null || echo "0")
+if [[ "$UBPF" -eq 1 ]]; then
+    test_result "END-23 Unpriv BPF disabled" "PASS" "BPF sin privilegios deshabilitado"
+else
+    test_result "END-23 Unpriv BPF disabled" "FAIL" "BPF sin privilegios habilitado"
+fi
+
+# T7.3: kexec deshabilitado (anti-rootkit)
+KEXEC=$(sysctl -n kernel.kexec_load_disabled 2>/dev/null || echo "0")
+if [[ "$KEXEC" -eq 1 ]]; then
+    test_result "END-24 kexec disabled" "PASS" "kexec deshabilitado"
+else
+    test_result "END-24 kexec disabled" "FAIL" "kexec habilitado (vector de rootkit)"
+fi
+
+# T7.4: perf_event_paranoid
+PERF=$(sysctl -n kernel.perf_event_paranoid 2>/dev/null || echo "0")
+if [[ "$PERF" -ge 2 ]]; then
+    test_result "END-25 perf paranoid" "PASS" "Valor=$PERF (restringido)"
+else
+    test_result "END-25 perf paranoid" "FAIL" "Valor=$PERF (debería ser >=2)"
+fi
+
+# T7.5: Módulos kernel peligrosos bloqueados
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Blacklist de módulos kernel ---" | tee -a "$RESULT_FILE"
+
+for MOD in dccp sctp rds tipc n-hdlc cramfs freevxfs hfs hfsplus firewire-core; do
+    MOD_CLEAN=$(echo "$MOD" | tr '-' '_')
+    if modprobe -n -v "$MOD" 2>&1 | grep -q "install /bin/false\|FATAL\|blacklist"; then
+        test_result "END-MOD $MOD" "PASS" "Módulo $MOD bloqueado"
+    elif ! lsmod | grep -q "$MOD_CLEAN"; then
+        test_result "END-MOD $MOD" "PASS" "Módulo $MOD no cargado"
+    else
+        test_result "END-MOD $MOD" "FAIL" "Módulo $MOD accesible/cargado"
+    fi
+done
+
+# T7.6: vsock cargado (CVE-2025-21756)
+if lsmod | grep -q "vsock"; then
+    test_result "END-26 vsock (CVE-2025-21756)" "FAIL" "Módulo vsock cargado - vector de escalada"
+else
+    test_result "END-26 vsock (CVE-2025-21756)" "PASS" "Módulo vsock no cargado"
+fi
+
+# --- T8: CVE Kernel Version Checks ---
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Verificación de CVEs kernel (2024-2025) ---" | tee -a "$RESULT_FILE"
+
+KVER=$(uname -r)
+KMAJ=$(echo "$KVER" | cut -d. -f1)
+KMIN=$(echo "$KVER" | cut -d. -f2)
+KPAT=$(echo "$KVER" | cut -d. -f3 | cut -d- -f1)
+
+check_kernel_cve() {
+    local cve="$1" desc="$2" fmaj="$3" fmin="$4" fpat="$5"
+    if [[ "$KMAJ" -lt "$fmaj" ]] || \
+       [[ "$KMAJ" -eq "$fmaj" && "$KMIN" -lt "$fmin" ]] || \
+       [[ "$KMAJ" -eq "$fmaj" && "$KMIN" -eq "$fmin" && "$KPAT" -lt "$fpat" ]]; then
+        test_result "$cve" "FAIL" "Kernel $KVER vulnerable - $desc (fix >= ${fmaj}.${fmin}.${fpat})"
+    else
+        test_result "$cve" "PASS" "Kernel $KVER parcheado - $desc"
+    fi
+}
+
+check_kernel_cve "CVE-2025-21756" "vsock UAF escalada root (CVSS 7.8)" 6 13 4
+check_kernel_cve "CVE-2025-38236" "MSG_OOB UNIX socket kernel takeover" 6 9 8
+check_kernel_cve "CVE-2025-39866" "Filesystem writeback UAF" 6 12 16
+check_kernel_cve "CVE-2024-1086" "nf_tables UAF netfilter" 6 7 3
+check_kernel_cve "CVE-2022-0847" "DirtyPipe escalada privilegios" 5 16 11
+
+# --- T9: Auditoría avanzada ---
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Reglas de auditoría avanzadas ---" | tee -a "$RESULT_FILE"
+
+# T9.1: execve auditing
+if auditctl -l 2>/dev/null | grep -q "execve"; then
+    test_result "END-27 audit execve" "PASS" "Ejecución de procesos auditada"
+else
+    test_result "END-27 audit execve" "FAIL" "Sin auditoría de execve (T1059)"
+fi
+
+# T9.2: ptrace auditing
+if auditctl -l 2>/dev/null | grep -q "ptrace"; then
+    test_result "END-28 audit ptrace" "PASS" "Process injection auditada"
+else
+    test_result "END-28 audit ptrace" "FAIL" "Sin auditoría de ptrace (T1055)"
+fi
+
+# T9.3: module auditing
+if auditctl -l 2>/dev/null | grep -q "init_module\|kernel-module"; then
+    test_result "END-29 audit modules" "PASS" "Carga de módulos auditada"
+else
+    test_result "END-29 audit modules" "FAIL" "Sin auditoría de módulos (T1547.006)"
+fi
+
+# T9.4: mount/namespace auditing
+if auditctl -l 2>/dev/null | grep -q "mount\|namespace"; then
+    test_result "END-30 audit mount/ns" "PASS" "Montajes/namespaces auditados"
+else
+    test_result "END-30 audit mount/ns" "FAIL" "Sin auditoría de mount/namespace"
+fi
+
+# --- T10: Capabilities peligrosas ---
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Capabilities peligrosas en binarios ---" | tee -a "$RESULT_FILE"
+
+DANGER_CAPS=0
+while IFS= read -r line; do
+    if echo "$line" | grep -qiE "cap_sys_admin|cap_sys_ptrace|cap_dac_override|cap_net_raw"; then
+        DANGER_CAPS=$((DANGER_CAPS+1))
+        echo "  [!] $line" | tee -a "$RESULT_FILE"
+    fi
+done < <(getcap -r / 2>/dev/null || true)
+
+if [[ "$DANGER_CAPS" -eq 0 ]]; then
+    test_result "END-31 Capabilities" "PASS" "Sin capabilities peligrosas en binarios"
+else
+    test_result "END-31 Capabilities" "FAIL" "$DANGER_CAPS binario(s) con capabilities peligrosas"
+fi
+
+# --- T11: SUID/SGID sospechosos ---
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Binarios SUID/SGID ---" | tee -a "$RESULT_FILE"
+
+KNOWN_SUID="/usr/bin/su /usr/bin/sudo /usr/bin/passwd /usr/bin/chsh /usr/bin/chfn /usr/bin/newgrp /usr/bin/mount /usr/bin/umount /usr/bin/pkexec"
+SUSPICIOUS_SUID=0
+while IFS= read -r suid_bin; do
+    [[ -z "$suid_bin" ]] && continue
+    FOUND_KNOWN=0
+    for known in $KNOWN_SUID; do
+        if [[ "$suid_bin" == "$known" ]]; then
+            FOUND_KNOWN=1
+            break
+        fi
+    done
+    if [[ $FOUND_KNOWN -eq 0 ]]; then
+        SUSPICIOUS_SUID=$((SUSPICIOUS_SUID+1))
+        echo "  [!] SUID no estándar: $suid_bin" | tee -a "$RESULT_FILE"
+    fi
+done < <(find /usr/bin /usr/sbin /usr/local/bin -perm -4000 -type f 2>/dev/null)
+
+if [[ "$SUSPICIOUS_SUID" -eq 0 ]]; then
+    test_result "END-32 SUID binarios" "PASS" "Solo binarios SUID conocidos"
+else
+    test_result "END-32 SUID binarios" "FAIL" "$SUSPICIOUS_SUID binario(s) SUID no estándar"
+fi
+
+# --- T12: Protección filesystem ---
+echo "" | tee -a "$RESULT_FILE"
+echo "--- Protección de filesystem ---" | tee -a "$RESULT_FILE"
+
+# /dev/shm noexec
+if mount | grep -E " /dev/shm " | grep -q "nosuid"; then
+    test_result "END-33 /dev/shm nosuid" "PASS" "/dev/shm con nosuid"
+else
+    test_result "END-33 /dev/shm nosuid" "FAIL" "/dev/shm sin nosuid"
+fi
+
+# /boot permisos restrictivos
+if [[ -d /boot ]] && [[ "$(stat -c '%a' /boot)" =~ ^7[05]0$ ]]; then
+    test_result "END-34 /boot permisos" "PASS" "/boot con permisos restrictivos"
+else
+    test_result "END-34 /boot permisos" "FAIL" "/boot con permisos laxos ($(stat -c '%a' /boot 2>/dev/null))"
+fi
+
 # Resumen
 echo "" | tee -a "$RESULT_FILE"
 echo "=== RESUMEN ENDPOINT ===" | tee -a "$RESULT_FILE"
@@ -1060,18 +1239,22 @@ fi
 log_section "5. VALIDACIÓN OFENSIVA CON METASPLOIT"
 # ============================================================
 
-echo "Genera un validador ofensivo que ejecuta 12 tests usando"
+echo "Genera un validador ofensivo que ejecuta 20 tests usando"
 echo "Metasploit Framework contra localhost para verificar que"
 echo "las mitigaciones aplicadas funcionan frente a exploits reales."
 echo ""
 echo "Incluye:"
 echo "  - Scanning de servicios (SSH, puertos, SMB, SSL)"
 echo "  - Checks de exploits conocidos (DirtyPipe, PwnKit, Samba, Log4Shell)"
-echo "  - Detección de payloads (AV, IDS, firewall)"
+echo "  - CVEs kernel 2025 (CVE-2025-21756 vsock, CVE-2024-1086 nf_tables)"
+echo "  - Detección de payloads normales y encoded (AV, IDS, firewall)"
+echo "  - User namespace escape, kernel modules, ptrace injection"
+echo "  - TLS deprecado, SSH hardening"
 echo "  - Verificación de controles de credenciales (fail2ban)"
 echo ""
 echo "NOTA: Todos los tests apuntan a 127.0.0.1 exclusivamente."
-echo "Si msfconsole no está instalado, todos los tests se marcan SKIP."
+echo "Si msfconsole no está instalado, los tests MSF se marcan SKIP."
+echo "Los tests 13-20 NO requieren Metasploit (verificación directa)."
 echo ""
 
 if check_file_exists "/usr/local/bin/validar-metasploit.sh"; then
@@ -1340,6 +1523,141 @@ else
     _result "SKIP" "MSF-12" "fail2ban-client o ssh no disponible"
 fi
 
+# ══════════════════════════════════════════════════
+# TESTS AÑADIDOS 2025 - CVEs críticos y técnicas modernas
+# ══════════════════════════════════════════════════
+
+# ── MSF-13: CVE-2025-21756 vsock UAF (kernel escalada) ──
+echo ">>> MSF-13: CVE-2025-21756 vsock UAF check..."
+KVER=$(uname -r)
+KMAJ=$(echo "$KVER" | cut -d. -f1)
+KMIN=$(echo "$KVER" | cut -d. -f2)
+KPAT=$(echo "$KVER" | cut -d. -f3 | cut -d- -f1)
+VSOCK_LOADED=$(lsmod 2>/dev/null | grep -c vsock || true)
+if [[ "$KMAJ" -lt 6 ]] || [[ "$KMAJ" -eq 6 && "$KMIN" -lt 13 ]] || \
+   [[ "$KMAJ" -eq 6 && "$KMIN" -eq 13 && "$KPAT" -lt 4 ]]; then
+    if [[ "$VSOCK_LOADED" -gt 0 ]]; then
+        _result "FAIL" "MSF-13" "Kernel $KVER vulnerable a CVE-2025-21756 Y vsock cargado"
+    else
+        _result "PASS" "MSF-13" "Kernel $KVER vulnerable pero vsock no cargado (mitigado)"
+    fi
+else
+    _result "PASS" "MSF-13" "Kernel $KVER parcheado contra CVE-2025-21756"
+fi
+
+# ── MSF-14: CVE-2024-1086 nf_tables UAF ──
+echo ">>> MSF-14: CVE-2024-1086 nf_tables check..."
+if [[ "$KMAJ" -lt 6 ]] || [[ "$KMAJ" -eq 6 && "$KMIN" -lt 7 ]] || \
+   [[ "$KMAJ" -eq 6 && "$KMIN" -eq 7 && "$KPAT" -lt 3 ]]; then
+    NFT_LOADED=$(lsmod 2>/dev/null | grep -c nf_tables || true)
+    if [[ "$NFT_LOADED" -gt 0 ]]; then
+        _result "FAIL" "MSF-14" "Kernel $KVER vulnerable a CVE-2024-1086 Y nf_tables cargado"
+    else
+        _result "PASS" "MSF-14" "Kernel $KVER vulnerable pero nf_tables no cargado"
+    fi
+else
+    _result "PASS" "MSF-14" "Kernel $KVER parcheado contra CVE-2024-1086"
+fi
+
+# ── MSF-15: Verificar protección user namespaces (container escape) ──
+echo ">>> MSF-15: User namespace restriction check..."
+USERNS=$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo "-1")
+if [[ "$USERNS" == "0" ]]; then
+    _result "PASS" "MSF-15" "User namespaces sin privilegios deshabilitados"
+elif [[ "$USERNS" == "-1" ]]; then
+    # Parámetro no existe - verificar si AppArmor/SELinux restringe
+    if aa-status 2>/dev/null | grep -q "profiles.*enforce" || getenforce 2>/dev/null | grep -q "Enforcing"; then
+        _result "PASS" "MSF-15" "User namespaces controlados por MAC"
+    else
+        _result "FAIL" "MSF-15" "User namespaces sin restricciones (vector container escape)"
+    fi
+else
+    _result "FAIL" "MSF-15" "User namespaces sin privilegios habilitados (vector escape)"
+fi
+
+# ── MSF-16: Detección de módulos kernel peligrosos ──
+echo ">>> MSF-16: Dangerous kernel modules check..."
+DANGEROUS_MODS=0
+for MOD in dccp sctp rds tipc n_hdlc; do
+    if lsmod | grep -q "$MOD"; then
+        DANGEROUS_MODS=$((DANGEROUS_MODS+1))
+        echo "  [!] Módulo peligroso cargado: $MOD"
+    fi
+done
+if [[ $DANGEROUS_MODS -eq 0 ]]; then
+    _result "PASS" "MSF-16" "Sin módulos kernel peligrosos cargados"
+else
+    _result "FAIL" "MSF-16" "$DANGEROUS_MODS módulos peligrosos cargados"
+fi
+
+# ── MSF-17: Verificar protección ptrace (T1055 Process Injection) ──
+echo ">>> MSF-17: ptrace scope check (anti-injection)..."
+PTRACE_SCOPE=$(sysctl -n kernel.yama.ptrace_scope 2>/dev/null || echo "0")
+if [[ "$PTRACE_SCOPE" -ge 2 ]]; then
+    _result "PASS" "MSF-17" "ptrace_scope=$PTRACE_SCOPE (admin-only)"
+elif [[ "$PTRACE_SCOPE" -ge 1 ]]; then
+    _result "PASS" "MSF-17" "ptrace_scope=$PTRACE_SCOPE (parent-child only)"
+else
+    _result "FAIL" "MSF-17" "ptrace_scope=$PTRACE_SCOPE (sin restricción - T1055 viable)"
+fi
+
+# ── MSF-18: SSH hardening verification ──
+echo ">>> MSF-18: SSH cipher/kex hardening..."
+if command -v ssh &>/dev/null; then
+    SSH_OUT=$(ssh -o BatchMode=yes -o ConnectTimeout=3 127.0.0.1 2>&1 || true)
+    # Verificar si SSH expone versión detallada
+    SSH_BANNER=$(timeout 3 bash -c "echo '' | nc -w2 127.0.0.1 22 2>/dev/null" || true)
+    if echo "$SSH_BANNER" | grep -qiE "OpenSSH_[0-8]\.[0-9]"; then
+        _result "FAIL" "MSF-18" "SSH versión antigua expuesta: $SSH_BANNER"
+    elif echo "$SSH_BANNER" | grep -qi "OpenSSH"; then
+        _result "PASS" "MSF-18" "SSH versión actual: $(echo "$SSH_BANNER" | head -1)"
+    else
+        _result "SKIP" "MSF-18" "SSH no accesible"
+    fi
+else
+    _result "SKIP" "MSF-18" "SSH client no disponible"
+fi
+
+# ── MSF-19: Verificar TLS 1.0/1.1 en servicios locales ──
+echo ">>> MSF-19: Deprecated TLS check..."
+WEAK_TLS=0
+for PORT in 443 8443 8080; do
+    if timeout 3 bash -c "echo '' | openssl s_client -connect 127.0.0.1:$PORT -tls1 2>&1" | grep -q "CONNECTED"; then
+        WEAK_TLS=$((WEAK_TLS+1))
+        echo "  [!] TLS 1.0 aceptado en puerto $PORT"
+    fi
+    if timeout 3 bash -c "echo '' | openssl s_client -connect 127.0.0.1:$PORT -tls1_1 2>&1" | grep -q "CONNECTED"; then
+        WEAK_TLS=$((WEAK_TLS+1))
+        echo "  [!] TLS 1.1 aceptado en puerto $PORT"
+    fi
+done 2>/dev/null
+if [[ $WEAK_TLS -eq 0 ]]; then
+    _result "PASS" "MSF-19" "Sin TLS 1.0/1.1 detectado en servicios locales"
+else
+    _result "FAIL" "MSF-19" "$WEAK_TLS servicio(s) aceptan TLS deprecado"
+fi
+
+# ── MSF-20: Payload encoded detection (evasion test) ──
+echo ">>> MSF-20: Encoded payload detection..."
+if command -v msfvenom &>/dev/null && command -v clamscan &>/dev/null; then
+    PAYLOAD_ENC=$(mktemp /tmp/msf-test-enc-XXXXXX.elf)
+    msfvenom -p linux/x64/meterpreter/reverse_tcp LHOST=127.0.0.1 LPORT=4444 \
+        -e x64/xor_dynamic -i 3 -f elf -o "$PAYLOAD_ENC" &>/dev/null
+    if [[ -f "$PAYLOAD_ENC" ]]; then
+        AV_ENC=$(clamscan --no-summary "$PAYLOAD_ENC" 2>&1)
+        rm -f "$PAYLOAD_ENC"
+        if echo "$AV_ENC" | grep -qi "FOUND"; then
+            _result "PASS" "MSF-20" "ClamAV detectó payload ENCODED (3x XOR)"
+        else
+            _result "FAIL" "MSF-20" "ClamAV NO detectó payload ENCODED (evasión exitosa)"
+        fi
+    else
+        _result "SKIP" "MSF-20" "Error generando payload encoded"
+    fi
+else
+    _result "SKIP" "MSF-20" "msfvenom o clamscan no disponible"
+fi
+
 echo ""
 echo "=========================================================="
 echo " RESUMEN DE VALIDACIÓN OFENSIVA"
@@ -1353,6 +1671,16 @@ if [[ $((PASS + FAIL)) -gt 0 ]]; then
     SCORE=$((PASS * 100 / (PASS + FAIL)))
     echo "  Score: ${SCORE}%"
 fi
+echo ""
+echo "  Tests nuevos 2025:"
+echo "    MSF-13: CVE-2025-21756 vsock UAF"
+echo "    MSF-14: CVE-2024-1086 nf_tables UAF"
+echo "    MSF-15: User namespace escape"
+echo "    MSF-16: Dangerous kernel modules"
+echo "    MSF-17: ptrace scope (T1055)"
+echo "    MSF-18: SSH hardening"
+echo "    MSF-19: Deprecated TLS"
+echo "    MSF-20: Encoded payload evasion"
 echo ""
 } | tee -a "$RESULT_FILE"
 

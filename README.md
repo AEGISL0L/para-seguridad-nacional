@@ -31,13 +31,13 @@ Suite completa de hardening y securizacion para Linux, con 78 modulos interactiv
 - **IoT**: MQTT hardening, device inventory, firmware integrity, segmentacion
 - **DNS avanzado**: DNSSEC, DoT/DoH, RPZ sinkhole, tunneling detection
 - **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias (18 checks: ARP, DHCP, DNS tunneling, Spotify Connect, Google Cast, SSDP/UPnP, SNMP, MAC randomization), correlacion IDS
-- **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift, deteccion de APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN
+- **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift, deteccion de APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN, protocolos modernos (MQTT, Modbus/ICS, CoAP, AMQP, Kubernetes API), CVE cross-reference de versiones de servicios
 - **Runtime kernel**: LKRG, kernel lockdown, eBPF hardening, Falco, module signing, CPU mitigations
 - **Memoria y procesos**: ASLR, PIE enforcement, W^X, seccomp-BPF, cgroups v2, ptrace, coredumps
 - **YARA + Sigma**: reglas de deteccion de malware y correlacion de eventos de evasion
 - **Post-quantum crypto**: evaluacion de preparacion ML-KEM/ML-DSA, Certificate Transparency
 - **EDR con osquery**: packs de seguridad, deteccion de amenazas, Wazuh, FleetDM, baseline/drift, alertas syslog
-- **Gestion de vulnerabilidades**: Trivy, grype, OpenSCAP, priorizacion CVSS+EPSS+KEV, reporting HTML, drift, madurez
+- **Gestion de vulnerabilidades**: Trivy, grype, OpenSCAP, priorizacion CVSS+EPSS+KEV+Reachability, reporting HTML, drift, madurez, deteccion directa de CVEs kernel (2024-2026), verificacion de integridad supply chain
 
 ---
 
@@ -466,7 +466,7 @@ Modulos fundamentales de securizacion del sistema.
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
-| 1 | **Hardening base** | `hardening-opensuse.sh` | 13 secciones: hardening de kernel (sysctl), eliminacion de FTP, servicios innecesarios, firewall, SSH hardening, politicas de contrasenas, permisos de archivos criticos, fail2ban, actualizaciones automaticas, auditd, MFA para SSH, ClamAV antimalware, OpenSCAP |
+| 1 | **Hardening base** | `hardening-opensuse.sh` | 16 secciones: hardening de kernel (sysctl con protecciones memoria 2025: dmesg_restrict, ptrace_scope=2, kptr_restrict=2, perf_event_paranoid=3, unprivileged_userns_clone=0), blacklist de modulos kernel peligrosos (DCCP, SCTP, RDS, TIPC, Firewire), hardening de filesystem (noexec /tmp /dev/shm /var/tmp), eliminacion de FTP, servicios innecesarios, firewall, SSH hardening 2025 (MaxStartups, LogLevel VERBOSE, curve25519-only, Compression no), politicas de contrasenas, permisos de archivos criticos, fail2ban, actualizaciones automaticas, auditd con 50+ reglas MITRE (execve, ptrace, modulos, namespaces, red, persistencia), MFA para SSH, ClamAV antimalware, OpenSCAP, verificacion de CVEs kernel criticos (CVE-2025-21756, CVE-2025-38236, CVE-2025-39866, CVE-2024-1086, CVE-2022-0847), banner legal |
 | 2 | **Hardening seguro** | `hardening-seguro.sh` | Seguridad de archivos, procesos, AIDE (integridad), claves SSH |
 | 3 | **Hardening final** | `hardening-final.sh` | Consolidacion de auditd, sysctl avanzado, reglas de firewall, actualizaciones |
 | 4 | **Hardening externo** | `hardening-externo.sh` | Banners de seguridad, honeypot, DNS seguro, plantilla VPN |
@@ -522,7 +522,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 31 | **Reportes de seguridad** | `reportar-seguridad.sh` | Reporte de cobertura MITRE ATT&CK, exportacion ATT&CK Navigator JSON layer, reporte de cumplimiento por categoria, inventario de activos de seguridad, resumen ejecutivo con score de postura |
 | 32 | **Caza de amenazas** | `cazar-amenazas.sh` | UEBA (baseline de usuarios + deteccion de anomalias), 5 playbooks de hunting (persistencia oculta, LOLBins, lateral silencioso, exfil lenta, C2 encubierto), deteccion persistencia avanzada T1098 (timer 15min), busqueda retrospectiva en logs, anomalias de red (beaconing, asimetrico, C2), hunting /proc + eBPF (deleted binaries, mount namespaces, capabilities) |
 | 33 | **Automatizacion de respuesta** | `automatizar-respuesta.sh` | SOAR ligero: motor de respuesta automatica (6 tipos de eventos), bloqueo IP/cuenta, preservacion de evidencia, gestion de bloqueos (listar/whitelist/limpiar), notificaciones por severidad, reglas configurables en `/etc/security/soar-rules.conf` |
-| 34 | **Validacion de controles** | `validar-controles.sh` | Purple team: validador de autenticacion (15 tests), red (15 tests), endpoint (21 tests), simulador seguro de 12 tecnicas ATT&CK, reporte consolidado con scoring global (60% controles + 40% deteccion), validacion semanal automatica |
+| 34 | **Validacion de controles** | `validar-controles.sh` | Purple team: validador de autenticacion (15 tests), red (15 tests), endpoint (34 tests incluyendo: BPF/kexec/perf, blacklist 10 modulos kernel, vsock CVE-2025-21756, 5 CVE kernel version checks, audit execve/ptrace/modules/mount, capabilities peligrosas, SUID no estandar), simulador seguro de 12 tecnicas ATT&CK, 20 tests Metasploit (8 nuevos: CVE-2025-21756 vsock, CVE-2024-1086 nf_tables, user namespace escape, kernel modules, ptrace T1055, SSH hardening, TLS deprecado, payload encoded evasion), reporte consolidado con scoring global, validacion semanal automatica |
 
 ### Categoria 5: Inteligencia (3 modulos)
 
@@ -585,7 +585,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | 65 | **Auditoria infra red** | `auditoria-red-infraestructura.sh` | nmap (8 fases), TLS/SSL, SNMP, inventario servicios, baseline, drift, reportes, deteccion de APIs IoT expuestas (Cast, Roku ECP, UPnP, IPP, router panel), deteccion EOL 12+ categorias (Windows XP-8, macOS, Android, Linux kernel, FreeBSD, routers, NAS, camaras IP, impresoras, Smart TV, IoT modules), generacion automatica de script de aislamiento LAN triple (MAC+IP+subnet), auditoria sysctl ARP/IPv6 |
 | 68 | **Respuesta a incidentes** | `respuesta-incidentes.sh` | Recoleccion forense, playbooks contencion MITRE, timeline, aislamiento de red, recuperacion, cadena de custodia digital, extraccion de IOCs, comunicacion/escalacion, hunting de IOCs en flota, metricas IR (MTTD/MTTR/MTTC) |
 | 69 | **EDR con Osquery** | `edr-osquery.sh` | Osquery multi-distro, packs de seguridad (10 queries), deteccion de amenazas (10 queries), guia Wazuh, decorators custom, alertas syslog/JSON, baseline y drift, FleetDM prep, queries diferenciales, auditoria EDR |
-| 70 | **Gestion de vulnerabilidades** | `gestion-vulnerabilidades.sh` | Trivy, grype, OpenSCAP, escaneo sistema/contenedores, priorizacion CVSS+EPSS+KEV, analisis dependencias, reporting HTML/JSON, verificacion parches, escaneo programado semanal, auditoria madurez (L1-L5) |
+| 70 | **Gestion de vulnerabilidades** | `gestion-vulnerabilidades.sh` | Trivy, grype, OpenSCAP, escaneo sistema/contenedores, priorizacion CVSS+EPSS+KEV+Reachability (formula mejorada 4 factores), analisis dependencias, reporting HTML/JSON, verificacion parches, escaneo programado semanal, auditoria madurez (L1-L5), deteccion directa de 9 CVEs kernel criticos (2024-2026) con opcion --fix, verificacion supply chain (integridad paquetes, firmas GPG, SUID no estandar), output JSON |
 | 74 | **Acceso privilegiado** | `acceso-privilegiado.sh` | Inventario privilegiado, grabacion sesiones, sudo granular, restriccion su, JIT access, alertas, capabilities, credenciales, breakglass |
 | 75 | **Caza de APTs** | `caza-apt-hunting.sh` | YARA rules engine, filesystem scan, memory hunting, network hunting, behavioral baseline, persistence detection, IOC sweep, threat intel, hunting playbooks |
 | 76 | **Inteligencia de red** | `inteligencia-red-avanzada.sh` | JA3/JA4 TLS fingerprinting (abuse.ch), deteccion de beaconing C2 (jitter ratio), passive DNS collector (DGA, NXD), anomalias de protocolo, analisis de trafico cifrado (ETA), monitor de rutas BGP (RIPE RIS), colector NetFlow/ss sampling (baseline 3-sigma), deteccion de exfiltracion (large transfers, DNS exfil, slow exfil), forense de red (pcap + cadena custodia SHA-256), auditoria integral |
@@ -1141,6 +1141,7 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `auditoria-red-programada.sh` | Orquestador de auditorias periodicas (diaria/semanal/mensual/trimestral/completa) |
 | `auditoria-red-reporte-global.sh` | Reporte consolidado con puntuacion 0-100, grado A-D, exportacion JSON para SIEM |
 | `auditoria-red-limpieza.sh` | Limpieza de reportes y scans antiguos segun politica de retencion |
+| `auditoria-red-protocolos-modernos.sh` | Auditoria de protocolos IoT/ICS (MQTT auth+TLS, Modbus TCP, CoAP DTLS, AMQP management UI, Kubernetes API/etcd/kubelet), CVE cross-reference de versiones (OpenSSH regreSSHion, nginx, Apache, MariaDB, PostgreSQL, Redis, curl, Exim) |
 
 ### EDR con Osquery
 
@@ -1160,12 +1161,13 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `securizar-vuln-system.sh` | Escaneo de vulnerabilidades del sistema (Trivy/grype/fallback) |
 | `securizar-vuln-containers.sh` | Escaneo de contenedores Docker/Podman con threshold policy |
 | `securizar-vuln-openscap.sh` | Evaluacion OpenSCAP con auto-deteccion de perfil SSG |
-| `securizar-vuln-prioritize.sh` | Priorizacion CVSS+EPSS+KEV (risk score combinado) |
+| `securizar-vuln-prioritize.sh` | Priorizacion CVSS+EPSS+KEV+Reachability (risk score 4 factores) |
 | `securizar-vuln-deps.sh` | Analisis de dependencias (SUID binaries, librerias criticas) |
 | `securizar-vuln-report.sh` | Reporting ejecutivo HTML/JSON/texto con dashboard |
 | `securizar-vuln-patch-verify.sh` | Verificacion pre/post-patch con diff y rollback |
 | `securizar-vuln-scheduled.sh` | Escaneo programado semanal con drift detection (timer systemd) |
 | `auditoria-vuln-management.sh` | Auditoria de madurez L1-L5 con scoring (cron semanal) |
+| `securizar-vuln-kernel.sh` | Deteccion directa de 9 CVEs kernel criticos (2024-2026: CVE-2025-21756 vsock UAF, CVE-2025-38236 MSG_OOB, CVE-2025-39866 writeback UAF, CVE-2024-1086 nf_tables, CVE-2022-0847 DirtyPipe, container escapes), modulos peligrosos cargados con --fix, verificacion supply chain (integridad paquetes, GPG, SUID), output JSON |
 
 ---
 
