@@ -99,7 +99,8 @@ _isp_verificacion_exhaustiva() {
     echo -e "    ${_r} Servicio kill switch habilitado"
 
     _r="!!"
-    if ip link show 2>/dev/null | grep -qE '(wg0|tun0|proton0|nordlynx|CloudflareWARP)'; then
+    if ip link show 2>/dev/null | grep -qE '(wg[0-9]|tun[0-9]|tap[0-9]|proton[0-9]|mullvad|nordlynx|CloudflareWARP)' || \
+       { command -v wg &>/dev/null && wg show interfaces 2>/dev/null | grep -q .; }; then
         _r="OK"; ((ok++)) || true
     fi
     echo -e "    ${_r} Interfaz VPN activa"
@@ -380,8 +381,61 @@ elif ask "¿Configurar VPN Kill Switch?"; then
     cat > "${ISP_CONF_DIR}/vpn-killswitch.sh" << 'KILLSWITCH_ON'
 #!/bin/bash
 # VPN Kill Switch - Activar
-# Bloquea todo tráfico que no pase por VPN (wg0/tun0/proton0)
+# Bloquea todo tráfico que no pase por VPN
+# Auto-detecta endpoints VPN para permitir reconexión
 set -euo pipefail
+
+# ── Debug logging ──
+_KS_LOG="/var/log/securizar/debug.log"
+mkdir -p /var/log/securizar 2>/dev/null || true
+_dbg() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] killswitch-on: $*" >> "$_KS_LOG" 2>/dev/null || true; }
+_dbg "=== ACTIVACION kill switch ==="
+_dbg "PID=$$ UID=$(id -u) invocado_por=$(ps -o comm= $PPID 2>/dev/null || echo desconocido)"
+
+# ── Detectar endpoints VPN para permitir reconexión ──
+_vpn_endpoints=()
+# WireGuard: endpoints desde interfaces activas
+if command -v wg &>/dev/null; then
+    while IFS= read -r _ep; do
+        [[ -n "$_ep" ]] && _vpn_endpoints+=("$_ep")
+    done < <(wg show all endpoints 2>/dev/null | awk '{print $2}' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+fi
+# WireGuard: config files
+for _wgcf in /etc/wireguard/*.conf; do
+    [[ -f "$_wgcf" ]] || continue
+    while IFS= read -r _ep; do
+        [[ -n "$_ep" ]] && _vpn_endpoints+=("$_ep")
+    done < <(grep -oP 'Endpoint\s*=\s*\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$_wgcf" 2>/dev/null || true)
+done
+# OpenVPN: config files
+for _ovcf in /etc/openvpn/*.conf /etc/openvpn/client/*.conf /etc/openvpn/*.ovpn; do
+    [[ -f "$_ovcf" ]] || continue
+    while IFS= read -r _ep; do
+        [[ -n "$_ep" ]] && _vpn_endpoints+=("$_ep")
+    done < <(grep -oP '^remote\s+\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$_ovcf" 2>/dev/null || true)
+done
+# ProtonVPN configs
+for _pvcf in /etc/protonvpn/*.conf /usr/share/protonvpn/wireguard/*.conf; do
+    [[ -f "$_pvcf" ]] || continue
+    while IFS= read -r _ep; do
+        [[ -n "$_ep" ]] && _vpn_endpoints+=("$_ep")
+    done < <(grep -oP 'Endpoint\s*=\s*\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$_pvcf" 2>/dev/null || true)
+done
+# Endpoints manuales
+if [[ -f /etc/securizar/vpn-endpoints.conf ]]; then
+    while IFS= read -r _ep; do
+        _ep="${_ep%%#*}"; _ep="${_ep// /}"
+        [[ -n "$_ep" ]] && _vpn_endpoints+=("$_ep")
+    done < /etc/securizar/vpn-endpoints.conf
+fi
+# Deduplicar
+if [[ ${#_vpn_endpoints[@]} -gt 0 ]]; then
+    readarray -t _vpn_endpoints < <(printf '%s\n' "${_vpn_endpoints[@]}" | sort -u)
+fi
+_dbg "Endpoints detectados: ${#_vpn_endpoints[@]} → ${_vpn_endpoints[*]:-ninguno}"
+_dbg "Fuentes: wg_activo=$(command -v wg &>/dev/null && wg show interfaces 2>/dev/null | wc -w || echo 0) wg_conf=$(ls /etc/wireguard/*.conf 2>/dev/null | wc -l) ovpn_conf=$(ls /etc/openvpn/*.conf /etc/openvpn/client/*.conf 2>/dev/null | wc -l) pvpn_conf=$(ls /etc/protonvpn/*.conf /usr/share/protonvpn/wireguard/*.conf 2>/dev/null | wc -l) manual=$(test -f /etc/securizar/vpn-endpoints.conf && grep -cv '^#\|^$' /etc/securizar/vpn-endpoints.conf 2>/dev/null || echo 0)"
+_dbg "Backends: nft=$(command -v nft &>/dev/null && echo si || echo no) iptables=$(command -v iptables &>/dev/null && echo si || echo no) firewalld=$(command -v firewall-cmd &>/dev/null && echo si || echo no)"
+_dbg "Interfaces VPN actuales: $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E 'wg|tun|tap|proton|mullvad|nordlynx|WARP' | tr '\n' ' ')"
 
 if command -v nft &>/dev/null; then
     # ── nftables (openSUSE, sistemas modernos) ──
@@ -391,30 +445,35 @@ if command -v nft &>/dev/null; then
 
     # Permitir loopback
     nft add rule inet securizar_ks output oifname "lo" accept
+    # Permitir conexiones establecidas (primero para rendimiento)
+    nft add rule inet securizar_ks output ct state established,related accept
     # Permitir LAN (RFC1918)
     nft add rule inet securizar_ks output ip daddr 10.0.0.0/8 accept
     nft add rule inet securizar_ks output ip daddr 172.16.0.0/12 accept
     nft add rule inet securizar_ks output ip daddr 192.168.0.0/16 accept
     # Permitir DHCP
     nft add rule inet securizar_ks output udp dport 67-68 accept
-    # Permitir DNS local (stubby DoT)
+    # Permitir DNS cifrado DoT (puerto 853)
     nft add rule inet securizar_ks output tcp dport 853 accept
     # Permitir DoH a resolvers DNS conocidos (puerto 443)
     nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 } tcp dport 443 accept
-    # Permitir interfaces VPN
-    nft add rule inet securizar_ks output oifname "wg0" accept
-    nft add rule inet securizar_ks output oifname "tun0" accept
-    nft add rule inet securizar_ks output oifname "tun*" accept
-    # Permitir interfaces WireGuard (ProtonVPN, Mullvad, etc.)
-    nft add rule inet securizar_ks output oifname "proton*" accept
-    # Permitir Cloudflare WARP
+    # Permitir endpoints VPN (permite reconexión si VPN cae)
+    for _ep in "${_vpn_endpoints[@]}"; do
+        [[ -n "$_ep" ]] && nft add rule inet securizar_ks output ip daddr "$_ep" accept 2>/dev/null || true
+    done
+    # Permitir Cloudflare WARP (UDP 2408 a edge)
+    nft add rule inet securizar_ks output ip daddr 162.159.192.0/24 udp dport 2408 accept 2>/dev/null || true
+    nft add rule inet securizar_ks output ip daddr 162.159.193.0/24 udp dport 2408 accept 2>/dev/null || true
+    # Permitir interfaces VPN (todas las variantes conocidas)
+    for _vif in wg tun tap proton mullvad nordlynx; do
+        nft add rule inet securizar_ks output oifname "${_vif}*" accept 2>/dev/null || true
+    done
     nft add rule inet securizar_ks output oifname "CloudflareWARP" accept
-    # Permitir conexiones establecidas
-    nft add rule inet securizar_ks output ct state established,related accept
     # DROP todo lo demás
     nft add rule inet securizar_ks output drop
 
-    echo "[+] VPN Kill Switch ACTIVADO via nftables"
+    _dbg "nftables: tabla securizar_ks creada, $(nft list chain inet securizar_ks output 2>/dev/null | grep -c 'accept\|drop') reglas"
+    echo "[+] VPN Kill Switch ACTIVADO via nftables (${#_vpn_endpoints[@]} endpoints VPN permitidos)"
 
 elif command -v iptables &>/dev/null; then
     # ── iptables (sistemas legacy) ──
@@ -424,6 +483,7 @@ elif command -v iptables &>/dev/null; then
     iptables -X "$CHAIN" 2>/dev/null || true
     iptables -N "$CHAIN"
     iptables -A "$CHAIN" -o lo -j ACCEPT
+    iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A "$CHAIN" -d 10.0.0.0/8 -j ACCEPT
     iptables -A "$CHAIN" -d 172.16.0.0/12 -j ACCEPT
     iptables -A "$CHAIN" -d 192.168.0.0/16 -j ACCEPT
@@ -433,32 +493,66 @@ elif command -v iptables &>/dev/null; then
     for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
         iptables -A "$CHAIN" -d "$_doh_ip" -p tcp --dport 443 -j ACCEPT
     done
-    iptables -A "$CHAIN" -o wg0 -j ACCEPT
-    iptables -A "$CHAIN" -o tun0 -j ACCEPT
-    iptables -A "$CHAIN" -o tun+ -j ACCEPT
-    # WireGuard (ProtonVPN, Mullvad, etc.)
-    iptables -A "$CHAIN" -o proton+ -j ACCEPT
-    # Cloudflare WARP
+    # Permitir endpoints VPN (reconexión)
+    for _ep in "${_vpn_endpoints[@]}"; do
+        [[ -n "$_ep" ]] && iptables -A "$CHAIN" -d "$_ep" -j ACCEPT 2>/dev/null || true
+    done
+    # Permitir WARP endpoints (UDP 2408)
+    iptables -A "$CHAIN" -d 162.159.192.0/24 -p udp --dport 2408 -j ACCEPT 2>/dev/null || true
+    iptables -A "$CHAIN" -d 162.159.193.0/24 -p udp --dport 2408 -j ACCEPT 2>/dev/null || true
+    # Permitir interfaces VPN
+    for _vif in wg tun tap proton mullvad nordlynx; do
+        iptables -A "$CHAIN" -o "${_vif}+" -j ACCEPT 2>/dev/null || true
+    done
     iptables -A "$CHAIN" -o CloudflareWARP -j ACCEPT
-    iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A "$CHAIN" -j DROP
     iptables -I OUTPUT -j "$CHAIN"
-    echo "[+] VPN Kill Switch ACTIVADO via iptables"
+    _dbg "iptables: cadena SECURIZAR_KS creada, $(iptables -L SECURIZAR_KS 2>/dev/null | grep -c 'ACCEPT\|DROP') reglas"
+    echo "[+] VPN Kill Switch ACTIVADO via iptables (${#_vpn_endpoints[@]} endpoints VPN permitidos)"
 
 elif command -v firewall-cmd &>/dev/null; then
     # ── firewalld ──
-    firewall-cmd --set-default-zone=drop 2>/dev/null || true
-    firewall-cmd --add-rich-rule='rule family="ipv4" destination address="10.0.0.0/8" accept' --permanent 2>/dev/null || true
-    firewall-cmd --add-rich-rule='rule family="ipv4" destination address="172.16.0.0/12" accept' --permanent 2>/dev/null || true
-    firewall-cmd --add-rich-rule='rule family="ipv4" destination address="192.168.0.0/16" accept' --permanent 2>/dev/null || true
-    firewall-cmd --add-rich-rule='rule family="ipv4" port port="853" protocol="tcp" accept' --permanent 2>/dev/null || true
-    # Permitir DoH a resolvers DNS conocidos (puerto 443)
-    for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
-        firewall-cmd --add-rich-rule="rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept" --permanent 2>/dev/null || true
+    # Añadir reglas a zona drop ANTES de cambiarla a default (previene lockdown)
+    _fw_ok=0
+    _fw_total=0
+    for _rule in \
+        'rule family="ipv4" destination address="10.0.0.0/8" accept' \
+        'rule family="ipv4" destination address="172.16.0.0/12" accept' \
+        'rule family="ipv4" destination address="192.168.0.0/16" accept' \
+        'rule family="ipv4" port port="853" protocol="tcp" accept' \
+        'rule family="ipv4" port port="67-68" protocol="udp" accept'; do
+        ((_fw_total++)) || true
+        if firewall-cmd --zone=drop --add-rich-rule="$_rule" --permanent 2>/dev/null; then
+            ((_fw_ok++)) || true
+        fi
     done
+    for _doh_ip in 1.1.1.1 1.0.0.1 9.9.9.9 149.112.112.112 8.8.8.8 8.8.4.4; do
+        ((_fw_total++)) || true
+        if firewall-cmd --zone=drop --add-rich-rule="rule family=\"ipv4\" destination address=\"${_doh_ip}\" port port=\"443\" protocol=\"tcp\" accept" --permanent 2>/dev/null; then
+            ((_fw_ok++)) || true
+        fi
+    done
+    # Endpoints VPN (reconexión)
+    for _ep in "${_vpn_endpoints[@]}"; do
+        [[ -n "$_ep" ]] || continue
+        firewall-cmd --zone=drop --add-rich-rule="rule family=\"ipv4\" destination address=\"${_ep}\" accept" --permanent 2>/dev/null || true
+    done
+    # WARP endpoints
+    firewall-cmd --zone=drop --add-rich-rule='rule family="ipv4" destination address="162.159.192.0/24" port port="2408" protocol="udp" accept' --permanent 2>/dev/null || true
+    firewall-cmd --zone=drop --add-rich-rule='rule family="ipv4" destination address="162.159.193.0/24" port port="2408" protocol="udp" accept' --permanent 2>/dev/null || true
+    # Verificar reglas críticas ANTES de cambiar zona
+    if [[ $_fw_ok -lt 3 ]]; then
+        _dbg "ABORT firewalld: solo $_fw_ok/$_fw_total reglas criticas aplicadas en zona drop"
+        echo "[!] ABORTANDO: solo $_fw_ok/$_fw_total reglas aplicadas en zona drop"
+        echo "[!] Zona default NO cambiada (sigue: $(firewall-cmd --get-default-zone 2>/dev/null))"
+        exit 1
+    fi
     firewall-cmd --reload 2>/dev/null || true
-    echo "[+] VPN Kill Switch ACTIVADO via firewalld (zona drop)"
+    firewall-cmd --set-default-zone=drop 2>/dev/null || true
+    _dbg "firewalld: zona default=$(firewall-cmd --get-default-zone 2>/dev/null) reglas=$_fw_ok/$_fw_total endpoints=${#_vpn_endpoints[@]}"
+    echo "[+] VPN Kill Switch ACTIVADO via firewalld (zona drop, $_fw_ok/$_fw_total reglas, ${#_vpn_endpoints[@]} endpoints VPN)"
 else
+    _dbg "ERROR: ningun backend de firewall disponible (nft/iptables/firewalld)"
     echo "[!] No se encontró nftables, iptables ni firewalld"
     exit 1
 fi
@@ -472,21 +566,32 @@ KILLSWITCH_ON
 # VPN Kill Switch - Desactivar
 set -euo pipefail
 
+_KS_LOG="/var/log/securizar/debug.log"
+mkdir -p /var/log/securizar 2>/dev/null || true
+_dbg() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] killswitch-off: $*" >> "$_KS_LOG" 2>/dev/null || true; }
+_dbg "=== DESACTIVACION kill switch ==="
+_dbg "PID=$$ UID=$(id -u) invocado_por=$(ps -o comm= $PPID 2>/dev/null || echo desconocido)"
+
 if command -v nft &>/dev/null; then
     nft delete table inet securizar_ks 2>/dev/null || true
+    _dbg "nftables: tabla securizar_ks eliminada"
     echo "[+] VPN Kill Switch DESACTIVADO (nftables)"
 elif command -v iptables &>/dev/null; then
     CHAIN="SECURIZAR_KS"
     iptables -D OUTPUT -j "$CHAIN" 2>/dev/null || true
     iptables -F "$CHAIN" 2>/dev/null || true
     iptables -X "$CHAIN" 2>/dev/null || true
+    _dbg "iptables: cadena SECURIZAR_KS eliminada"
     echo "[+] VPN Kill Switch DESACTIVADO (iptables)"
 elif command -v firewall-cmd &>/dev/null; then
+    _dbg "firewalld: restaurando zona default a public"
     firewall-cmd --set-default-zone=public 2>/dev/null || true
     firewall-cmd --reload 2>/dev/null || true
+    _dbg "firewalld: zona default=$(firewall-cmd --get-default-zone 2>/dev/null)"
     echo "[+] VPN Kill Switch DESACTIVADO (firewalld → zona public)"
 fi
 
+_dbg "desactivacion completada"
 echo "[+] Tráfico normal restaurado"
 KILLSWITCH_OFF
     chmod 700 "${ISP_CONF_DIR}/vpn-killswitch-off.sh"
@@ -502,6 +607,8 @@ KILLSWITCH_OFF
 IFACE="$1"
 ACTION="$2"
 
+logger -t securizar-nm-ks "dispatch: iface=$IFACE action=$ACTION"
+
 case "$ACTION" in
     vpn-up)
         /etc/securizar/vpn-killswitch.sh 2>/dev/null || true
@@ -510,13 +617,13 @@ case "$ACTION" in
         /etc/securizar/vpn-killswitch-off.sh 2>/dev/null || true
         ;;
     up)
-        # WireGuard (ProtonVPN, Mullvad, etc.)
-        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|CloudflareWARP*)
+        # WireGuard, ProtonVPN, Mullvad, OpenVPN, WARP, etc.
+        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|CloudflareWARP*|tun*|tap*)
             /etc/securizar/vpn-killswitch.sh 2>/dev/null || true
         esac
         ;;
     down)
-        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|CloudflareWARP*)
+        case "$IFACE" in proton*|wg*|mullvad*|nordlynx*|CloudflareWARP*|tun*|tap*)
             /etc/securizar/vpn-killswitch-off.sh 2>/dev/null || true
         esac
         ;;
@@ -527,6 +634,23 @@ NM_HOOK
         log_info "Hook NetworkManager instalado: kill switch automático con VPN"
     else
         log_warn "NetworkManager dispatcher.d no encontrado; hook no instalado"
+    fi
+
+    # ── Crear plantilla de endpoints VPN manuales ──
+    if [[ ! -f "${ISP_CONF_DIR}/vpn-endpoints.conf" ]]; then
+        cat > "${ISP_CONF_DIR}/vpn-endpoints.conf" << 'VPN_EP_CONF'
+# Securizar M38 S1: Endpoints VPN manuales
+# Añade IPs de tus servidores VPN (una por línea)
+# El kill switch permitirá tráfico a estas IPs para reconexión
+# Se auto-detectan endpoints de /etc/wireguard/*.conf y /etc/openvpn/*.conf
+# Usa este archivo solo para endpoints que no se auto-detecten
+#
+# Ejemplos:
+# 185.159.157.1
+# 198.51.100.42
+VPN_EP_CONF
+        chmod 640 "${ISP_CONF_DIR}/vpn-endpoints.conf"
+        log_change "Creado" "${ISP_CONF_DIR}/vpn-endpoints.conf (plantilla endpoints VPN)"
     fi
 
     log_info "VPN Kill Switch configurado"
@@ -546,18 +670,32 @@ if [[ -f "${ISP_CONF_DIR}/vpn-killswitch.sh" ]]; then
     if [[ "$_ks_active" == "true" ]]; then
         log_already "Kill switch activo (reglas firewall presentes)"
     else
-        for _ks_iface in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx CloudflareWARP; do
-            if ip link show "$_ks_iface" &>/dev/null 2>&1; then
-                if ask "VPN $_ks_iface detectada pero kill switch NO activo. ¿Activar ahora?"; then
-                    bash "${ISP_CONF_DIR}/vpn-killswitch.sh" 2>/dev/null && \
-                        log_change "Kill switch" "Activado (VPN $_ks_iface detectada)" || \
-                        log_warn "Kill switch: fallo al activar"
-                else
-                    log_skip "Activación kill switch"
-                fi
-                break
+        _ks_found=false
+        _ks_iface=""
+        for _iname in proton0 proton1 wg0 wg1 tun0 tun1 mullvad-wg nordlynx CloudflareWARP; do
+            if ip link show "$_iname" &>/dev/null 2>&1; then
+                _ks_found=true; _ks_iface="$_iname"; break
             fi
         done
+        # Detección dinámica: WireGuard con nombre no estándar
+        if [[ "$_ks_found" != "true" ]] && command -v wg &>/dev/null; then
+            _ks_iface=$(wg show interfaces 2>/dev/null | awk '{print $1}')
+            [[ -n "$_ks_iface" ]] && _ks_found=true
+        fi
+        # Detección dinámica: interfaces punto-a-punto (usuario decide)
+        if [[ "$_ks_found" != "true" ]]; then
+            _ks_iface=$(ip -o link show 2>/dev/null | grep -i 'POINTOPOINT' | awk -F': ' '{print $2}' | grep -v '^lo$' | head -1)
+            [[ -n "$_ks_iface" ]] && _ks_found=true
+        fi
+        if [[ "$_ks_found" == "true" ]]; then
+            if ask "VPN $_ks_iface detectada pero kill switch NO activo. ¿Activar ahora?"; then
+                bash "${ISP_CONF_DIR}/vpn-killswitch.sh" 2>/dev/null && \
+                    log_change "Kill switch" "Activado (VPN $_ks_iface detectada)" || \
+                    log_warn "Kill switch: fallo al activar"
+            else
+                log_skip "Activación kill switch"
+            fi
+        fi
     fi
 fi
 
@@ -575,7 +713,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStartPre=/bin/bash -c 'for i in proton0 proton1 wg0 tun0 tun1 mullvad-wg nordlynx CloudflareWARP; do ip link show "$i" 2>/dev/null && exit 0; done; exit 1'
+ExecStartPre=/bin/bash -c 'for i in proton0 proton1 wg0 wg1 tun0 tun1 mullvad-wg nordlynx CloudflareWARP; do ip link show "$i" 2>/dev/null && exit 0; done; command -v wg &>/dev/null && wg show interfaces 2>/dev/null | grep -q . && exit 0; exit 1'
 ExecStart=/etc/securizar/vpn-killswitch.sh
 ExecStop=/etc/securizar/vpn-killswitch-off.sh
 ProtectHome=yes
@@ -589,6 +727,114 @@ KS_SVC
         log_change "Creado" "/etc/systemd/system/securizar-vpn-killswitch.service (boot persistence)"
     else
         log_skip "Kill switch persistencia systemd"
+    fi
+fi
+
+# ── S1 post: Watchdog de interfaces VPN (independiente de NetworkManager) ──
+# ProtonVPN CLI, wg-quick, etc. crean interfaces sin pasar por NM.
+# Este watchdog detecta proton0/wg0/tun0 y activa/desactiva el kill switch.
+if [[ -f "${ISP_CONF_DIR}/vpn-killswitch.sh" ]]; then
+    if [[ -f /etc/systemd/system/securizar-vpn-watchdog.service ]]; then
+        log_already "Watchdog VPN (securizar-vpn-watchdog)"
+    elif ask "¿Crear watchdog VPN? (detecta VPN fuera de NetworkManager: ProtonVPN CLI, wg-quick, etc.)"; then
+
+        cat > "${ISP_BIN_DIR}/vpn-watchdog.sh" << 'VPN_WATCHDOG'
+#!/bin/bash
+# Watchdog de interfaces VPN - Securizar M38 S1
+# Detecta interfaces VPN que aparecen/desaparecen sin pasar por NetworkManager
+# Ejecutado cada 10s por securizar-vpn-watchdog.timer
+set -euo pipefail
+
+_WD_LOG="/var/log/securizar/debug.log"
+mkdir -p /var/log/securizar 2>/dev/null || true
+_dbg() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] vpn-watchdog: $*" >> "$_WD_LOG" 2>/dev/null || true; }
+
+STATE_FILE="/run/securizar-vpn-watchdog.state"
+VPN_IFACES="proton0 proton1 wg0 wg1 tun0 tun1 mullvad-wg nordlynx CloudflareWARP"
+
+# Detectar si alguna interfaz VPN existe
+vpn_up=false
+vpn_iface=""
+for iface in $VPN_IFACES; do
+    if ip link show "$iface" &>/dev/null 2>&1; then
+        vpn_up=true
+        vpn_iface="$iface"
+        break
+    fi
+done
+# Deteccion dinamica: interfaces WireGuard con nombre no estandar
+if [[ "$vpn_up" == "false" ]] && command -v wg &>/dev/null; then
+    _wg_iface=$(wg show interfaces 2>/dev/null | awk '{print $1}')
+    if [[ -n "$_wg_iface" ]]; then
+        vpn_up=true
+        vpn_iface="$_wg_iface"
+    fi
+fi
+
+# Leer estado anterior
+prev_state="unknown"
+[[ -f "$STATE_FILE" ]] && prev_state=$(cat "$STATE_FILE" 2>/dev/null || echo "unknown")
+
+_dbg "deteccion: vpn_up=$vpn_up iface=${vpn_iface:-ninguna} prev_state=$prev_state"
+
+if [[ "$vpn_up" == "true" && "$prev_state" != "up" ]]; then
+    # VPN acaba de subir → activar kill switch
+    _dbg "transicion: $prev_state → up (iface=$vpn_iface), activando kill switch"
+    if /etc/securizar/vpn-killswitch.sh 2>/dev/null; then
+        _dbg "kill switch activado OK"
+        logger -t securizar-vpn-watchdog "Kill switch ACTIVADO (interfaz $vpn_iface detectada)"
+    else
+        _dbg "kill switch FALLO al activar (exit=$?)"
+        logger -t securizar-vpn-watchdog "Kill switch: fallo al activar para $vpn_iface"
+    fi
+    echo "up" > "$STATE_FILE"
+elif [[ "$vpn_up" == "false" && "$prev_state" == "up" ]]; then
+    # VPN acaba de caer → desactivar kill switch
+    _dbg "transicion: up → down, desactivando kill switch"
+    if /etc/securizar/vpn-killswitch-off.sh 2>/dev/null; then
+        _dbg "kill switch desactivado OK"
+        logger -t securizar-vpn-watchdog "Kill switch DESACTIVADO (VPN caída)"
+    else
+        _dbg "kill switch FALLO al desactivar (exit=$?)"
+        logger -t securizar-vpn-watchdog "Kill switch: fallo al desactivar"
+    fi
+    echo "down" > "$STATE_FILE"
+fi
+VPN_WATCHDOG
+        chmod 755 "${ISP_BIN_DIR}/vpn-watchdog.sh"
+        log_change "Creado" "${ISP_BIN_DIR}/vpn-watchdog.sh"
+
+        cat > /etc/systemd/system/securizar-vpn-watchdog.service << 'WD_SVC'
+[Unit]
+Description=Securizar - Watchdog VPN (detecta interfaces sin NM)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vpn-watchdog.sh
+ProtectHome=yes
+PrivateTmp=yes
+WD_SVC
+
+        cat > /etc/systemd/system/securizar-vpn-watchdog.timer << 'WD_TIMER'
+[Unit]
+Description=Securizar - Timer watchdog VPN (cada 10s)
+
+[Timer]
+OnBootSec=15
+OnUnitActiveSec=10
+AccuracySec=3
+
+[Install]
+WantedBy=timers.target
+WD_TIMER
+        systemctl daemon-reload
+        systemctl enable securizar-vpn-watchdog.timer 2>/dev/null || true
+        systemctl start securizar-vpn-watchdog.timer 2>/dev/null || true
+        log_change "Creado" "securizar-vpn-watchdog.timer (check cada 10s, detecta VPN sin NM)"
+        log_info "ProtonVPN CLI, wg-quick, Mullvad CLI serán detectados automáticamente"
+    else
+        log_skip "Watchdog VPN"
     fi
 fi
 
@@ -618,16 +864,36 @@ fi
 # ── S1 extra: Deshabilitar IPv6 persistente (anti-leak) ──
 if [[ -f /etc/sysctl.d/99-securizar-ipv6.conf ]]; then
     log_already "IPv6 deshabilitado persistente (99-securizar-ipv6.conf)"
-elif ask "¿Deshabilitar IPv6 persistente? (previene fugas fuera de VPN)"; then
-    cat > /etc/sysctl.d/99-securizar-ipv6.conf << 'IPV6_CONF'
+else
+    # Detectar si la red depende de IPv6 (previene lockdown en redes IPv6-only)
+    _ipv6_safe_to_disable=true
+    _has_ipv4_gw=false
+    if ip -4 route show default 2>/dev/null | grep -q 'default'; then
+        _has_ipv4_gw=true
+    fi
+    if [[ "$_has_ipv4_gw" != "true" ]]; then
+        _ipv6_safe_to_disable=false
+        log_warn "No se detectó gateway IPv4. Tu red podría ser IPv6-only."
+        log_warn "Deshabilitar IPv6 podría causar pérdida total de conectividad."
+    fi
+
+    if [[ "$_ipv6_safe_to_disable" == "true" ]]; then
+        _ipv6_prompt="¿Deshabilitar IPv6 persistente? (previene fugas fuera de VPN)"
+    else
+        _ipv6_prompt="¿Deshabilitar IPv6? (RIESGO: no se detectó IPv4, posible lockdown)"
+    fi
+
+    if ask "$_ipv6_prompt"; then
+        cat > /etc/sysctl.d/99-securizar-ipv6.conf << 'IPV6_CONF'
 # Securizar M38 S1: Deshabilitar IPv6 (prevención de fugas)
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 IPV6_CONF
-    sysctl -p /etc/sysctl.d/99-securizar-ipv6.conf 2>/dev/null || true
-    log_change "Creado" "/etc/sysctl.d/99-securizar-ipv6.conf (IPv6 deshabilitado persistente)"
-else
-    log_skip "IPv6 deshabilitado persistente"
+        sysctl -p /etc/sysctl.d/99-securizar-ipv6.conf 2>/dev/null || true
+        log_change "Creado" "/etc/sysctl.d/99-securizar-ipv6.conf (IPv6 deshabilitado persistente)"
+    else
+        log_skip "IPv6 deshabilitado persistente"
+    fi
 fi
 fi  # S1
 
@@ -692,7 +958,22 @@ elif ask "¿Configurar DNS cifrado (DoT o DoH automático)?"; then
     # ── Configurar unbound para DoT estricto ──
     cp /etc/unbound/unbound.conf /etc/unbound/unbound.conf.bak-securizar 2>/dev/null || true
 
-    cat > /etc/unbound/unbound.conf << 'UNBOUND_CONF'
+    # Auto-detectar ruta del bundle de certificados TLS (varía por distro)
+    _tls_cert_bundle=""
+    for _certpath in /etc/ssl/ca-bundle.pem /etc/ssl/certs/ca-certificates.crt \
+                     /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem \
+                     /usr/share/ca-certificates/mozilla/cacert.pem; do
+        if [[ -f "$_certpath" ]]; then
+            _tls_cert_bundle="$_certpath"
+            break
+        fi
+    done
+    if [[ -z "$_tls_cert_bundle" ]]; then
+        _tls_cert_bundle="/etc/ssl/ca-bundle.pem"
+        log_warn "Bundle de certificados TLS no encontrado, usando default: $_tls_cert_bundle"
+    fi
+
+    cat > /etc/unbound/unbound.conf << UNBOUND_CONF
 # ============================================================
 # Securizar Módulo 38 - DNS-over-TLS con unbound
 # Todas las consultas DNS se cifran por el puerto 853
@@ -741,7 +1022,7 @@ server:
 
     do-ip6: no
 
-    tls-cert-bundle: "/etc/ssl/ca-bundle.pem"
+    tls-cert-bundle: "${_tls_cert_bundle}"
 
     verbosity: 1
     log-queries: no
@@ -776,7 +1057,22 @@ UNBOUND_CONF
 
     systemctl enable unbound 2>/dev/null || true
     systemctl restart unbound 2>/dev/null || true
-    log_change "Servicio" "unbound habilitado e iniciado"
+    # Verificar que unbound arrancó; restaurar backup si falló
+    sleep 2
+    if systemctl is-active unbound &>/dev/null; then
+        log_change "Servicio" "unbound habilitado e iniciado"
+    else
+        log_warn "unbound no arrancó con nueva configuración"
+        if [[ -f /etc/unbound/unbound.conf.bak-securizar ]]; then
+            cp /etc/unbound/unbound.conf.bak-securizar /etc/unbound/unbound.conf
+            systemctl restart unbound 2>/dev/null || true
+            if systemctl is-active unbound &>/dev/null; then
+                log_warn "Restaurada configuración anterior de unbound (funcional)"
+            else
+                log_warn "unbound no arranca ni con configuración anterior"
+            fi
+        fi
+    fi
 
     fi  # cierre del if ! command -v unbound (DoT)
     fi  # cierre del if DNS_MODE == dot
@@ -796,11 +1092,12 @@ UNBOUND_CONF
         DNS_MODE=""
     else
 
-    # Detener systemd-resolved si ocupa :53
+    # Detener systemd-resolved si ocupa :53 (NO deshabilitar aún — fallback seguro)
+    _resolved_was_active=false
     if ss -tlnp 2>/dev/null | grep -q ":53.*systemd-resolve"; then
+        _resolved_was_active=true
         systemctl stop systemd-resolved 2>/dev/null || true
-        systemctl disable systemd-resolved 2>/dev/null || true
-        log_change "systemd-resolved" "Detenido (liberando puerto 53 para dnscrypt-proxy)"
+        log_change "systemd-resolved" "Detenido temporalmente (liberando puerto 53)"
     fi
 
     # Detener unbound si estaba corriendo (cambio de modo)
@@ -893,7 +1190,20 @@ DNSCRYPT_CONF
     # ── Activar servicio ──
     systemctl enable dnscrypt-proxy 2>/dev/null || true
     systemctl restart dnscrypt-proxy 2>/dev/null || true
-    log_change "Servicio" "dnscrypt-proxy habilitado e iniciado (DoH puerto 443)"
+    # Verificar que dnscrypt-proxy escucha antes de deshabilitar systemd-resolved
+    sleep 2
+    if ss -tlnp 2>/dev/null | grep -q ":53.*dnscrypt"; then
+        if [[ "${_resolved_was_active:-false}" == "true" ]]; then
+            systemctl disable systemd-resolved 2>/dev/null || true
+        fi
+        log_change "Servicio" "dnscrypt-proxy verificado en :53 (DoH puerto 443)"
+    else
+        log_warn "dnscrypt-proxy no escucha en :53"
+        if [[ "${_resolved_was_active:-false}" == "true" ]]; then
+            log_warn "Reactivando systemd-resolved como fallback DNS"
+            systemctl start systemd-resolved 2>/dev/null || true
+        fi
+    fi
 
     fi  # cierre del if ! command -v dnscrypt-proxy
     fi  # cierre del if DNS_MODE == doh
@@ -939,9 +1249,13 @@ DNSMASQ_CONF
                 log_change "dnsmasq" "Configurado para reenviar a resolver local"
             fi
 
-            nmcli con down "$active_conn" 2>/dev/null || true
-            sleep 2
-            nmcli con up "$active_conn" 2>/dev/null || true
+            # Aplicar cambios DNS sin desconexión completa (previene lockdown)
+            nmcli general reload conf 2>/dev/null || true
+            sleep 1
+            # Si resolv.conf no apunta a local, reaplicar conexión
+            if ! grep -q '^nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
+                nmcli con up "$active_conn" 2>/dev/null || true
+            fi
             log_change "NetworkManager" "DNS redirigido a 127.0.0.1 (modo ${DNS_MODE})"
             dns_configured=true
         fi
@@ -954,8 +1268,15 @@ DNSMASQ_CONF
 nameserver 127.0.0.1
 options edns0 trust-ad
 RESOLV_CONF
-        chattr +i /etc/resolv.conf 2>/dev/null || true
-        log_change "resolv.conf" "Forzado a usar resolver local, archivo inmutable"
+        # Solo hacer inmutable si el resolver local responde (previene lockdown)
+        sleep 2
+        if nslookup example.com 127.0.0.1 &>/dev/null; then
+            chattr +i /etc/resolv.conf 2>/dev/null || true
+            log_change "resolv.conf" "Forzado a resolver local, inmutable (DNS verificado)"
+        else
+            log_warn "DNS local no responde aún. resolv.conf NO inmutable (se puede corregir)"
+            log_warn "  Cuando funcione, ejecuta: sudo chattr +i /etc/resolv.conf"
+        fi
     fi
 
     # ── Desactivar mDNS y LLMNR ──
@@ -1036,12 +1357,21 @@ RESOLV_CONF
 # Ejecutado cada 5 min por securizar-dns-fallback-monitor.timer
 set -euo pipefail
 
+_DM_LOG="/var/log/securizar/debug.log"
+mkdir -p /var/log/securizar 2>/dev/null || true
+_dbg() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] dns-monitor: $*" >> "$_DM_LOG" 2>/dev/null || true; }
+_dbg "=== Ciclo monitor DNS ==="
+
 CONF="/etc/securizar/dns-mode.conf"
-[[ -f "$CONF" ]] || exit 0
+[[ -f "$CONF" ]] || { _dbg "SKIP: $CONF no existe"; exit 0; }
 source "$CONF"
 
 CURRENT_MODE="${DNS_MODE:-none}"
 LOG_TAG="securizar-dns-monitor"
+_dbg "modo=$CURRENT_MODE"
+_dbg "servicios: unbound=$(systemctl is-active unbound 2>/dev/null) dnscrypt=$(systemctl is-active dnscrypt-proxy 2>/dev/null) resolved=$(systemctl is-active systemd-resolved 2>/dev/null)"
+_dbg "resolv.conf: $(grep '^nameserver' /etc/resolv.conf 2>/dev/null | tr '\n' ' ') inmutable=$([[ -e /etc/resolv.conf ]] && lsattr /etc/resolv.conf 2>/dev/null | grep -q i && echo si || echo no)"
+_dbg "puerto_53: $(ss -tlnp 2>/dev/null | grep ':53 ' | awk '{print $4,$6}' | head -3 | tr '\n' ' ')"
 
 # Test de resolución actual
 dns_works() {
@@ -1060,56 +1390,181 @@ port_853_open() {
 }
 
 switch_to_dot() {
+    _dbg "switch_to_dot: deteniendo dnscrypt-proxy, iniciando unbound"
     logger -t "$LOG_TAG" "Cambiando a DoT (unbound)..."
     systemctl stop dnscrypt-proxy 2>/dev/null || true
     systemctl disable dnscrypt-proxy 2>/dev/null || true
     systemctl enable unbound 2>/dev/null || true
     systemctl start unbound 2>/dev/null || true
     sed -i 's/^DNS_MODE=.*/DNS_MODE=dot/' "$CONF"
+    _dbg "switch_to_dot: unbound=$(systemctl is-active unbound 2>/dev/null) dnscrypt=$(systemctl is-active dnscrypt-proxy 2>/dev/null)"
     logger -t "$LOG_TAG" "Modo cambiado a DoT (puerto 853 accesible)"
 }
 
 switch_to_doh() {
+    _dbg "switch_to_doh: deteniendo unbound, iniciando dnscrypt-proxy"
     logger -t "$LOG_TAG" "Cambiando a DoH (dnscrypt-proxy)..."
     systemctl stop unbound 2>/dev/null || true
     systemctl disable unbound 2>/dev/null || true
     systemctl enable dnscrypt-proxy 2>/dev/null || true
     systemctl start dnscrypt-proxy 2>/dev/null || true
     sed -i 's/^DNS_MODE=.*/DNS_MODE=doh/' "$CONF"
+    _dbg "switch_to_doh: unbound=$(systemctl is-active unbound 2>/dev/null) dnscrypt=$(systemctl is-active dnscrypt-proxy 2>/dev/null)"
     logger -t "$LOG_TAG" "Modo cambiado a DoH (puerto 853 bloqueado)"
 }
 
-# Si WARP activo en modo warp+doh o doh, no interferir
+# Si WARP activo: verificar que DNS funciona a traves de WARP
 if command -v warp-cli &>/dev/null; then
-    if warp-cli status 2>/dev/null | grep -qi 'connected'; then
-        exit 0
+    _warp_status=$(warp-cli status 2>/dev/null || echo "no disponible")
+    _dbg "warp: $_warp_status"
+    if echo "$_warp_status" | grep -qi 'connected'; then
+        if dns_works; then
+            _dbg "warp+dns OK, saliendo"
+            exit 0  # WARP + DNS ok
+        fi
+        # WARP conectado pero DNS falla: reconectar
+        _dbg "warp conectado pero dns_works FALLO, reconectando"
+        logger -t "$LOG_TAG" "WARP conectado pero DNS falla, reconectando..."
+        warp-cli disconnect 2>/dev/null || true
+        sleep 2
+        warp-cli connect 2>/dev/null || true
+        sleep 3
+        if dns_works; then
+            _dbg "dns restaurado tras reconexion WARP"
+            logger -t "$LOG_TAG" "DNS restaurado tras reconexion WARP"
+            exit 0
+        fi
+        _dbg "warp reconexion no restauro DNS, continuando a resolvers locales"
+        logger -t "$LOG_TAG" "WARP no restauro DNS, intentando resolvers locales"
     fi
 fi
 
 # Lógica principal
 if dns_works; then
+    _dbg "dns_works(127.0.0.1): OK, sin accion"
     exit 0  # Todo funciona, no hacer nada
 fi
 
 # DNS no funciona - intentar corregir
+_dbg "dns_works(127.0.0.1): FALLO"
 logger -t "$LOG_TAG" "DNS no responde (modo actual: ${CURRENT_MODE})"
 
 if port_853_open; then
+    _dbg "port_853: ABIERTO"
     if [[ "$CURRENT_MODE" != "dot" ]]; then
+        _dbg "accion: switch $CURRENT_MODE → dot"
         switch_to_dot
     else
         # Ya está en DoT y 853 abierto pero DNS falla — reiniciar unbound
+        _dbg "accion: restart unbound (ya en dot, 853 abierto pero dns falla)"
         systemctl restart unbound 2>/dev/null || true
         logger -t "$LOG_TAG" "unbound reiniciado"
     fi
 else
+    _dbg "port_853: BLOQUEADO"
     if [[ "$CURRENT_MODE" != "doh" ]]; then
+        _dbg "accion: switch $CURRENT_MODE → doh"
         switch_to_doh
     else
         # Ya está en DoH y DNS falla — reiniciar dnscrypt-proxy
+        _dbg "accion: restart dnscrypt-proxy (ya en doh, dns falla)"
         systemctl restart dnscrypt-proxy 2>/dev/null || true
         logger -t "$LOG_TAG" "dnscrypt-proxy reiniciado"
     fi
+fi
+
+# ── Verificar si DNS quedo funcional tras los cambios ──
+_dbg "esperando 3s para verificar fix..."
+sleep 3
+_restore_resolv_local() {
+    if ! grep -q '^nameserver 127.0.0.1' /etc/resolv.conf 2>/dev/null; then
+        chattr -i /etc/resolv.conf 2>/dev/null || true
+        printf '%s\n' "# Securizar - DNS cifrado local (restaurado por monitor)" \
+                      "nameserver 127.0.0.1" \
+                      "options edns0 trust-ad" > /etc/resolv.conf
+        chattr +i /etc/resolv.conf 2>/dev/null || true
+        logger -t "$LOG_TAG" "resolv.conf restaurado a 127.0.0.1 (DNS cifrado)"
+    fi
+    # Detener resolved de emergencia si quedaba activo
+    if systemctl is-active systemd-resolved &>/dev/null 2>&1; then
+        systemctl stop systemd-resolved 2>/dev/null || true
+    fi
+}
+if dns_works; then
+    _dbg "post-fix: dns_works OK, restaurando resolv.conf"
+    _restore_resolv_local
+    exit 0
+fi
+_dbg "post-fix: dns_works FALLO, intentando resolver alternativo"
+
+# ── Paso intermedio: probar el OTRO resolver cifrado antes de emergencia ──
+# Si unbound fallo, intentar dnscrypt-proxy (y viceversa)
+_tried_alt=false
+if [[ "$CURRENT_MODE" == "dot" ]]; then
+    _dbg "alt-resolver: dot fallo, intentando doh"
+    logger -t "$LOG_TAG" "unbound no recupero, probando dnscrypt-proxy..."
+    switch_to_doh
+    _tried_alt=true
+elif [[ "$CURRENT_MODE" == "doh" ]]; then
+    if port_853_open; then
+        _dbg "alt-resolver: doh fallo, 853 abierto, intentando dot"
+        logger -t "$LOG_TAG" "dnscrypt-proxy no recupero, probando unbound..."
+        switch_to_dot
+        _tried_alt=true
+    else
+        _dbg "alt-resolver: doh fallo, 853 bloqueado, no hay alternativa cifrada"
+    fi
+fi
+if [[ "$_tried_alt" == "true" ]]; then
+    sleep 3
+    if dns_works; then
+        _dbg "alt-resolver: dns_works OK con nuevo modo"
+        _restore_resolv_local
+        logger -t "$LOG_TAG" "DNS restaurado via resolver alternativo (modo: $(cat /etc/securizar/dns-mode.conf 2>/dev/null | grep DNS_MODE | cut -d= -f2))"
+        exit 0
+    fi
+    _dbg "alt-resolver: dns_works FALLO, cayendo a emergencia"
+fi
+
+# ── Ultimo recurso: ambos resolvers fallaron ──
+_dbg "EMERGENCIA: ambos resolvers cifrados fallaron"
+logger -t "$LOG_TAG" "CRITICO: DNS no responde tras reinicio de resolvers"
+
+# Desbloquear resolv.conf si es inmutable
+chattr -i /etc/resolv.conf 2>/dev/null || true
+_dbg "chattr -i aplicado a resolv.conf"
+
+# Intentar systemd-resolved como fallback temporal
+if systemctl list-unit-files systemd-resolved.service &>/dev/null 2>&1; then
+    _dbg "emergencia paso 1: iniciando systemd-resolved"
+    systemctl unmask systemd-resolved 2>/dev/null || true
+    systemctl start systemd-resolved 2>/dev/null || true
+    # resolved escucha en 127.0.0.53 (no conflicto con unbound/dnscrypt en 127.0.0.1)
+    printf '%s\n' "# EMERGENCIA securizar - systemd-resolved temporal" \
+                  "nameserver 127.0.0.53" \
+                  "options edns0 trust-ad" > /etc/resolv.conf
+    sleep 2
+    if nslookup example.com 127.0.0.53 &>/dev/null; then
+        _dbg "emergencia paso 1: resolved OK en 127.0.0.53"
+        logger -t "$LOG_TAG" "DNS emergencia: systemd-resolved en 127.0.0.53"
+        # NO chattr +i: monitor debe poder restaurar DNS cifrado en proximo ciclo
+        exit 0
+    fi
+    _dbg "emergencia paso 1: resolved FALLO (nslookup 127.0.0.53 no resuelve)"
+else
+    _dbg "emergencia paso 1: systemd-resolved no disponible"
+fi
+
+# Fallback absoluto: DNS publico temporal (NO cifrado, solo para no perder red)
+if ! nslookup example.com &>/dev/null 2>&1; then
+    _dbg "emergencia paso 2: DNS publico temporal (9.9.9.9 + 1.1.1.1)"
+    logger -t "$LOG_TAG" "EMERGENCIA: DNS publico temporal (NO cifrado, visible al ISP)"
+    printf '%s\n' "# EMERGENCIA securizar - resolver local caido" \
+                  "# Monitor reintentara DNS cifrado en proximo ciclo" \
+                  "nameserver 9.9.9.9" \
+                  "nameserver 1.1.1.1" \
+                  "options edns0" > /etc/resolv.conf
+    # NO chattr +i: debe poder corregirse
 fi
 DNS_MONITOR
     chmod 755 "${ISP_BIN_DIR}/dns-fallback-monitor.sh"
@@ -1327,13 +1782,19 @@ is_vpn_event() {
 
 is_vpn_event || exit 0
 
+logger -t securizar-dns-vpn "dispatch: iface=$IFACE action=$ACTION"
+
 force_local_dns() {
     if ss -tlnp 2>/dev/null | grep -qE "127.0.0.1:53.*(unbound|dnscrypt-proxy)"; then
+        chattr -i /etc/resolv.conf 2>/dev/null || true
         printf '%s\n' "# Securizar - DNS cifrado local (DoT/DoH)" \
                       "nameserver 127.0.0.1" \
                       "options edns0 trust-ad" > /etc/resolv.conf
+        chattr +i /etc/resolv.conf 2>/dev/null || true
+        logger -t securizar-dns-vpn "resolv.conf → 127.0.0.1 (chattr +i aplicado)"
         return 0
     fi
+    logger -t securizar-dns-vpn "WARN: resolver local no detectado en :53, resolv.conf no modificado"
     return 1
 }
 
@@ -1443,8 +1904,9 @@ if ask "¿Configurar ECH en Firefox?"; then
 user_pref("network.dns.echconfig.enabled", true);
 user_pref("network.dns.use_https_rr_as_altsvc", true);
 
-// DNS-over-HTTPS necesario para ECH (modo 3 = solo DoH)
-user_pref("network.trr.mode", 3);
+// DNS-over-HTTPS para ECH (modo 2 = DoH preferido, fallback a DNS del sistema)
+// Modo 2 mantiene ECH funcional sin romper navegación si Cloudflare DoH cae
+user_pref("network.trr.mode", 2);
 user_pref("network.trr.uri", "https://cloudflare-dns.com/dns-query");
 user_pref("network.trr.custom_uri", "https://cloudflare-dns.com/dns-query");
 ECH_JS

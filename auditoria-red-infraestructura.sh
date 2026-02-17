@@ -19,6 +19,7 @@ set -euo pipefail
 
 # Asegurar que /usr/local/bin esté en PATH (compilaciones desde fuente)
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/securizar-common.sh"
@@ -406,6 +407,7 @@ elif ask "Crear scripts de descubrimiento de red?"; then
 # Uso: auditoria-red-descubrimiento.sh [subred] [--full|--quick|--stealth]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -873,6 +875,7 @@ elif ask "Crear scripts de topología y auditoría L2 (LLDP/CDP, VLANs, bridges)
 # Uso: auditoria-red-topologia.sh [--full|--quick]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -1289,6 +1292,7 @@ EOFCONF
 # Uso: auditoria-red-puertos.sh [target] [--top1000|--full|--custom <ports>]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -1540,6 +1544,7 @@ EOFCONF
 #      auditoria-red-tls.sh --batch <archivo_endpoints>
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -1803,6 +1808,7 @@ elif ask "Crear scripts de auditoria SNMP?"; then
 # Uso: auditoria-red-snmp.sh [target/subred]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -1870,7 +1876,7 @@ DEFAULT_COMMUNITIES=("public" "private" "community" "admin" "manager" "snmpd" "d
         for comm in "${DEFAULT_COMMUNITIES[@]}"; do
             if command -v snmpget &>/dev/null; then
                 RESULT=$(timeout 3 snmpget -v2c -c "$comm" "$host" 1.3.6.1.2.1.1.1.0 2>&1 || true)
-                if echo "$RESULT" | grep -qv "Timeout\|No Response\|Error\|Unknown"; then
+                if echo "$RESULT" | grep -qv "Timeout\|No Response\|Error\|Unknown\|Failure\|Operation not permitted\|No Such Object"; then
                     echo -e "    ${RED}[CRITICO] Community string '$comm' FUNCIONA${NC}"
                     echo "    Respuesta: $(echo "$RESULT" | head -1)"
                     ((CRITICAL++)) || true
@@ -1903,13 +1909,13 @@ echo -e "${CYAN}[3/4] Deteccion de versiones SNMP...${NC}"
         # Test SNMPv1
         if command -v snmpget &>/dev/null; then
             V1_RESULT=$(timeout 3 snmpget -v1 -c public "$host" 1.3.6.1.2.1.1.1.0 2>&1 || true)
-            if echo "$V1_RESULT" | grep -qv "Timeout\|No Response\|Error"; then
+            if echo "$V1_RESULT" | grep -qv "Timeout\|No Response\|Error\|Failure\|Operation not permitted\|No Such Object"; then
                 echo -e "    ${RED}[FAIL] SNMPv1 acepta conexiones (sin cifrado ni autenticacion)${NC}"
                 ((ISSUES++)) || true
             fi
 
             V2_RESULT=$(timeout 3 snmpget -v2c -c public "$host" 1.3.6.1.2.1.1.1.0 2>&1 || true)
-            if echo "$V2_RESULT" | grep -qv "Timeout\|No Response\|Error"; then
+            if echo "$V2_RESULT" | grep -qv "Timeout\|No Response\|Error\|Failure\|Operation not permitted\|No Such Object"; then
                 echo -e "    ${YELLOW}[WARN] SNMPv2c acepta conexiones (sin cifrado)${NC}"
                 ((ISSUES++)) || true
             fi
@@ -1938,7 +1944,7 @@ echo -e "${CYAN}[4/4] Enumeracion de informacion expuesta...${NC}"
         if command -v snmpwalk &>/dev/null; then
             # Intentar con community "public"
             WALK_RESULT=$(timeout 10 snmpwalk -v2c -c public "$host" 1.3.6.1.2.1.1 2>&1 || true)
-            if echo "$WALK_RESULT" | grep -qv "Timeout\|No Response\|Error"; then
+            if echo "$WALK_RESULT" | grep -qv "Timeout\|No Response\|Error\|Failure\|Operation not permitted\|No Such Object"; then
                 echo "    [!] Informacion del sistema accesible con 'public':"
                 echo "$WALK_RESULT" | head -10 | while IFS= read -r line; do
                     echo "      $line"
@@ -2007,6 +2013,7 @@ elif ask "Crear scripts de auditoria de configuracion de red?"; then
 # Uso: auditoria-red-config.sh [--full|--quick]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -2340,7 +2347,7 @@ echo ""
         ufw status numbered 2>/dev/null | head -20 | while IFS= read -r line; do
             echo "    $line"
         done
-    elif command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q "table"; then
+    elif command -v nft &>/dev/null && [[ -n "$(nft list tables 2>/dev/null)" ]]; then
         FW_ACTIVE=true
         echo -e "    ${GREEN}[OK]${NC} nftables con reglas activas"
         echo "  Backend: nftables"
@@ -2435,6 +2442,7 @@ elif ask "Crear scripts de auditoría extendida (NTP, DHCP, ethtool, IPv6, MTU, 
 # Uso: auditoria-red-infralink.sh [--full|--quick] [interfaz]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -3007,6 +3015,7 @@ EOFCONF
 # Uso: auditoria-red-inventario.sh [target] [--compare|--scan-only]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -3153,6 +3162,7 @@ elif ask "Crear sistema de baseline y deteccion de drift?"; then
 #      auditoria-red-baseline.sh --history             Ver historial de cambios
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -3405,6 +3415,7 @@ elif ask "Crear baseline extendida (LLDP, VLANs, NTP, bonds, MTU)?"; then
 #      auditoria-red-baseline-ext.sh --compare    Comparar con baseline extendida
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -3685,6 +3696,7 @@ elif ask "Configurar auditorias periodicas automatizadas?"; then
 # Uso: auditoria-red-programada.sh [diaria|semanal|mensual|trimestral|completa]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 LOG_FILE="/var/log/securizar/auditoria-red.log"
 REPORT_DIR="/var/lib/securizar/auditoria-red/reportes"
@@ -3991,6 +4003,7 @@ elif ask "Crear orquestador de auditorías extendidas (topología, NTP, MTU)?"; 
 # Uso: auditoria-red-programada-ext.sh [diaria|semanal|completa]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 LOG_FILE="/var/log/securizar/auditoria-red-ext.log"
 REPORT_DIR="/var/lib/securizar/auditoria-red/reportes"
@@ -4137,6 +4150,7 @@ elif ask "Crear sistema de reporte consolidado?"; then
 # Uso: auditoria-red-reporte-global.sh [--text|--json|--html]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -4210,7 +4224,7 @@ echo ""
         echo -e "  ${GREEN}[OK]${NC} ufw activo"
         FW_OK=true
         add_check "pass" 3
-    elif command -v nft &>/dev/null && nft list ruleset 2>/dev/null | grep -q "table"; then
+    elif command -v nft &>/dev/null && [[ -n "$(nft list tables 2>/dev/null)" ]]; then
         echo -e "  ${GREEN}[OK]${NC} nftables activo"
         FW_OK=true
         add_check "pass" 3
@@ -4424,6 +4438,7 @@ ENDSCRIPT
 # auditoria-red-limpieza.sh - Limpieza de reportes y scans antiguos
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 CONF_DIR="/etc/securizar/auditoria-red"
 REPORT_RETENTION_DAYS=90
@@ -4462,6 +4477,7 @@ elif ask "Crear sistema de reporte extendido (topología, NTP, IPv6, rendimiento
 # Uso: auditoria-red-reporte-ext.sh [--text|--json]
 set -euo pipefail
 [[ ":$PATH:" == *":/usr/local/bin:"* ]] || export PATH="/usr/local/bin:$PATH"
+[[ ":$PATH:" == *":/usr/sbin:"* ]] || export PATH="/usr/sbin:$PATH"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
