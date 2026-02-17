@@ -29,6 +29,7 @@ Suite completa de hardening y securizacion para Linux, con 78 modulos interactiv
 - **DevSecOps**: CI/CD pipeline security, SAST, secrets detection, code signing
 - **Seguridad de APIs**: rate limiting, JWT/OAuth2, mTLS, GraphQL, WAF
 - **IoT**: MQTT hardening, device inventory, firmware integrity, segmentacion
+- **Proteccion contra ISP**: kill switch VPN multi-backend (nftables/iptables/firewalld), DNS cifrado dual-mode DoT↔DoH con auto-fallback, ECH, DPI evasion, WARP, debug logging
 - **DNS avanzado**: DNSSEC, DoT/DoH, RPZ sinkhole, tunneling detection
 - **Auditoria de red**: Wireshark, tshark, capturas automatizadas, deteccion de anomalias (20 checks: ARP, DHCP, DNS tunneling, Spotify Connect, Google Cast, SSDP/UPnP, SNMP, MAC randomization, captive portal detection, SNI plaintext analysis), correlacion IDS
 - **Auditoria de infraestructura de red**: nmap, TLS/SSL (testssl.sh), SNMP, inventario de servicios, baseline y drift, deteccion de APIs IoT expuestas (Cast/Roku/UPnP/IPP), deteccion EOL 12+ categorias, generacion automatica de script de aislamiento LAN, protocolos modernos (MQTT, Modbus/ICS, CoAP, AMQP, Kubernetes API), CVE cross-reference de versiones de servicios, verificacion cifrado disco LUKS, auditoria mount options, crypto policy check, systemd sandboxing audit (12 fases)
@@ -529,7 +530,7 @@ Herramientas para un SOC (Security Operations Center) funcional.
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
 | 35 | **Ciberinteligencia proactiva** | `ciberinteligencia.sh` | Motor de enriquecimiento de IoC multi-fuente con scoring 0-100, inteligencia de red proactiva (GeoIP, correlacion), inteligencia DNS (DGA, tunneling, NRD), monitorizacion de superficie de ataque, sistema de alerta temprana y CVE monitoring, informes de inteligencia automatizados, monitorizacion de credenciales expuestas, integracion SOAR. Instala 16 scripts y 6 timers systemd |
-| 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | Kill switch VPN (iptables DROP si cae la VPN), prevencion de fugas DNS (DoT estricto + DNSSEC), ECH (Encrypted Client Hello), prevencion WebRTC leaks, evasion de DPI (obfs4/stunnel), hardening de privacidad del navegador, HTTPS-Only enforcement, NTP con NTS, ofuscacion de patrones de trafico, auditoria de metadatos ISP |
+| 36 | **Proteccion contra ISP** | `proteger-contra-isp.sh` | 11 secciones: VPN kill switch multi-backend (nftables/iptables/firewalld con deteccion dinamica de endpoints WireGuard/OpenVPN/ProtonVPN, interfaz VPN via `wg show` + POINTOPOINT, NM dispatcher + watchdog 10s, boot persistence systemd), DNS cifrado dual-mode auto-fallback DoT↔DoH (unbound/dnscrypt-proxy con monitor 5min, cascada: restart → alt resolver → systemd-resolved → DNS publico, chattr +i proteccion, NM override global-dns + dispatcher), ECH (Encrypted Client Hello), prevencion WebRTC, evasion DPI (obfs4/stunnel), hardening privacidad navegador, HTTPS-Only, NTP con NTS, ofuscacion trafico, auditoria metadatos ISP, Cloudflare WARP + Gateway (opcional). MAC randomization, IPv6 disable, debug logging a `/var/log/securizar/debug.log` (30 puntos de debug en 6 scripts desplegados) |
 | 77 | **Plataforma TIP** | `plataforma-tip.sh` | Cliente MISP (PyMISP/curl REST), parser STIX 2.1, consumer TAXII 2.1 (CIRCL + configurables), ciclo de vida IOC (aging, dedup, expiracion), tracker de campañas con mapeo MITRE ATT&CK, framework de atribucion Diamond Model, comparticion de inteligencia (STIX/CSV/MISP con TLP), correlacion cross-source, threat briefings diarios/semanales, auditoria integral |
 
 ### Categoria 6: Infraestructura y Red (9 modulos)
@@ -1114,6 +1115,27 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `detectar-dns-tunneling.sh` | Deteccion de DNS tunneling (entropia, patrones) |
 | `monitorear-dns.sh` | Monitorizacion continua de DNS (hijacking, disponibilidad) |
 
+### Proteccion contra ISP
+
+| Herramienta | Ubicacion | Funcion |
+|-------------|-----------|---------|
+| `vpn-killswitch.sh` | `/etc/securizar/` | Activar kill switch: DROP todo trafico no-VPN. Multi-backend (nftables/iptables/firewalld), auto-deteccion de endpoints VPN (WireGuard activo, configs, OpenVPN, ProtonVPN, manual) |
+| `vpn-killswitch-off.sh` | `/etc/securizar/` | Desactivar kill switch: restaurar trafico normal |
+| `99-vpn-killswitch` | `/etc/NetworkManager/dispatcher.d/` | NM dispatcher: activa/desactiva kill switch en eventos VPN up/down |
+| `vpn-watchdog.sh` | `/usr/local/bin/` | Watchdog VPN (timer 10s): detecta interfaces VPN fuera de NM (ProtonVPN CLI, wg-quick, Mullvad). Deteccion estatica + `wg show interfaces` |
+| `dns-fallback-monitor.sh` | `/usr/local/bin/` | Monitor DNS (timer 5min): cascada de recuperacion DoT↔DoH → alt resolver → systemd-resolved → DNS publico. Verificacion WARP, chattr handling, debug logging |
+| `98-securizar-dns-vpn` | `/etc/NetworkManager/dispatcher.d/` | NM dispatcher DNS: fuerza resolv.conf a 127.0.0.1 cuando VPN sube, con chattr +i proteccion |
+| `detectar-dns-leak.sh` | `/usr/local/bin/` | Diagnostico de fugas DNS: estado resolver, resolv.conf, conexiones DoT/DoH, fugas puerto 53 |
+| `auditoria-isp.sh` | `/usr/local/bin/` | Auditoria de metadatos ISP (10 checks) |
+| `detectar-http-inseguro.sh` | `/usr/local/bin/` | Deteccion de conexiones HTTP no cifradas |
+| `diagnostico-warp.sh` | `/usr/local/bin/` | Diagnostico Cloudflare WARP (conectividad, modo, DNS, WARP+) |
+| `restaurar-warp.sh` | `/usr/local/bin/` | Desinstalar Cloudflare WARP (multi-distro) |
+
+Scripts desplegados con debug logging integrado (30 puntos de debug):
+- Todos escriben a `/var/log/securizar/debug.log` con timestamps y prefijos por componente
+- NM dispatchers usan `logger` al journal del sistema
+- Cada script registra: contexto de invocacion, estado del sistema, decisiones tomadas, resultado de cada accion
+
 ### Auditoria de red (Wireshark)
 
 | Herramienta | Funcion |
@@ -1188,7 +1210,8 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/var/lib/securizar/cve-audit/` | Resultados de auditorias CVE |
 | `/var/lib/securizar/log-hashes/` | Cadena de hashes para integridad de logs |
 | `/var/lib/securizar/forense/` | Timelines y datos de forense de logs |
-| `/var/log/securizar/` | Logs de correlacion, alertas, cambios de software |
+| `/var/log/securizar/` | Logs de correlacion, alertas, cambios de software, debug ISP |
+| `/var/log/securizar/debug.log` | Debug logging de scripts ISP (kill switch, watchdog, DNS monitor, dispatchers) |
 | `/etc/securizar/email/` | Plantillas SPF, configuracion de seguridad email |
 | `/etc/securizar/siem/` | Templates de integracion SIEM (ELK, Splunk, Graylog) |
 | `/etc/securizar/log-certs/` | Certificados TLS para reenvio seguro de logs |
@@ -1248,6 +1271,13 @@ Se crean reglas en `/etc/audit/rules.d/` con numeracion `6X`:
 | `/var/lib/securizar/edr-baseline/` | Snapshots de baseline EDR |
 | `/etc/securizar/vuln-management/` | Configuracion de gestion de vulnerabilidades |
 | `/var/lib/securizar/vuln-management/` | Datos de escaneos, reportes, parches |
+| `/etc/securizar/vpn-killswitch.sh` | Script de activacion del kill switch VPN (multi-backend) |
+| `/etc/securizar/vpn-killswitch-off.sh` | Script de desactivacion del kill switch VPN |
+| `/etc/securizar/vpn-endpoints.conf` | Endpoints VPN manuales (IPs para reconexion) |
+| `/etc/securizar/dns-mode.conf` | Modo DNS activo (DNS_MODE=dot o DNS_MODE=doh) |
+| `/etc/securizar/dns-backup.conf` | Backup del resolv.conf original |
+| `/etc/securizar/warp-mode.conf` | Configuracion de modo WARP (warp/doh/warp+doh) |
+| `/run/securizar-vpn-watchdog.state` | Estado runtime del watchdog VPN (up/down/unknown) |
 | `/etc/securizar/cloud-egress-whitelist.conf` | Whitelist de trafico saliente cloud |
 | `/usr/local/lib/incident-response/templates/` | Plantillas de comunicacion IR (CSIRT, gerencia, legal, usuarios) |
 | `/etc/securizar/escalation-matrix.conf` | Matriz de escalacion por severidad |
@@ -1390,6 +1420,29 @@ sudo /usr/local/bin/auditoria-red-config.sh                             # Config
 sudo /usr/local/bin/auditoria-red-baseline.sh --capture                 # Capturar baseline
 sudo /usr/local/bin/auditoria-red-baseline.sh --compare                 # Detectar drift
 sudo /usr/local/bin/auditoria-red-reporte-global.sh --json              # Reporte consolidado
+```
+
+### Proteccion contra ISP
+
+```bash
+# Despues de instalar modulo 36
+sudo /usr/local/bin/detectar-dns-leak.sh              # Diagnostico de fugas DNS
+sudo /usr/local/bin/auditoria-isp.sh                  # Auditoria de metadatos ISP
+sudo /usr/local/bin/detectar-http-inseguro.sh          # Conexiones HTTP no cifradas
+sudo /usr/local/bin/diagnostico-warp.sh                # Estado Cloudflare WARP
+
+# Kill switch manual
+sudo bash /etc/securizar/vpn-killswitch.sh             # Activar kill switch
+sudo bash /etc/securizar/vpn-killswitch-off.sh         # Desactivar kill switch
+
+# Debug: ver logs de los scripts desplegados
+sudo tail -f /var/log/securizar/debug.log              # Debug en tiempo real
+sudo journalctl -t securizar-dns-monitor --since today # Monitor DNS en journal
+sudo journalctl -t securizar-vpn-watchdog --since today # Watchdog VPN en journal
+sudo journalctl -t securizar-nm-ks --since today       # NM dispatcher kill switch
+
+# Verificar estado completo
+sudo bash proteger-contra-isp.sh --verify             # 27 checks exhaustivos
 ```
 
 ### Responder a un incidente
