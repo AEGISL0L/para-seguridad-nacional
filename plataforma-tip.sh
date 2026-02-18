@@ -1302,7 +1302,7 @@ check "curl disponible" "command -v curl"
 
 echo ""
 echo -e "${BOLD}────────────────────────────────────────────────────────${NC}"
-local pct=0
+pct=0
 [[ $MAX -gt 0 ]] && pct=$(( SCORE * 100 / MAX ))
 if [[ $pct -ge 80 ]]; then
     echo -e "  Resultado: ${GREEN}${BOLD}${SCORE}/${MAX}${NC} (${pct}%) ${GREEN}BUENO${NC}"
