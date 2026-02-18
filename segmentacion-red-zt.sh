@@ -291,6 +291,7 @@ table inet securizar_zonas {
 
         # Tráfico no clasificado: log con rate limit
         limit rate 10/minute log prefix "securizar-zonas-noclasif: " level warn
+        counter drop
     }
 
     chain zona_forward {
@@ -1258,14 +1259,14 @@ check_os_updates() {
 
     case "$(. /etc/os-release 2>/dev/null && echo "$ID")" in
         opensuse*|sles)
-            pending=$(zypper --non-interactive list-patches 2>/dev/null | grep -c "needed" || echo "0")
+            pending=$(zypper --non-interactive list-patches 2>/dev/null | grep -c "needed" || true)
             ;;
         debian|ubuntu|linuxmint|pop)
             apt-get update -qq 2>/dev/null
-            pending=$(apt list --upgradable 2>/dev/null | grep -c "upgradable" || echo "0")
+            pending=$(apt list --upgradable 2>/dev/null | grep -c "upgradable" || true)
             ;;
         fedora|rhel|centos|rocky|alma)
-            pending=$(dnf check-update --quiet 2>/dev/null | grep -cE "^[a-zA-Z]" || echo "0")
+            pending=$(dnf check-update --quiet 2>/dev/null | grep -cE "^[a-zA-Z]" || true)
             ;;
         arch|manjaro)
             pending=$(checkupdates 2>/dev/null | wc -l || echo "0")
@@ -1292,19 +1293,42 @@ check_firewall() {
 
     if systemctl is-active firewalld &>/dev/null 2>&1; then
         fw_status="firewalld"
-    elif ufw status 2>/dev/null | grep -q "active"; then
-        fw_status="ufw"
-    elif nft list ruleset &>/dev/null 2>&1 && [[ $(nft list ruleset 2>/dev/null | wc -l) -gt 2 ]]; then
-        fw_status="nftables"
-    elif iptables -L -n 2>/dev/null | grep -qv "^$\|^Chain\|^target"; then
-        fw_status="iptables"
+    elif [[ "$(systemctl is-enabled firewalld 2>/dev/null)" == "masked" ]]; then
+        # firewalld masked: comprobar si queda tabla huérfana
+        if nft list table inet firewalld &>/dev/null 2>&1; then
+            fw_status="nftables"
+            detail="AVISO: firewalld masked pero tabla inet firewalld huérfana en kernel"
+            check_register "firewall" 20 "warn" "$detail"
+            SCORE_TOTAL=$((SCORE_TOTAL + 10))
+            return
+        fi
+        fw_status="inactive"
+        detail="firewalld masked"
+    fi
+
+    if [[ "$fw_status" == "inactive" ]]; then
+        if ufw status 2>/dev/null | grep -q "active"; then
+            fw_status="ufw"
+        elif nft list ruleset &>/dev/null 2>&1 && [[ $(nft list ruleset 2>/dev/null | wc -l) -gt 2 ]]; then
+            fw_status="nftables"
+        elif iptables -L -n 2>/dev/null | grep -qv "^$\|^Chain\|^target"; then
+            fw_status="iptables"
+        fi
     fi
 
     if [[ "$fw_status" != "inactive" ]]; then
-        detail="Firewall activo: $fw_status"
+        if [[ -n "$detail" ]]; then
+            detail="$detail; fallback $fw_status activo"
+        else
+            detail="Firewall activo: $fw_status"
+        fi
         check_register "firewall" 20 "pass" "$detail"
     else
-        detail="No se detectó firewall activo"
+        if [[ -n "$detail" ]]; then
+            detail="$detail; sin firewall alternativo"
+        else
+            detail="No se detectó firewall activo"
+        fi
         check_register "firewall" 20 "fail" "$detail"
     fi
 }
@@ -1522,9 +1546,9 @@ fi
     echo "  \"score_max\": $SCORE_MAX,"
     echo "  \"nivel\": \"$NIVEL\","
     echo "  \"checks\": ["
-    local i
+    i=0
     for i in "${!CHECKS[@]}"; do
-        local comma=","
+        comma=","
         [[ $i -eq $((${#CHECKS[@]} - 1)) ]] && comma=""
         echo "    {"
         echo "      \"name\": \"${CHECKS[$i]}\","
@@ -1556,7 +1580,7 @@ else
     echo ""
 
     for i in "${!CHECKS[@]}"; do
-        local icon="[X]"
+        icon="[X]"
         [[ "${CHECK_RESULTS[$i]}" == "pass" ]] && icon="[+]"
         [[ "${CHECK_RESULTS[$i]}" == "warn" ]] && icon="[!]"
         printf "  %-4s %-25s %s\n" "$icon" "${CHECKS[$i]}" "${CHECK_DETAILS[$i]}"
@@ -2288,7 +2312,7 @@ test_tabla_zonas() {
     if command -v nft &>/dev/null; then
         if nft list table inet securizar_zonas &>/dev/null 2>&1; then
             local chains
-            chains=$(nft list table inet securizar_zonas 2>/dev/null | grep -c "chain " || echo "0")
+            chains=$(nft list table inet securizar_zonas 2>/dev/null | grep -c "chain " || true)
             test_result "tabla_securizar_zonas" "PASS" "Tabla securizar_zonas existe ($chains cadenas)"
         else
             test_result "tabla_securizar_zonas" "FAIL" "Tabla inet securizar_zonas no cargada"
@@ -2301,17 +2325,29 @@ test_tabla_zonas() {
 # === TEST 5: Firewall activo ===
 test_firewall_activo() {
     local fw_detected=""
+    local fw_warn=""
     if systemctl is-active firewalld &>/dev/null 2>&1; then
         fw_detected="firewalld"
-    elif ufw status 2>/dev/null | grep -q "active"; then
-        fw_detected="ufw"
-    elif command -v nft &>/dev/null && [[ $(nft list ruleset 2>/dev/null | wc -l) -gt 2 ]]; then
-        fw_detected="nftables"
-    elif iptables -L -n 2>/dev/null | grep -qv "^$\|^Chain\|^target"; then
-        fw_detected="iptables"
+    elif [[ "$(systemctl is-enabled firewalld 2>/dev/null)" == "masked" ]]; then
+        fw_warn="firewalld masked"
+        if nft list table inet firewalld &>/dev/null 2>&1; then
+            fw_warn="$fw_warn + tabla huérfana en kernel"
+        fi
     fi
 
-    if [[ -n "$fw_detected" ]]; then
+    if [[ -z "$fw_detected" ]]; then
+        if ufw status 2>/dev/null | grep -q "active"; then
+            fw_detected="ufw"
+        elif command -v nft &>/dev/null && [[ $(nft list ruleset 2>/dev/null | wc -l) -gt 2 ]]; then
+            fw_detected="nftables"
+        elif iptables -L -n 2>/dev/null | grep -qv "^$\|^Chain\|^target"; then
+            fw_detected="iptables"
+        fi
+    fi
+
+    if [[ -n "$fw_detected" && -n "$fw_warn" ]]; then
+        test_result "firewall_activo" "WARN" "Firewall: $fw_detected ($fw_warn)"
+    elif [[ -n "$fw_detected" ]]; then
         test_result "firewall_activo" "PASS" "Firewall activo: $fw_detected"
     else
         test_result "firewall_activo" "FAIL" "No se detectó firewall activo"
@@ -2457,7 +2493,7 @@ if [[ "$MODE" == "--json" ]]; then
         echo "  \"total\": $TOTAL_COUNT,"
         echo "  \"tests\": ["
         for i in "${!TEST_NAMES[@]}"; do
-            local comma=","
+            comma=","
             [[ $i -eq $((${#TEST_NAMES[@]} - 1)) ]] && comma=""
             echo "    {\"name\": \"${TEST_NAMES[$i]}\", \"result\": \"${TEST_RESULTS[$i]}\", \"detail\": \"${TEST_DETAILS[$i]}\"}$comma"
         done
@@ -2554,18 +2590,31 @@ check() {
 
 # --- Check 1: Firewall activo ---
 fw_active=0
+fw_detail=""
 if systemctl is-active firewalld &>/dev/null 2>&1; then
     fw_active=1
-elif ufw status 2>/dev/null | grep -q "active"; then
-    fw_active=1
-elif command -v nft &>/dev/null && [[ $(nft list ruleset 2>/dev/null | wc -l) -gt 2 ]]; then
-    fw_active=1
+    fw_detail="firewalld activo"
+elif [[ "$(systemctl is-enabled firewalld 2>/dev/null)" == "masked" ]]; then
+    fw_detail="firewalld masked"
+    if nft list table inet firewalld &>/dev/null 2>&1; then
+        fw_detail="$fw_detail + tabla huérfana en kernel"
+    fi
+fi
+
+if [[ $fw_active -eq 0 ]]; then
+    if ufw status 2>/dev/null | grep -q "active"; then
+        fw_active=1
+        fw_detail="${fw_detail:+$fw_detail; }ufw activo"
+    elif command -v nft &>/dev/null && [[ $(nft list ruleset 2>/dev/null | wc -l) -gt 2 ]]; then
+        fw_active=1
+        fw_detail="${fw_detail:+$fw_detail; }nftables activo"
+    fi
 fi
 
 if [[ $fw_active -eq 1 ]]; then
-    check "firewall" "ok" "Firewall activo"
+    check "firewall" "ok" "Firewall activo (${fw_detail})"
 else
-    check "firewall" "fail" "Firewall no detectado o inactivo"
+    check "firewall" "fail" "Firewall no detectado o inactivo${fw_detail:+ ($fw_detail)}"
 fi
 
 # --- Check 2: nftables zonas cargadas ---
@@ -2582,12 +2631,12 @@ fi
 # --- Check 3: Configuraciones no modificadas (drift) ---
 for conf_file in /etc/securizar/zonas-red.conf /etc/securizar/politicas-interzona.conf /etc/securizar/microseg-servicios.conf; do
     if [[ -f "$conf_file" ]]; then
-        local hash_file="/var/lib/securizar/$(basename "$conf_file").sha256"
-        local current_hash
+        hash_file="/var/lib/securizar/$(basename "$conf_file").sha256"
+        current_hash=""
         current_hash=$(sha256sum "$conf_file" | awk '{print $1}')
 
         if [[ -f "$hash_file" ]]; then
-            local stored_hash
+            stored_hash=""
             stored_hash=$(cat "$hash_file" 2>/dev/null)
             if [[ "$current_hash" == "$stored_hash" ]]; then
                 check "drift_$(basename "$conf_file")" "ok" "Sin cambios desde última verificación"
@@ -2605,7 +2654,7 @@ done
 
 # --- Check 4: Postura del dispositivo ---
 if [[ -x /usr/local/bin/evaluar-postura-dispositivo.sh ]]; then
-    local postura_score
+    postura_score=""
     postura_score=$(/usr/local/bin/evaluar-postura-dispositivo.sh --quiet 2>/dev/null || echo "0")
     if [[ "$postura_score" -ge 70 ]]; then
         check "postura_dispositivo" "ok" "Puntuación: $postura_score/100"
@@ -2823,7 +2872,7 @@ fi
 
 # Forward policy
 if command -v nft &>/dev/null; then
-    if nft list ruleset 2>/dev/null | grep -q "policy drop"; then
+    if nft list ruleset 2>/dev/null | grep "policy drop" >/dev/null 2>&1; then
         score_check "politicas_interzona" 5 5 "Default policy DROP"
     else
         score_check "politicas_interzona" 0 5 "Default policy no es DROP"
@@ -3010,10 +3059,10 @@ if [[ "$MODE" == "--json" ]]; then
         echo "  \"score_percent\": $SCORE_PERCENT,"
         echo "  \"nivel\": \"$NIVEL\","
         echo "  \"categories\": {"
-        local idx=0
+        idx=0
         for cat in "${CATEGORIES[@]}"; do
             idx=$((idx + 1))
-            local comma=","
+            comma=","
             [[ $idx -eq ${#CATEGORIES[@]} ]] && comma=""
             echo "    \"$cat\": {"
             echo "      \"score\": ${CAT_SCORE[$cat]},"
@@ -3038,12 +3087,12 @@ else
     echo "  $(printf '%.0s─' {1..80})"
 
     for cat in "${CATEGORIES[@]}"; do
-        local s=${CAT_SCORE[$cat]}
-        local m=${CAT_MAX[$cat]}
-        local d="${CAT_DETAIL[$cat]}"
-        local icon="[X]"
+        s=${CAT_SCORE[$cat]}
+        m=${CAT_MAX[$cat]}
+        d="${CAT_DETAIL[$cat]}"
+        icon="[X]"
         if [[ $m -gt 0 ]]; then
-            local pct=$(( (s * 100) / m ))
+            pct=$(( (s * 100) / m ))
             [[ $pct -ge 75 ]] && icon="[+]"
             [[ $pct -ge 45 && $pct -lt 75 ]] && icon="[!]"
         fi
