@@ -563,7 +563,7 @@ stats() {
     [[ ! -f "$IOC_DB" ]] && { echo "BD vacia"; return; }
     echo "Estadisticas IOC:"
     echo "  Total: $(wc -l < "$IOC_DB")"
-    echo "  Activos: $(jq -r 'select(.active==true)' "$IOC_DB" 2>/dev/null | wc -l)"
+    echo "  Activos: $(jq -c 'select(.active==true)' "$IOC_DB" 2>/dev/null | wc -l)"
     echo "  Por tipo:"
     jq -r '.type' "$IOC_DB" 2>/dev/null | sort | uniq -c | sort -rn | \
         while read -r count tp; do echo "    $tp: $count"; done
@@ -1105,8 +1105,8 @@ generate_daily() {
         if [[ -f "$IOC_DB" ]]; then
             local total active high_conf
             total=$(wc -l < "$IOC_DB" 2>/dev/null || echo 0)
-            active=$(jq -r 'select(.active==true)' "$IOC_DB" 2>/dev/null | wc -l)
-            high_conf=$(jq -r 'select(.active==true and .confidence>=70)' "$IOC_DB" 2>/dev/null | wc -l)
+            active=$(jq -c 'select(.active==true)' "$IOC_DB" 2>/dev/null | wc -l)
+            high_conf=$(jq -c 'select(.active==true and .confidence>=70)' "$IOC_DB" 2>/dev/null | wc -l)
             echo "  Total IOCs: $total"
             echo "  Activos: $active"
             echo "  Alta confianza (>=70): $high_conf"
@@ -1115,7 +1115,7 @@ generate_daily() {
             local yesterday
             yesterday=$(date -u -d "1 day ago" +%Y-%m-%dT 2>/dev/null || echo "1970")
             local new_24h
-            new_24h=$(jq -r "select(.first_seen > \"$yesterday\")" "$IOC_DB" 2>/dev/null | wc -l)
+            new_24h=$(jq -c "select(.first_seen > \"$yesterday\")" "$IOC_DB" 2>/dev/null | wc -l)
             echo "  Nuevos (24h): $new_24h"
         else
             echo "  BD IOC no disponible"
@@ -1182,7 +1182,7 @@ generate_weekly() {
             day_prefix=$(date -d "$i days ago" +%Y-%m-%dT 2>/dev/null || echo "")
             if [[ -f "$IOC_DB" ]] && [[ -n "$day_prefix" ]]; then
                 local count
-                count=$(jq -r "select(.first_seen | startswith(\"$day_prefix\"))" "$IOC_DB" 2>/dev/null | wc -l)
+                count=$(jq -c "select(.first_seen | startswith(\"$day_prefix\"))" "$IOC_DB" 2>/dev/null | wc -l)
                 printf "  %s: %d nuevos IOCs\n" "$day" "$count"
             fi
         done
