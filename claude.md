@@ -124,8 +124,7 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 74. `acceso-privilegiado.sh` - Session recording, sudo granular, JIT, capabilities, breakglass
 75. `caza-apt-hunting.sh` - YARA, memory hunting, beaconing, IOC sweep, playbooks
 
-### Scripts de cumplimiento (2) — categoría `c`
-39. `cumplimiento-cis.sh` - CIS Benchmark, NIST 800-53, scoring
+### Scripts de cumplimiento (1) — categoría `c`
 52. `cumplimiento-normativo.sh` - PCI-DSS, HIPAA, GDPR, SOC2, ISO27001
 
 ### Otros scripts
@@ -201,7 +200,7 @@ Configuración opcional en `securizar.conf` (variables: `SECURIZAR_BACKUP_BASE`,
 ### Verificación proactiva (84 checks)
 Función `verificacion_proactiva()` — 84 checks ponderados con scoring:
 - **Pesos**: CRITICAL=3, HIGH=2, MEDIUM=1
-- **Categorías de checks** (por número): Kernel(1), Servicios seguridad(2), Serv. innecesarios(3), Firewall(4), Puertos/red(5), Permisos(6), PAM(7), TMOUT(8), SSH(9), Sudo(10), Inmutabilidad(11), Módulos kernel(12), Herramientas(13), Scripts monitoreo(14), Boot/Secure Boot(15), Sandbox systemd(16), Cuentas(17), Red avanzada(18), Automatización(19), Sandbox apps(20), Exposición externa(21), MFA SSH(22), ClamAV(23), OpenSCAP(24), IoC feeds(25), TA0001-TA0011(26-37), Monitorización(38), Reportes(39), Threat hunting(40), SOAR(41), Purple team(42), Ciberinteligencia(43), Validación MSF(44), Protección ISP(45), Criptografía(46), Contenedores(47), Cumplim. CIS(48), Email(49), Logging SIEM(50), Cadena suministro(51), Segmentación ZT(52), Forense(53), Livepatch(54), BBDD(55), Backup/DR(56), Web(57), Secretos(58), Cloud(59), LDAP/AD(60), Cumplim. normativo(61), Engaño(62), Wireless(63), Virtualización(64), Física(65), Zero Trust ID(66), Anti-ransomware(67), Parches(68), DevSecOps(69), APIs(70), IoT(71), DNS(72), Auditoría red(73), Auditoría infra(74), Runtime kernel(75), Memoria(76), Resp. incidentes(77), EDR Osquery(78), Vuln management(79), MAC SELinux(80), Namespaces(81), Boot integrity(82), Acceso privilegiado(83), APT hunting(84)
+- **Categorías de checks** (por número): Kernel(1), Servicios seguridad(2), Serv. innecesarios(3), Firewall(4), Puertos/red(5), Permisos(6), PAM(7), TMOUT(8), SSH(9), Sudo(10), Inmutabilidad(11), Módulos kernel(12), Herramientas(13), Scripts monitoreo(14), Boot/Secure Boot(15), Sandbox systemd(16), Cuentas(17), Red avanzada(18), Automatización(19), Sandbox apps(20), Exposición externa(21), MFA SSH(22), ClamAV(23), OpenSCAP(24), IoC feeds(25), TA0001-TA0011(26-37), Monitorización(38), Reportes(39), Threat hunting(40), SOAR(41), Purple team(42), Ciberinteligencia(43), Validación MSF(44), Protección ISP(45), Criptografía(46), Contenedores(47), Email(49), Logging SIEM(50), Cadena suministro(51), Segmentación ZT(52), Forense(53), Livepatch(54), BBDD(55), Backup/DR(56), Web(57), Secretos(58), Cloud(59), LDAP/AD(60), Cumplim. normativo(61), Engaño(62), Wireless(63), Virtualización(64), Física(65), Zero Trust ID(66), Anti-ransomware(67), Parches(68), DevSecOps(69), APIs(70), IoT(71), DNS(72), Auditoría red(73), Auditoría infra(74), Runtime kernel(75), Memoria(76), Resp. incidentes(77), EDR Osquery(78), Vuln management(79), MAC SELinux(80), Namespaces(81), Boot integrity(82), Acceso privilegiado(83), APT hunting(84)
 
 ## Cobertura MITRE ATT&CK
 

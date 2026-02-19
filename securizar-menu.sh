@@ -119,7 +119,7 @@ _draw_sysinfo() {
 
     echo -e "  ${DIM}╭─────────────────────────────────────────────────────────────────╮${NC}"
     printf "  ${DIM}│${NC}  %-12s ${DIM}·${NC} %-20s ${DIM}·${NC} %-8s ${DIM}·${NC} %-14s  ${DIM}│${NC}\n" "$hostname" "$kernel" "$user" "$date_str"
-    printf "  ${DIM}│${NC}  ${DIM}Uptime:${NC} %-16s  ${DIM}Log:${NC} activo    ${DIM}Módulos:${NC} ${GREEN}%d${NC}${DIM}/78${NC}     ${DIM}│${NC}\n" "$uptime_str" "$run_count"
+    printf "  ${DIM}│${NC}  ${DIM}Uptime:${NC} %-16s  ${DIM}Log:${NC} activo    ${DIM}Módulos:${NC} ${GREEN}%d${NC}${DIM}/77${NC}     ${DIM}│${NC}\n" "$uptime_str" "$run_count"
     echo -e "  ${DIM}╰─────────────────────────────────────────────────────────────────╯${NC}"
 }
 
@@ -180,6 +180,11 @@ _cat_dots() {
 
 _exec_module() {
     local n=$1
+    if [[ -z "${MOD_FUNCS[$n]:-}" ]]; then
+        echo -e "  ${RED}✗${NC} Módulo $n no disponible"
+        _pause
+        return 1
+    fi
     echo ""
     echo -e "  ${CYAN}━━${NC} ${BOLD}Módulo ${n}: ${MOD_NAMES[$n]}${NC} ${CYAN}━━${NC}"
     [[ -n "${MOD_TAGS[$n]:-}" ]] && echo -e "  ${BG_YELLOW} ${MOD_TAGS[$n]} ${NC} ${DIM}Versión segura · sin riesgos de lockout${NC}"
@@ -252,9 +257,9 @@ _show_help() {
     echo -e "    ${WHITE}s${NC}  ${DIM}Aplicaciones y Servicios (8 módulos)${NC}"
     echo -e "    ${WHITE}r${NC}  ${DIM}Protección y Resiliencia (11 módulos)${NC}"
     echo -e "    ${WHITE}d${NC}  ${DIM}Detección y Respuesta (9 módulos)${NC}"
-    echo -e "    ${WHITE}c${NC}  ${DIM}Cumplimiento (2 módulos)${NC}"
+    echo -e "    ${WHITE}c${NC}  ${DIM}Cumplimiento (1 módulo)${NC}"
     echo -e "    ${WHITE}a${NC}  ${DIM}Aplicar todos los módulos${NC}"
-    echo -e "    ${WHITE}v${NC}  ${DIM}Verificación proactiva (87 checks)${NC}"
+    echo -e "    ${WHITE}v${NC}  ${DIM}Verificación proactiva (86 checks)${NC}"
     echo ""
     echo -e "  ${BOLD}Acceso directo${NC}"
     echo ""
@@ -1355,7 +1360,6 @@ submenu_isp() {
 # ── Módulos 37-52: Infra, Apps, Cumplimiento ────────────────
 mod_39_hardening_crypto()       { _run_delegated 37 "Hardening criptográfico" "hardening-criptografico.sh"; }
 mod_40_contenedores()           { _run_delegated 38 "Seguridad de contenedores" "seguridad-contenedores.sh"; }
-mod_41_cumplimiento_cis()       { _run_delegated 39 "Cumplimiento CIS Benchmarks" "cumplimiento-cis.sh"; }
 mod_42_seguridad_email()        { _run_delegated 40 "Seguridad de email" "seguridad-email.sh"; }
 mod_43_logging_centralizado()   { _run_delegated 41 "Logging centralizado y SIEM" "logging-centralizado.sh"; }
 mod_44_cadena_suministro()      { _run_delegated 42 "Seguridad de cadena de suministro" "seguridad-cadena-suministro.sh"; }
@@ -2961,7 +2965,6 @@ MOD_NAMES[35]="Ciberinteligencia proactiva";   MOD_DESCS[35]="IoC enrich, red, D
 MOD_NAMES[36]="Protección contra ISP";        MOD_DESCS[36]="Kill switch, DNS leak, ECH, DPI, NTS"; MOD_FUNCS[36]="mod_38_proteger_isp";       MOD_FILES[36]="proteger-contra-isp.sh";         MOD_TAGS[36]=""
 MOD_NAMES[37]="Hardening criptográfico";      MOD_DESCS[37]="SSH, TLS, certificados, LUKS, NTS";    MOD_FUNCS[37]="mod_39_hardening_crypto";   MOD_FILES[37]="hardening-criptografico.sh";     MOD_TAGS[37]=""
 MOD_NAMES[38]="Seguridad de contenedores";    MOD_DESCS[38]="Docker, Podman, seccomp, K8s, CIS";    MOD_FUNCS[38]="mod_40_contenedores";       MOD_FILES[38]="seguridad-contenedores.sh";      MOD_TAGS[38]=""
-MOD_NAMES[39]="Cumplimiento CIS";             MOD_DESCS[39]="CIS Benchmark, NIST 800-53, scoring";  MOD_FUNCS[39]="mod_41_cumplimiento_cis";   MOD_FILES[39]="cumplimiento-cis.sh";            MOD_TAGS[39]=""
 MOD_NAMES[40]="Seguridad de email";           MOD_DESCS[40]="SPF, DKIM, DMARC, TLS, anti-relay";   MOD_FUNCS[40]="mod_42_seguridad_email";    MOD_FILES[40]="seguridad-email.sh";             MOD_TAGS[40]=""
 MOD_NAMES[41]="Logging centralizado";         MOD_DESCS[41]="rsyslog TLS, SIEM, correlación, forense"; MOD_FUNCS[41]="mod_43_logging_centralizado"; MOD_FILES[41]="logging-centralizado.sh";    MOD_TAGS[41]=""
 MOD_NAMES[42]="Cadena de suministro";         MOD_DESCS[42]="SBOM, CVEs, firmas, integridad";       MOD_FUNCS[42]="mod_44_cadena_suministro";  MOD_FILES[42]="seguridad-cadena-suministro.sh"; MOD_TAGS[42]=""
@@ -3009,7 +3012,7 @@ aplicar_todo_seguro() {
     echo ""
     echo -e "  ${BG_GREEN} APLICAR TODO SEGURO ${NC}"
     echo ""
-    echo -e "  Se ejecutarán ${BOLD}78 módulos${NC} de hardening secuencialmente."
+    echo -e "  Se ejecutarán ${BOLD}77 módulos${NC} de hardening secuencialmente."
     echo -e "  Los scripts peligrosos se ejecutan en versión ${YELLOW}SEGURA${NC}."
     echo -e "  Incluye mitigaciones MITRE: ${CYAN}TA0043, TA0001-TA0011, TA0040${NC}."
     echo ""
@@ -3032,12 +3035,15 @@ aplicar_todo_seguro() {
 
     local failed=0
     local succeeded=0
-    local total=78
+    local total=77
+    local actual=0
 
     for num in $(seq 1 78); do
+        [[ -z "${MOD_FUNCS[$num]:-}" ]] && continue
+        ((actual++))
         echo ""
         echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
-        _progress_bar "$num" "$total"
+        _progress_bar "$actual" "$total"
         echo -e "  ${CYAN}▶${NC} ${BOLD}Módulo ${num}/${total}:${NC} ${MOD_NAMES[$num]}"
         echo -e "  ${DIM}─────────────────────────────────────────────────────────────────${NC}"
         echo ""
@@ -3090,7 +3096,6 @@ verificacion_proactiva() {
         [45]="36"
         [46]="37"
         [47]="38"
-        [48]="39"
         [49]="40"
         [50]="41"
         [51]="42"
@@ -3144,7 +3149,6 @@ verificacion_proactiva() {
         [45]="Protección ISP"
         [46]="Criptografía"
         [47]="Contenedores"
-        [48]="Cumplim. CIS"
         [49]="Seguridad email"
         [50]="Logging SIEM"
         [51]="Cadena suminist."
@@ -3204,7 +3208,6 @@ verificacion_proactiva() {
         [45]=2
         [46]=2
         [47]=1
-        [48]=2
         [49]=2
         [50]=2
         [51]=2
@@ -4411,19 +4414,7 @@ verificacion_proactiva() {
         _vp_na
     fi
 
-    # ── 48. Cumplimiento CIS 
-    echo ""
-    _mark_section 48
-    echo -e "  ${CYAN}┌─${NC} ${BOLD}[48/87] CUMPLIMIENTO CIS BENCHMARKS${NC}"
-
-    _vp_xcheck /usr/local/bin/cis-scoring.sh \
-        "Motor de puntuación CIS instalado" "Motor de puntuación CIS NO instalado"
-    _vp_xcheck /usr/local/bin/reporte-cumplimiento-cis.sh \
-        "Generador de informes CIS instalado" "Generador de informes CIS NO instalado"
-    _vp_fcheck /etc/sysctl.d/99-securizar-cis-network.conf \
-        "Hardening red CIS aplicado" "Hardening red CIS NO aplicado"
-
-    # ── 49. Seguridad de email 
+    # ── 49. Seguridad de email
     echo ""
     _mark_section 49
     echo -e "  ${CYAN}┌─${NC} ${BOLD}[49/87] SEGURIDAD DE EMAIL${NC}"
@@ -5477,8 +5468,8 @@ _CAT_RUN_TYPE[deteccion]="non_consecutive"
 _CAT_REDIRECTS[deteccion]="64:submenu_wireshark 65:submenu_auditoria_red"
 
 _CAT_TITLE[cumplimiento]="Cumplimiento"
-_CAT_DESC[cumplimiento]="CIS benchmarks, cumplimiento normativo (PCI-DSS, HIPAA, GDPR, ENS)"
-_CAT_MODULES[cumplimiento]="39 52"
+_CAT_DESC[cumplimiento]="Cumplimiento normativo (PCI-DSS, HIPAA, GDPR, ENS)"
+_CAT_MODULES[cumplimiento]="52"
 _CAT_RUN_TYPE[cumplimiento]="non_consecutive"
 
 _generic_submenu() {
@@ -5586,15 +5577,15 @@ menu_principal() {
         printf "    ${CYAN}d${NC}   ${BOLD}Detección y Respuesta${NC}       ${DIM}11 módulos${NC}   "
         _cat_dots 11 "$(_count_done 41 44 64 65 68 69 70 74 75 76 78)"
         echo ""
-        printf "    ${CYAN}c${NC}   ${BOLD}Cumplimiento${NC}                 ${DIM}2 módulos${NC}   "
-        _cat_dots 2 "$(_count_done 39 52)"
+        printf "    ${CYAN}c${NC}   ${BOLD}Cumplimiento${NC}                 ${DIM}1 módulo${NC}    "
+        _cat_dots 1 "$(_count_done 52)"
         echo ""
 
         echo ""
         echo -e "  ${BOLD}Acciones${NC}"
         echo ""
-        echo -e "    ${GREEN}a${NC}   ${GREEN}${BOLD}Aplicar TODO seguro${NC}          ${DIM}78 módulos secuenciales${NC}"
-        echo -e "    ${CYAN}v${NC}   ${CYAN}${BOLD}Verificación proactiva${NC}       ${DIM}87 checks de seguridad${NC}"
+        echo -e "    ${GREEN}a${NC}   ${GREEN}${BOLD}Aplicar TODO seguro${NC}          ${DIM}77 módulos secuenciales${NC}"
+        echo -e "    ${CYAN}v${NC}   ${CYAN}${BOLD}Verificación proactiva${NC}       ${DIM}86 checks de seguridad${NC}"
 
         _draw_footer
 

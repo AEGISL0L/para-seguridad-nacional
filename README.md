@@ -1,6 +1,6 @@
 # Securizar
 
-Suite completa de hardening y securizacion para Linux, con 78 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia avanzada (MISP, STIX/TAXII, plataforma TIP, OSINT), cumplimiento CIS/GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2), respuesta a incidentes (forense, custodia digital, IOCs, escalacion, hunting, metricas IR), EDR con osquery (threat detection, Wazuh, fleet, baseline/drift), gestion de vulnerabilidades (Trivy, grype, OpenSCAP, CVSS/EPSS, drift), control de acceso obligatorio (SELinux/AppArmor), aislamiento de namespaces, integridad de arranque (Secure Boot, TPM2, IMA/EVM), gestion de acceso privilegiado, caza de APTs (YARA, IOC sweep, hunting playbooks), inteligencia de trafico de red (JA3, beaconing, exfiltracion) y monitorizacion de superficie de ataque (CT logs, subdominios, fugas). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
+Suite completa de hardening y securizacion para Linux, con 77 modulos interactivos, cobertura total del framework MITRE ATT&CK, operaciones de seguridad (SOC), ciberinteligencia avanzada (MISP, STIX/TAXII, plataforma TIP, OSINT), cumplimiento GDPR/PCI-DSS/HIPAA/SOC2/ISO27001, forensia digital, Zero Trust, DevSecOps, anti-ransomware, seguridad de APIs/IoT/DNS, auditoria de red con Wireshark, auditoria de infraestructura de red, proteccion runtime del kernel (LKRG, eBPF, Falco), hardening avanzado de memoria/procesos (ASLR, W^X, seccomp, cgroups v2), respuesta a incidentes (forense, custodia digital, IOCs, escalacion, hunting, metricas IR), EDR con osquery (threat detection, Wazuh, fleet, baseline/drift), gestion de vulnerabilidades (Trivy, grype, OpenSCAP, CVSS/EPSS, drift), control de acceso obligatorio (SELinux/AppArmor), aislamiento de namespaces, integridad de arranque (Secure Boot, TPM2, IMA/EVM), gestion de acceso privilegiado, caza de APTs (YARA, IOC sweep, hunting playbooks), inteligencia de trafico de red (JA3, beaconing, exfiltracion) y monitorizacion de superficie de ataque (CT logs, subdominios, fugas). Soporta multiples distribuciones mediante una biblioteca de abstraccion compartida.
 
 ```
 ███████╗███████╗ ██████╗██╗   ██╗██████╗ ██╗███████╗ █████╗ ██████╗
@@ -11,9 +11,13 @@ Suite completa de hardening y securizacion para Linux, con 78 modulos interactiv
 ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
 ```
 
+> *"El principio rector —asegurar la victoria mediante la superioridad estrategica sin conflicto directo— demarca la linea entre estrategias proactivas y reactivas en el ambito de la guerra digital. El poder incomparable del conocimiento y la anticipacion son las armas preeminentes para dominar el panorama en constante evolucion del conflicto digital."*
+>
+> — El Arte de la Ciberguerra
+
 ## Caracteristicas principales
 
-- **78 modulos** organizados en 10 categorias con menu interactivo
+- **77 modulos** organizados en 10 categorias con menu interactivo
 - **Multi-distro**: openSUSE, Debian/Ubuntu, RHEL/Fedora/CentOS, Arch Linux
 - **Cobertura MITRE ATT&CK** de las 14 tacticas enterprise (TA0001-TA0043)
 - **100% interactivo**: cada seccion pregunta antes de aplicar cambios
@@ -24,7 +28,7 @@ Suite completa de hardening y securizacion para Linux, con 78 modulos interactiv
 - **Ciberinteligencia**: enriquecimiento de IoC, inteligencia DNS, alerta temprana, MISP/STIX/TAXII, plataforma TIP
 - **Inteligencia de red**: JA3/JA4 fingerprinting, beaconing C2, passive DNS, exfiltracion, forense de red
 - **OSINT**: Certificate Transparency, subdominios, WHOIS, cloud discovery, fugas de codigo, vendor risk
-- **Cumplimiento**: CIS Benchmarks Level 1/2, NIST 800-53, PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
+- **Cumplimiento**: PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001
 - **Anti-ransomware**: canary files, LVM snapshots, whitelisting, YARA, containment
 - **DevSecOps**: CI/CD pipeline security, SAST, secrets detection, code signing
 - **Seguridad de APIs**: rate limiting, JWT/OAuth2, mTLS, GraphQL, WAF
@@ -102,7 +106,7 @@ sudo bash mitigar-acceso-inicial.sh  # Modulo 18
 
 ```
 securizar/
-├── securizar-menu.sh              # Menu orquestador principal (78 modulos)
+├── securizar-menu.sh              # Menu orquestador principal (77 modulos)
 ├── securizar.conf                 # Configuracion global (opcional)
 ├── lib/                           # Biblioteca compartida
 │   ├── securizar-common.sh        # Punto de entrada: colores, logging, ask(), backup
@@ -152,7 +156,6 @@ securizar/
 ├── proteger-contra-isp.sh         # Modulo 36: Proteccion contra espionaje ISP
 ├── hardening-criptografico.sh     # Modulo 37: Hardening criptografico
 ├── seguridad-contenedores.sh      # Modulo 38: Seguridad de contenedores
-├── cumplimiento-cis.sh            # Modulo 39: Cumplimiento CIS Benchmarks
 ├── seguridad-email.sh             # Modulo 40: Seguridad de email
 ├── logging-centralizado.sh        # Modulo 41: Logging centralizado y SIEM
 ├── seguridad-cadena-suministro.sh # Modulo 42: Cadena de suministro
@@ -461,6 +464,8 @@ SECURIZAR_MSF_TARGETS="127.0.0.1"
 
 ## Catalogo de modulos
 
+> *"No se trata solo de asignacion, sino de orquestacion —la integracion sinfonica de habilidad, precision y destreza tecnologica. Las organizaciones que sobresalen en esta coreografia estrategica de recursos son las que permanecen resilientes en medio de las tormentas digitales."*
+
 ### Categoria 1: Hardening Base (modulos 1-9)
 
 Modulos fundamentales de securizacion del sistema.
@@ -514,6 +519,8 @@ Defensas especificas contra cada tactica del framework MITRE ATT&CK.
 Cada modulo MITRE instala scripts de deteccion en `/usr/local/bin/`, reglas auditd en `/etc/audit/rules.d/` y cron jobs/timers systemd para monitoreo continuo.
 
 ### Categoria 4: Operaciones de Seguridad (modulos 30-34)
+
+> *"Estos protocolos —meticulosamente elaborados y rigidamente aplicados— son los escudos y espadas del ciberespacio, dictando como se comparte, asegura y salvaguarda la informacion. En esta matriz de altas apuestas, los mas disciplinados emergen no simplemente ilesos, sino dominantes."*
 
 Herramientas para un SOC (Security Operations Center) funcional.
 
@@ -578,6 +585,8 @@ Herramientas para un SOC (Security Operations Center) funcional.
 
 ### Categoria 9: Deteccion y Respuesta (11 modulos)
 
+> *"Los ciberguerreros motivados no son meros operadores de tecnologia; son sus maestros. Sus ojos, entrenados para detectar las anomalias mas sutiles, a menudo pueden prever y prevenir brechas, convirtiendo vulnerabilidades potenciales en fortalezas de resiliencia digital."*
+
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
 | 41 | **Logging centralizado** | `logging-centralizado.sh` | rsyslog TLS, CEF/JSON, hash chain SHA-256, correlacion 8 patrones, SIEM, forense |
@@ -596,7 +605,6 @@ Herramientas para un SOC (Security Operations Center) funcional.
 
 | # | Modulo | Script | Descripcion |
 |---|--------|--------|-------------|
-| 39 | **Cumplimiento CIS** | `cumplimiento-cis.sh` | CIS Benchmark L1/L2, NIST 800-53, scoring, remediacion, informes |
 | 52 | **Cumplimiento normativo** | `cumplimiento-normativo.sh` | PCI-DSS v4.0, GDPR, HIPAA, SOC2, ISO 27001, evidencias, remediacion |
 
 ---
@@ -618,9 +626,9 @@ Menu principal
 ├── s  Aplicaciones y Servicios (8 modulos)
 ├── r  Proteccion y Resiliencia (11 modulos)
 ├── d  Deteccion y Respuesta (11 modulos)
-├── c  Cumplimiento (2 modulos)
-├── a  Aplicar todos los 78 modulos
-├── v  Verificacion proactiva (87 checks)
+├── c  Cumplimiento (1 modulo)
+├── a  Aplicar todos los 77 modulos
+├── v  Verificacion proactiva (86 checks)
 ├── 1-78  Acceso directo por numero
 ├── ?  Ayuda
 └── q  Salir con resumen de sesion
@@ -660,7 +668,7 @@ Esto garantiza que nunca se bloquee el acceso al sistema.
 
 ### Verificacion proactiva
 
-La opcion `v` ejecuta 87 verificaciones agrupadas por categoria:
+La opcion `v` ejecuta 86 verificaciones agrupadas por categoria:
 
 - Kernel y sysctl
 - Servicios y firewall
@@ -677,7 +685,7 @@ La opcion `v` ejecuta 87 verificaciones agrupadas por categoria:
 - Respuesta a incidentes, monitorizacion, reportes
 - Caza de amenazas, SOAR, Purple Team
 - Ciberinteligencia, proteccion ISP
-- Criptografia, contenedores, CIS
+- Criptografia, contenedores
 - Seguridad de email, logging SIEM, cadena de suministro
 - Segmentacion de red y Zero Trust
 - Forense avanzado
@@ -714,6 +722,8 @@ La opcion `v` ejecuta 87 verificaciones agrupadas por categoria:
 ---
 
 ## Cobertura MITRE ATT&CK
+
+> *"Este dominio del espectro completo de los elementos de la ciberguerra permite tejer una estrategia receptiva y proactiva, transformando desafios potenciales en oportunidades orquestadas. En este gran juego de ajedrez digital, los movimientos son anticipatorios, estrategicos y omniabarcantes."*
 
 El proyecto cubre las 14 tacticas del framework MITRE ATT&CK enterprise:
 
@@ -1204,7 +1214,7 @@ Scripts desplegados con debug logging integrado (30 puntos de debug):
 | `/var/lib/soar/` | SOAR (queue de eventos, acciones ejecutadas, IPs bloqueadas) |
 | `/var/lib/purple-team/` | Purple Team (validacion, evidencia de simulaciones, reportes) |
 | `/var/lib/ciberinteligencia/` | Ciberinteligencia (cache, config, datos, alertas) |
-| `/var/lib/securizar/` | CIS scores, SBOM, binary hashes, CVE audits, software changes |
+| `/var/lib/securizar/` | SBOM, binary hashes, CVE audits, software changes |
 | `/var/lib/securizar/sbom/` | Inventarios SBOM en formato CycloneDX JSON |
 | `/var/lib/securizar/binary-hashes/` | Baseline SHA-256 de binarios criticos del sistema |
 | `/var/lib/securizar/cve-audit/` | Resultados de auditorias CVE |
@@ -1527,6 +1537,8 @@ show_changes_summary
 ---
 
 ## Licencia
+
+> *"En una era donde la tecnologia se entreteje intrincadamente en el tejido de la sociedad, la capacidad de ver mas alla de lo inmediato, de anticipar y actuar dentro de esta red compleja, se convierte en la quintaesencia del dominio cibernetico."*
 
 Este proyecto es software libre para uso defensivo en securizacion de sistemas Linux.
 
