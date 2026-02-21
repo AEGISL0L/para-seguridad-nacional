@@ -636,8 +636,9 @@ if command -v nft &>/dev/null; then
     # Permitir conexiones establecidas (primero para rendimiento)
     nft add rule inet securizar_ks output ct state established,related accept
     # Bloquear DNS plano a destinos externos (fuerza DNS cifrado via resolver local)
-    nft add rule inet securizar_ks output ip daddr != 127.0.0.1 udp dport 53 drop
-    nft add rule inet securizar_ks output ip daddr != 127.0.0.1 tcp dport 53 drop
+    # counter + log para detectar intentos de leak DNS (Auditoría H1)
+    nft add rule inet securizar_ks output ip daddr != 127.0.0.1 udp dport 53 counter log prefix '"DNS-LEAK-UDP: "' drop
+    nft add rule inet securizar_ks output ip daddr != 127.0.0.1 tcp dport 53 counter log prefix '"DNS-LEAK-TCP: "' drop
     # Permitir LAN (RFC1918) - solo puertos esenciales
     _LAN="{10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16}"
     nft add rule inet securizar_ks output ip daddr $_LAN meta l4proto icmp accept
@@ -646,7 +647,7 @@ if command -v nft &>/dev/null; then
     # Permitir DHCP
     nft add rule inet securizar_ks output udp dport 67-68 accept
     # Permitir DNS cifrado DoT (puerto 853) a resolvers conocidos
-    nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 } tcp dport 853 accept
+    nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 194.242.2.4, 8.8.8.8, 8.8.4.4 } tcp dport 853 accept
     # Permitir DoH a resolvers DNS conocidos (puerto 443)
     nft add rule inet securizar_ks output ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9, 149.112.112.112, 8.8.8.8, 8.8.4.4 } tcp dport 443 accept
     # Permitir endpoints VPN (permite reconexión si VPN cae)
