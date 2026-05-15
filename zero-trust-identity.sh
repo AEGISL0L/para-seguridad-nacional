@@ -1919,6 +1919,13 @@ while IFS= read -r line; do
             net="${net#"${net%%[![:space:]]*}"}"
             net="${net%"${net##*[![:space:]]}"}"
 
+            # Validar CIDR/IP antes de interpolar en iptables
+            if ! is_valid_ip_or_cidr "$net"; then
+                log_warn "Red invalida rechazada (posible inyeccion): $net"
+                ERRORS=$((ERRORS + 1))
+                continue
+            fi
+
             if [[ "$puertos" == "all" ]]; then
                 if [[ "$MODE" == "show" ]]; then
                     log_seg "    iptables -A $CHAIN_NAME -d $net -j ACCEPT"
@@ -1934,6 +1941,12 @@ while IFS= read -r line; do
                 for port in "${PORT_ARRAY[@]}"; do
                     port="${port#"${port%%[![:space:]]*}"}"
                     port="${port%"${port##*[![:space:]]}"}"
+                    # Validar puerto antes de interpolar
+                    if ! is_valid_port "$port"; then
+                        log_warn "Puerto invalido rechazado (posible inyeccion): $port"
+                        ERRORS=$((ERRORS + 1))
+                        continue
+                    fi
                     if [[ "$MODE" == "show" ]]; then
                         log_seg "    iptables -A $CHAIN_NAME -d $net -p tcp --dport $port -j ACCEPT"
                         log_seg "    iptables -A $CHAIN_NAME -d $net -p udp --dport $port -j ACCEPT"
@@ -1978,6 +1991,13 @@ while IFS= read -r line; do
             net="${net#"${net%%[![:space:]]*}"}"
             net="${net%"${net##*[![:space:]]}"}"
 
+            # Validar CIDR/IP antes de interpolar en nft
+            if ! is_valid_ip_or_cidr "$net"; then
+                log_warn "Red invalida rechazada (posible inyeccion): $net"
+                ERRORS=$((ERRORS + 1))
+                continue
+            fi
+
             if [[ "$puertos" == "all" ]]; then
                 if [[ "$MODE" == "show" ]]; then
                     log_seg "    nft add rule inet $NFT_TABLE $CHAIN_NAME ip daddr $net accept"
@@ -1992,6 +2012,12 @@ while IFS= read -r line; do
                 for port in "${PORT_ARRAY[@]}"; do
                     port="${port#"${port%%[![:space:]]*}"}"
                     port="${port%"${port##*[![:space:]]}"}"
+                    # Validar puerto antes de interpolar
+                    if ! is_valid_port "$port"; then
+                        log_warn "Puerto invalido rechazado (posible inyeccion): $port"
+                        ERRORS=$((ERRORS + 1))
+                        continue
+                    fi
                     if [[ "$MODE" == "show" ]]; then
                         log_seg "    nft add rule inet $NFT_TABLE $CHAIN_NAME ip daddr $net tcp dport $port accept"
                     elif [[ "$MODE" == "apply" ]]; then

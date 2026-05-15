@@ -2958,8 +2958,8 @@ if [[ -f "$CONF_FILE" ]]; then
     while IFS= read -r _line; do
         _line="${_line#"${_line%%[![:space:]]*}"}"
         [[ -z "$_line" || "$_line" == \#* ]] && continue
-        if [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-            eval "$_line"
+        if [[ "$_line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            declare "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
         fi
     done < "$CONF_FILE"
 fi

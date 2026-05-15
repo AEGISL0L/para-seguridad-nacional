@@ -423,6 +423,10 @@ EOFPB2
 # Severidad: CRÍTICA
 
 IP_SOSPECHOSA="$1"
+# Validar IP antes de usarla en comandos de firewall/red
+if ! [[ "$IP_SOSPECHOSA" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo "[ERROR] IP invalida: $IP_SOSPECHOSA" >&2; exit 1
+fi
 INCIDENT_ID="${2:-INC-$(date +%Y%m%d-%H%M%S)}"
 IR_DIR="/var/lib/incident-response/$INCIDENT_ID"
 mkdir -p "$IR_DIR"
@@ -498,6 +502,10 @@ EOFPB3
 # Severidad: ALTA
 
 IP_ORIGEN="$1"
+# Validar IP antes de usarla en comandos de firewall/red
+if ! [[ "$IP_ORIGEN" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo "[ERROR] IP invalida: $IP_ORIGEN" >&2; exit 1
+fi
 INCIDENT_ID="${2:-INC-$(date +%Y%m%d-%H%M%S)}"
 IR_DIR="/var/lib/incident-response/$INCIDENT_ID"
 mkdir -p "$IR_DIR"

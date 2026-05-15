@@ -99,6 +99,12 @@ bloquear_ip() {
     local RAZON="$2"
     local DURACION="${3:-permanent}"
 
+    # Validar IP antes de interpolar en reglas de firewall
+    if ! is_valid_ipv4 "$IP" && ! is_valid_cidr "$IP"; then
+        log_soar "ERROR" "IP invalida rechazada (posible inyeccion): $IP"
+        return 1
+    fi
+
     # Verificar si ya está bloqueada
     if fw_query_rich_rule "rule family='ipv4' source address='$IP' drop" &>/dev/null 2>&1; then
         log_soar "INFO" "IP $IP ya bloqueada"

@@ -330,8 +330,11 @@ table inet securizar_zonas {
 
     # --- Cadenas por zona (input) ---
     chain trusted_input {
-        # TRUSTED puede acceder a todo
-        counter accept
+        # TRUSTED: solo respuestas a conexiones iniciadas por nosotros
+        ct state established,related accept
+        # Fallback: si necesitas acceso temporal desde trusted, ejecuta:
+        #   nft insert rule inet securizar_zonas trusted_input tcp dport {22,80,443} accept
+        log prefix "trusted-deny: " counter drop
     }
 
     chain internal_input {

@@ -79,7 +79,11 @@ elif ask "¿Instalar herramientas de escaneo de vulnerabilidades?"; then
                 zypper --non-interactive --gpg-auto-import-keys install trivy 2>/dev/null || {
                     # Fallback: binary install
                     log_info "Intentando instalación binaria de Trivy..."
-                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin 2>/dev/null || log_warn "No se pudo instalar Trivy"
+                    local _trivy_installer
+                    _trivy_installer=$(mktemp /tmp/trivy-install.XXXXXX.sh)
+                    curl -sfL -o "$_trivy_installer" https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh 2>/dev/null && \
+                        bash "$_trivy_installer" -b /usr/local/bin 2>/dev/null || log_warn "No se pudo instalar Trivy"
+                    rm -f "$_trivy_installer"
                 }
                 ;;
             debian)
@@ -111,7 +115,11 @@ EOFREPO
     # --- grype ---
     if ! command -v grype &>/dev/null; then
         log_info "Instalando grype..."
-        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin 2>/dev/null || log_warn "No se pudo instalar grype"
+        local _grype_installer
+        _grype_installer=$(mktemp /tmp/grype-install.XXXXXX.sh)
+        curl -sSfL -o "$_grype_installer" https://raw.githubusercontent.com/anchore/grype/main/install.sh 2>/dev/null && \
+            bash "$_grype_installer" -b /usr/local/bin 2>/dev/null || log_warn "No se pudo instalar grype"
+        rm -f "$_grype_installer"
     fi
     if command -v grype &>/dev/null; then
         TOOLS_INSTALLED="${TOOLS_INSTALLED}grype "

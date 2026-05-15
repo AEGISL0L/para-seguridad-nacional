@@ -168,6 +168,46 @@ reset_changes() {
     _SECURIZAR_ALREADY=()
 }
 
+# ── Validacion de entradas (anti-inyeccion) ──────────────────────
+# Valida IPv4 estricta: solo digitos y puntos, octetos 0-255
+is_valid_ipv4() {
+    local ip="$1"
+    [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+    local IFS='.'
+    local -a octets
+    read -ra octets <<< "$ip"
+    for o in "${octets[@]}"; do
+        (( o > 255 )) && return 1
+    done
+    return 0
+}
+
+# Valida CIDR: IPv4/prefijo (prefijo 0-32)
+is_valid_cidr() {
+    local cidr="$1"
+    [[ "$cidr" =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/([0-9]{1,2})$ ]] || return 1
+    is_valid_ipv4 "${BASH_REMATCH[1]}" || return 1
+    (( BASH_REMATCH[2] > 32 )) && return 1
+    return 0
+}
+
+# Valida IP o CIDR
+is_valid_ip_or_cidr() {
+    is_valid_ipv4 "$1" || is_valid_cidr "$1"
+}
+
+# Valida puerto: entero 1-65535
+is_valid_port() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] || return 1
+    (( port >= 1 && port <= 65535 ))
+}
+
+# Valida nombre de usuario: solo alfanumerico, guion, guion bajo, punto
+is_valid_username() {
+    [[ "$1" =~ ^[a-zA-Z0-9._-]+$ ]]
+}
+
 # ── Helpers de verificacion de estado ──────────────────────────
 check_sysctl()          { [[ "$(sysctl -n "$1" 2>/dev/null)" == "$2" ]]; }
 check_file_exists()     { [[ -f "$1" ]]; }

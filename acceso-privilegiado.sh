@@ -406,7 +406,11 @@ LOG_DIR="/var/log/securizar/privileged"
 mkdir -p "$LOG_DIR"
 JIT_LOG="$LOG_DIR/jit-access.log"
 
-# Validar usuario
+# Validar usuario (nombre y existencia)
+if ! [[ "$USER" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    echo "Error: nombre de usuario invalido (caracteres no permitidos): $USER"
+    exit 1
+fi
 if ! id "$USER" &>/dev/null; then
     echo "Error: usuario '$USER' no existe"
     exit 1
@@ -445,7 +449,10 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') JIT-GRANT user=$USER group=$SUDO_GRP minutes=
 logger -t securizar-jit "GRANT: $USER -> $SUDO_GRP for $MINUTES min"
 
 # Programar revocacion
-REVOKE_CMD="gpasswd -d $USER $SUDO_GRP 2>/dev/null; echo \"\$(date) JIT-REVOKE user=$USER group=$SUDO_GRP\" >> $JIT_LOG; logger -t securizar-jit \"REVOKE: $USER from $SUDO_GRP\""
+SAFE_USER=$(printf '%q' "$USER")
+SAFE_GRP=$(printf '%q' "$SUDO_GRP")
+SAFE_LOG=$(printf '%q' "$JIT_LOG")
+REVOKE_CMD="gpasswd -d ${SAFE_USER} ${SAFE_GRP} 2>/dev/null; echo \"\$(date) JIT-REVOKE user=${SAFE_USER} group=${SAFE_GRP}\" >> ${SAFE_LOG}; logger -t securizar-jit \"REVOKE: ${SAFE_USER} from ${SAFE_GRP}\""
 
 if command -v systemd-run &>/dev/null; then
     systemd-run --on-active="${MINUTES}m" --timer-property=AccuracySec=10s \
